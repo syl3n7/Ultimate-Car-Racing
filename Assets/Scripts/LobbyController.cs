@@ -302,7 +302,7 @@ public class LobbyController : MonoBehaviour
     }
 }
 
-internal class ServerListEntry
+internal partial class ServerListEntry
 {
     public void Setup(string serverServerName, string s, string s1, Action action)
     {
