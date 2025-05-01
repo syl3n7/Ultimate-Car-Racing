@@ -52,6 +52,9 @@ public class GameManager : MonoBehaviour
             FindSpawnPoints();
         }
         
+        // TEST: Force spawn after 2 seconds - comment this out after testing!
+        StartCoroutine(DelayedTestSpawn());
+        
         // We're ready to start
         SendReadyMessage();
     }
@@ -189,7 +192,7 @@ public class GameManager : MonoBehaviour
         {
             Position = playerCar.transform.position,
             Rotation = playerCar.transform.rotation.eulerAngles,
-            Velocity = playerCar.Rigidbody.linearVelocity,  // Changed from linearVelocity to velocity
+            Velocity = playerCar.Rigidbody.linearVelocity,  // FIXED: Changed from linearVelocity to velocity
             AngularVelocity = playerCar.Rigidbody.angularVelocity,
             Timestamp = Time.time
         };
@@ -226,6 +229,20 @@ public class GameManager : MonoBehaviour
     
     public void SpawnPlayers(string[] playerIds)
     {
+        Debug.Log($"SpawnPlayers called with {playerIds.Length} players");
+        
+        if (playerCarPrefab == null)
+        {
+            Debug.LogError("Player car prefab is null! Cannot spawn players.");
+            return;
+        }
+        
+        if (spawnPoints == null || spawnPoints.Length == 0)
+        {
+            Debug.LogError("No spawn points available! Cannot spawn players.");
+            return;
+        }
+        
         gameStarted = true;
         
         // Find a spawn point for each player
@@ -307,6 +324,8 @@ public class GameManager : MonoBehaviour
     
     private void HandleNetworkMessage(string fromClient, string message)
     {
+        Debug.Log($"Received network message: {message} from {fromClient}");
+        
         string[] parts = message.Split('|');
         if (parts.Length < 1) return;
         
@@ -315,6 +334,7 @@ public class GameManager : MonoBehaviour
         switch (command)
         {
             case "PLAYER_READY":
+                Debug.Log($"Player ready: {fromClient}");
                 // Host handles player ready messages
                 if (NetworkManager.Instance.IsHost)
                 {
@@ -323,9 +343,16 @@ public class GameManager : MonoBehaviour
                 break;
                 
             case "START_GAME":
+                Debug.Log($"Start game command received with data: {(parts.Length > 1 ? parts[1] : "none")}");
                 // Game starting, spawn players
-                string[] playerIds = JsonConvert.DeserializeObject<string[]>(parts[1]);
-                SpawnPlayers(playerIds);
+                try {
+                    string[] playerIds = JsonConvert.DeserializeObject<string[]>(parts[1]);
+                    Debug.Log($"Deserialized {playerIds.Length} player IDs: {string.Join(", ", playerIds)}");
+                    SpawnPlayers(playerIds);
+                }
+                catch (Exception ex) {
+                    Debug.LogError($"Error deserializing player IDs: {ex.Message}");
+                }
                 break;
                 
             case "RESPAWN":
@@ -482,45 +509,67 @@ public class GameManager : MonoBehaviour
     
     private void CheckAllPlayersReady()
     {
-        if (!NetworkManager.Instance.IsHost) return;
+        Debug.Log("CheckAllPlayersReady called");
+        
+        if (!NetworkManager.Instance.IsHost)
+        {
+            Debug.Log("Not host, ignoring ready check");
+            return;
+        }
         
         // In a real implementation, you would check if all connected players are ready
         // For simplicity, we'll just start the game after a short delay
         
+        Debug.Log("Starting game after delay");
         StartCoroutine(StartGameAfterDelay(2f));
     }
-    
+
     private IEnumerator StartGameAfterDelay(float delay)
     {
+        Debug.Log($"Game will start in {delay} seconds");
         yield return new WaitForSeconds(delay);
+        
+        Debug.Log("Delay finished, preparing to start game");
         
         // Get all player IDs from NetworkManager
         List<string> playerIds = new List<string>();
         
         // Add the host (local player)
+        if (string.IsNullOrEmpty(localPlayerId))
+        {
+            Debug.LogError("Local player ID is null or empty!");
+            localPlayerId = "host_player"; // Fallback
+        }
+        
         playerIds.Add(localPlayerId);
+        Debug.Log($"Added local player to list: {localPlayerId}");
         
         // Add all connected players
         var connectedPlayers = NetworkManager.Instance.ConnectedPlayers;
-        if (connectedPlayers != null)
+        if (connectedPlayers != null && connectedPlayers.Count > 0)
         {
+            Debug.Log($"Found {connectedPlayers.Count} connected players");
             foreach (var player in connectedPlayers)
             {
+                Debug.Log($"Adding remote player: {player.clientId}");
                 playerIds.Add(player.clientId);
             }
         }
         else
         {
-            Debug.LogWarning("No connected players found or ConnectedPlayers is null");
+            Debug.Log("No connected players found");
         }
         
         // Serialize the player list
         string playersJson = JsonConvert.SerializeObject(playerIds.ToArray());
+        Debug.Log($"Serialized player list: {playersJson}");
         
         // Send start game message to all players
         NetworkManager.Instance.SendMessageToRoom($"START_GAME|{playersJson}");
+        Debug.Log("Sent START_GAME message to room");
         
         // Start the game locally
+        Debug.Log("Starting game locally");
         SpawnPlayers(playerIds.ToArray());
     }
     
@@ -558,5 +607,20 @@ public class GameManager : MonoBehaviour
         public float Steering;
         public float Brake;
         public float Timestamp;
+    }
+
+    // Add this to GameManager
+    public void TestSpawnSinglePlayer()
+    {
+        // Use a test player ID if we don't have a real one
+        string testId = string.IsNullOrEmpty(localPlayerId) ? "test_player" : localPlayerId;
+        SpawnPlayers(new string[] { testId });
+    }
+
+    private IEnumerator DelayedTestSpawn()
+    {
+        yield return new WaitForSeconds(2f);
+        Debug.Log("Forcing test player spawn");
+        TestSpawnSinglePlayer();
     }
 }

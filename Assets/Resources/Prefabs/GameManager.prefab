@@ -46,10 +46,10 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   playerCarPrefab: {fileID: 2758779497387618871, guid: 6f6addce78ebb4fcc846a2861e9a061a, type: 3}
   spawnPoints:
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
-  - {fileID: 0}
+  - {fileID: 2933840840411040245, guid: c28864312405c4249bf14013a34dd172, type: 3}
+  - {fileID: 4142835333519174129, guid: 7122647f593a043698de0139fadcc4f2, type: 3}
+  - {fileID: 8853177570783055822, guid: eb93fd70805fe4667a4a1c826ad855c8, type: 3}
+  - {fileID: 4292975531755479117, guid: f800ffb7084794bc9bf1d88092a17c3d, type: 3}
   respawnHeight: 2
   syncInterval: 0.1
   inputSyncInterval: 0.05

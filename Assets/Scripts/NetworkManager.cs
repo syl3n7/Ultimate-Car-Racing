@@ -114,6 +114,12 @@ public class NetworkManager : MonoBehaviour
         return _averageLatency;
     }
 
+    // Add this property to NetworkManager if it's not already there
+    public float AverageLatency 
+    { 
+        get { return _averageLatency; } 
+    }
+
     void Awake()
     {
         if (Instance == null)
