@@ -8,7 +8,7 @@ import cmd
 import datetime
 import os
 import sys
-from tabulate import tabulate
+import tabulate
 
 class RelayServer:
     def __init__(self, tcp_port=7777, udp_port=7778):
