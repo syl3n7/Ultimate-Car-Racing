@@ -49,6 +49,7 @@ public class GameManager : MonoBehaviour
         // Register network callbacks
         NetworkManager.Instance.OnMessageReceived += HandleNetworkMessage;
         NetworkManager.Instance.OnGameDataReceived += HandleGameData;
+        NetworkManager.Instance.OnPositionReset += HandlePositionReset; // Ensure reset is registered here too
         
         // Get the local player ID immediately and log it
         localPlayerId = NetworkManager.Instance.ClientId;
@@ -58,6 +59,11 @@ public class GameManager : MonoBehaviour
         if (string.IsNullOrEmpty(localPlayerId)) 
         {
             StartCoroutine(WaitForClientId());
+        }
+        else
+        {
+            // Force spawn after a short delay if we already have an ID
+            StartCoroutine(DelayedTestSpawn());
         }
     }
 
@@ -664,34 +670,46 @@ public class GameManager : MonoBehaviour
 
     private void HandlePositionReset(Vector3 newPosition)
     {
+        Debug.Log($"GameManager received position reset request to {newPosition}");
+        
         // Reset position of local player
         if (localPlayerObject != null)
         {
-            Debug.Log($"Resetting player position to {newPosition}");
+            Debug.Log($"Applying position reset to local player {localPlayerId}");
             
-            // If using a character controller:
-            var controller = localPlayerObject.GetComponent<CharacterController>();
-            if (controller != null)
+            // Force disable and re-enable the controller or rigidbody to reset physics state
+            var rb = localPlayerObject.GetComponent<Rigidbody>();
+            if (rb != null)
             {
-                controller.enabled = false;
+                bool wasKinematic = rb.isKinematic;
+                rb.isKinematic = true;
+                rb.linearVelocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
                 localPlayerObject.transform.position = newPosition;
-                controller.enabled = true;
+                rb.isKinematic = wasKinematic;
+                Debug.Log($"Reset position using Rigidbody to {newPosition}");
             }
-            // If using rigidbody:
             else
             {
-                var rb = localPlayerObject.GetComponent<Rigidbody>();
-                if (rb != null)
-                {
-                    rb.linearVelocity = Vector3.zero;
-                    rb.angularVelocity = Vector3.zero;
-                    rb.position = newPosition;
-                }
-                else
-                {
-                    localPlayerObject.transform.position = newPosition;
-                }
+                localPlayerObject.transform.position = newPosition;
+                Debug.Log($"Reset position by direct transform to {newPosition}");
             }
+            
+            // Also broadcast this change to other players
+            if (NetworkManager.Instance != null)
+            {
+                var eventData = new Dictionary<string, object> {
+                    { "event", "teleport" },
+                    { "position", newPosition }
+                };
+                string jsonData = JsonConvert.SerializeObject(eventData);
+                NetworkManager.Instance.SendGameDataToRoom($"EVENT|{jsonData}");
+                Debug.Log("Broadcast position reset to other players");
+            }
+        }
+        else
+        {
+            Debug.LogError("Can't reset position - localPlayerObject is null!");
         }
     }
 

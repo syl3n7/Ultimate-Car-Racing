@@ -73,6 +73,7 @@ public class PlayerController : MonoBehaviour
     
     public void Initialize(string playerId, bool isLocal)
     {
+        Debug.Log($"Initializing player {playerId}, isLocal={isLocal}");
         PlayerId = playerId;
         IsLocal = isLocal;
         isInitialized = true;
@@ -83,31 +84,32 @@ public class PlayerController : MonoBehaviour
             playerNameText.text = playerId;
         }
         
-        // Local player is kinematic until game starts
-        if (!IsLocal)
+        // Set distinct colors for better visibility
+        Renderer renderer = GetComponent<Renderer>();
+        if (renderer != null)
         {
-            // Initialize target transforms for remote players
-            targetPosition = transform.position;
-            targetRotation = transform.rotation;
-            targetVelocity = Vector3.zero;
-            targetAngularVelocity = Vector3.zero;
+            renderer.material.color = IsLocal ? Color.blue : Color.red;
+            Debug.Log($"Setting car color for {playerId} to {(IsLocal ? "blue" : "red")}");
+        }
+        else
+        {
+            // If the main object doesn't have a renderer, try to find renderers in children
+            Renderer[] childRenderers = GetComponentsInChildren<Renderer>();
+            foreach (Renderer childRenderer in childRenderers)
+            {
+                childRenderer.material.color = IsLocal ? Color.blue : Color.red;
+            }
+            Debug.Log($"Set {childRenderers.Length} child renderers for {playerId}");
         }
         
         // Setup camera
         SetupCamera();
-
-        // Make the local car blue and remote cars red
-        if (IsLocal)
-        {
-            GetComponent<Renderer>().material.color = Color.blue;
-        }
-        else
-        {
-            GetComponent<Renderer>().material.color = Color.red;
-        }
-
+        
         // Set the name of the player object
         gameObject.name = IsLocal ? $"LocalCar_{playerId}" : $"RemoteCar_{playerId}";
+        
+        // Force wake up the Rigidbody
+        Rigidbody.WakeUp();
     }
     
     void Update()
@@ -303,15 +305,18 @@ public class PlayerController : MonoBehaviour
     public void SetupCamera()
     {
         // Find the camera attached to this car
-        Camera carCamera = GetComponentInChildren<Camera>();
+        Camera carCamera = GetComponentInChildren<Camera>(true); // Include inactive cameras
         
         if (carCamera != null)
         {
+            Debug.Log($"Found camera on {PlayerId}, isLocal={IsLocal}");
+            
             // If this is the local player, activate the camera
             if (IsLocal)
             {
                 carCamera.gameObject.SetActive(true);
                 carCamera.tag = "MainCamera";
+                Debug.Log($"Activated camera for local player {PlayerId}");
                 
                 // Disable any audio listeners on other cameras
                 AudioListener[] listeners = FindObjectsOfType<AudioListener>();
@@ -329,11 +334,18 @@ public class PlayerController : MonoBehaviour
                 {
                     carAudioListener.enabled = true;
                 }
+                else
+                {
+                    // Add an audio listener if it doesn't exist
+                    carCamera.gameObject.AddComponent<AudioListener>();
+                    Debug.Log("Added missing AudioListener to player camera");
+                }
             }
             else
             {
                 // Disable camera on remote player cars
                 carCamera.gameObject.SetActive(false);
+                Debug.Log($"Disabled camera for remote player {PlayerId}");
                 
                 // Disable any audio listener
                 AudioListener audioListener = carCamera.GetComponent<AudioListener>();
@@ -343,7 +355,12 @@ public class PlayerController : MonoBehaviour
                 }
             }
         }
+        else
+        {
+            Debug.LogWarning($"No camera found on player {PlayerId}!");
+        }
     }
+
     public void SetIsLocal(bool isLocal)
     {
         // Use reflection to set the value since the property is read-only
@@ -360,6 +377,23 @@ public class PlayerController : MonoBehaviour
             // Alternative approach if the field can't be found
             // This uses the Initialize method which we know works
             Initialize(this.PlayerId, isLocal);
+        }
+    }
+
+    void OnDrawGizmos()
+    {
+        // Draw a colored sphere to show who's who
+        if (Application.isPlaying && isInitialized)
+        {
+            Gizmos.color = IsLocal ? Color.blue : Color.red;
+            Gizmos.DrawSphere(transform.position + Vector3.up * 2f, 0.5f);
+            
+            // Draw text to show player ID
+            #if UNITY_EDITOR
+            UnityEditor.Handles.color = Color.white;
+            UnityEditor.Handles.Label(transform.position + Vector3.up * 3f, 
+                $"{PlayerId} (Local: {IsLocal})");
+            #endif
         }
     }
 }
