@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UltimateCarRacing.Networking;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 
 public class GameManager : MonoBehaviour
 {
@@ -191,19 +192,31 @@ public class GameManager : MonoBehaviour
         
         var playerCar = activePlayers[localPlayerId];
         
-        // Create state data using the SerializableVector3
-        PlayerStateData stateData = new PlayerStateData
+        // Configure serialization settings to avoid circular references
+        var settings = new JsonSerializerSettings
         {
-            Position = playerCar.transform.position, // Implicit conversion works
-            Rotation = playerCar.transform.rotation.eulerAngles,
-            Velocity = playerCar.Rigidbody.linearVelocity,
-            AngularVelocity = playerCar.Rigidbody.angularVelocity,
+            ReferenceLoopHandling = ReferenceLoopHandling.Ignore,
+            ContractResolver = new DefaultContractResolver
+            {
+                IgnoreSerializableInterface = true
+            }
+        };
+        
+        // Create player state using SerializableVector3 instead of Vector3
+        var playerState = new PlayerStateData
+        {
+            Position = new SerializableVector3(playerCar.transform.position),
+            Rotation = new SerializableVector3(playerCar.transform.eulerAngles),
+            Velocity = new SerializableVector3(playerCar.Rigidbody.velocity),
+            AngularVelocity = new SerializableVector3(playerCar.Rigidbody.angularVelocity),
             Timestamp = Time.time
         };
         
-        // Serialize and send
-        string jsonData = JsonConvert.SerializeObject(stateData);
-        NetworkManager.Instance.SendGameDataToRoom($"STATE|{jsonData}");
+        // Use the configured settings when serializing
+        string jsonData = JsonConvert.SerializeObject(playerState, settings);
+        
+        // Send the data to other players
+        NetworkManager.Instance.SendGameDataToRoom(jsonData);
     }
     
     private void SyncPlayerInput()
@@ -612,10 +625,10 @@ public class GameManager : MonoBehaviour
     [System.Serializable]
     public class PlayerStateData
     {
-        public Vector3 Position;
-        public Vector3 Rotation;
-        public Vector3 Velocity;
-        public Vector3 AngularVelocity;
+        public SerializableVector3 Position;
+        public SerializableVector3 Rotation;
+        public SerializableVector3 Velocity;
+        public SerializableVector3 AngularVelocity;
         public float Timestamp;
     }
     

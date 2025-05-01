@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 
 namespace UltimateCarRacing.Networking {
 
@@ -638,7 +639,18 @@ public class NetworkManager : MonoBehaviour
         // Now try to send the message
         try
         {
-            string jsonMessage = JsonConvert.SerializeObject(message);
+            // Use settings to handle circular references
+            var settings = new JsonSerializerSettings
+            {
+                ReferenceLoopHandling = ReferenceLoopHandling.Ignore,
+                ContractResolver = new DefaultContractResolver
+                {
+                    // Ignore Unity-specific properties that cause circular references
+                    IgnoreSerializableInterface = true
+                }
+            };
+            
+            string jsonMessage = JsonConvert.SerializeObject(message, settings);
             byte[] data = Encoding.UTF8.GetBytes(jsonMessage + "\n");
             tcpStream.Write(data, 0, data.Length);
         }
@@ -660,7 +672,18 @@ public class NetworkManager : MonoBehaviour
             
         try
         {
-            string jsonMessage = JsonConvert.SerializeObject(message);
+            // Use settings to handle circular references
+            var settings = new JsonSerializerSettings
+            {
+                ReferenceLoopHandling = ReferenceLoopHandling.Ignore,
+                ContractResolver = new DefaultContractResolver
+                {
+                    // Ignore Unity-specific properties that cause circular references
+                    IgnoreSerializableInterface = true
+                }
+            };
+            
+            string jsonMessage = JsonConvert.SerializeObject(message, settings);
             byte[] data = Encoding.UTF8.GetBytes(jsonMessage);
             udpClient.Send(data, data.Length, relayEndpoint);
         }
