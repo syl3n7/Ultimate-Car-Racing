@@ -575,7 +575,7 @@ class AdminConsole(cmd.Cmd):
                 player['connected_since']
             ])
             
-        print(tabulate(table_data, headers=headers, tablefmt="pretty"))
+        print(tabulate.tabulate(table_data, headers=headers, tablefmt="pretty"))
     
     def do_rooms(self, arg):
         """List all game rooms"""
@@ -598,7 +598,7 @@ class AdminConsole(cmd.Cmd):
                     room_data['max_players']
                 ])
                 
-            print(tabulate(table_data, headers=headers, tablefmt="pretty"))
+            print(tabulate.tabulate(table_data, headers=headers, tablefmt="pretty"))
     
     def do_kick(self, arg):
         """Kick a player: kick <player_id>"""
