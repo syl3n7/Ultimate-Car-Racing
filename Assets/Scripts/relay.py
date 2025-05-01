@@ -133,6 +133,7 @@ class RelayServer:
     
     def handle_tcp_client(self, client_socket, client_id):
         """Handle TCP messages from a connected client"""
+        print(f"Starting to handle messages for client {client_id}")
         try:
             # Set socket to non-blocking
             client_socket.setblocking(False)
@@ -166,7 +167,7 @@ class RelayServer:
         finally:
             # Clean up when client disconnects
             self.remove_client(client_id)
-            print(f"Client disconnected: {client_id}")
+            print(f"Client disconnected: {client_id} - Connection handling terminated")
     
     def handle_tcp_message(self, data, client_id):
         """Process a message received over TCP"""

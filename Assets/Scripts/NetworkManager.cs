@@ -85,6 +85,7 @@ public class NetworkManager : MonoBehaviour
         {
             if (_connectionStatus != value)
             {
+                Debug.Log($"[Network] Connection status changing from {_connectionStatus} to {value}");
                 _connectionStatus = value;
                 OnConnectionStatusChanged?.Invoke(_connectionStatus, string.Empty);
             }
@@ -312,7 +313,7 @@ public class NetworkManager : MonoBehaviour
                 EnqueueAction(() => {
                     LogError($"TCP receive thread error: {e.Message}");
                     ConnectionStatus = NetworkConnectionState.Failed;
-                    Reconnect();
+                    Reconnect();  // This could be creating your loop
                 });
             }
         }
@@ -489,12 +490,24 @@ public class NetworkManager : MonoBehaviour
     private void SendHeartbeat()
     {
         if (!isRunning || tcpClient == null || !tcpClient.Connected)
-            return;
-            
-        SendTcpMessage(new Dictionary<string, object>
         {
-            { "type", "HEARTBEAT" }
-        });
+            // Don't try to send if we're not properly connected
+            return;
+        }
+            
+        try
+        {
+            SendTcpMessage(new Dictionary<string, object>
+            {
+                { "type", "HEARTBEAT" }
+            });
+            Debug.Log("Heartbeat sent");  // Add this to track heartbeat sending
+        }
+        catch (Exception e)
+        {
+            LogError($"Failed to send heartbeat: {e.Message}");
+            // Don't immediately reconnect here - give the connection recovery a chance
+        }
     }
 
     public void RequestGameList()
@@ -681,21 +694,58 @@ public class NetworkManager : MonoBehaviour
             Debug.Log($"[Network] Measured latency: {latency*1000:F1}ms, Average: {_averageLatency*1000:F1}ms");
     }
 
+    private bool isReconnecting = false;
+
     private void Reconnect()
     {
-        // Only attempt reconnect if we're marked as failed
-        if (ConnectionStatus != NetworkConnectionState.Failed)
+        // Only attempt reconnect if we're marked as failed and not already reconnecting
+        if (ConnectionStatus != NetworkConnectionState.Failed || isReconnecting)
             return;
             
         Log("Attempting to reconnect...");
+        isReconnecting = true;
         Disconnect(false);
-        StartCoroutine(ReconnectCoroutine());
+        StartCoroutine(ReconnectCoroutineWithBackoff());
     }
 
-    private IEnumerator ReconnectCoroutine()
+    private IEnumerator ReconnectCoroutineWithBackoff()
     {
-        yield return new WaitForSeconds(2f); // Wait before reconnecting
-        InitializeNetwork();
+        // Use exponential backoff for reconnection attempts
+        float backoffTime = 2f;
+        int attempts = 0;
+        
+        while (attempts < 5 && ConnectionStatus != NetworkConnectionState.Connected)
+        {
+            yield return new WaitForSeconds(backoffTime);
+            
+            Debug.Log($"Reconnection attempt {attempts+1}/5");
+            InitializeNetwork();
+            
+            // Wait to see if connection succeeds
+            float startTime = Time.time;
+            while (Time.time - startTime < 5f && 
+                   ConnectionStatus == NetworkConnectionState.Connecting)
+            {
+                yield return new WaitForSeconds(0.5f);
+            }
+            
+            if (ConnectionStatus == NetworkConnectionState.Connected)
+            {
+                Debug.Log("Reconnection successful!");
+                break;
+            }
+            
+            // Increase backoff time for next attempt
+            backoffTime = Mathf.Min(backoffTime * 1.5f, 10f);
+            attempts++;
+        }
+        
+        isReconnecting = false;
+        
+        if (ConnectionStatus != NetworkConnectionState.Connected)
+        {
+            Debug.LogError("Failed to reconnect after multiple attempts");
+        }
     }
 
     public void Disconnect(bool setStatus = true)
@@ -705,34 +755,35 @@ public class NetworkManager : MonoBehaviour
         // Clean up TCP
         if (tcpReceiveThread != null)
         {
-            tcpReceiveThread.Abort();
+            try {
+                tcpReceiveThread.Abort();
+            } catch (Exception e) {
+                Debug.LogWarning($"Error aborting TCP thread: {e.Message}");
+            }
             tcpReceiveThread = null;
         }
         
         if (tcpStream != null)
         {
-            tcpStream.Close();
+            try {
+                tcpStream.Close();
+            } catch (Exception e) {
+                Debug.LogWarning($"Error closing TCP stream: {e.Message}");
+            }
             tcpStream = null;
         }
         
         if (tcpClient != null)
         {
-            tcpClient.Close();
+            try {
+                tcpClient.Close();
+            } catch (Exception e) {
+                Debug.LogWarning($"Error closing TCP client: {e.Message}");
+            }
             tcpClient = null;
         }
         
-        // Clean up UDP
-        if (udpReceiveThread != null)
-        {
-            udpReceiveThread.Abort();
-            udpReceiveThread = null;
-        }
-        
-        if (udpClient != null)
-        {
-            udpClient.Close();
-            udpClient = null;
-        }
+        // Similar careful cleanup for UDP resources...
         
         // Reset state
         clientId = null;

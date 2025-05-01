@@ -92,6 +92,9 @@ public class PlayerController : MonoBehaviour
             targetVelocity = Vector3.zero;
             targetAngularVelocity = Vector3.zero;
         }
+        
+        // Setup camera
+        SetupCamera();
     }
     
     void Update()
@@ -199,7 +202,7 @@ public class PlayerController : MonoBehaviour
         {
             // Teleport if desync is too large
             transform.position = targetPosition;
-            Rigidbody.velocity = targetVelocity;
+            Rigidbody.linearVelocity = targetVelocity;
             transform.rotation = targetRotation;
             Rigidbody.angularVelocity = targetAngularVelocity;
         }
@@ -208,7 +211,7 @@ public class PlayerController : MonoBehaviour
             // Otherwise smoothly lerp
             transform.position = Vector3.Lerp(transform.position, targetPosition, lerpFactor);
             transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, lerpFactor);
-            Rigidbody.velocity = Vector3.Lerp(Rigidbody.velocity, targetVelocity, velocityLerpSpeed * Time.deltaTime);
+            Rigidbody.linearVelocity = Vector3.Lerp(Rigidbody.linearVelocity, targetVelocity, velocityLerpSpeed * Time.deltaTime);
             Rigidbody.angularVelocity = Vector3.Lerp(Rigidbody.angularVelocity, targetAngularVelocity, velocityLerpSpeed * Time.deltaTime);
         }
         
@@ -239,7 +242,7 @@ public class PlayerController : MonoBehaviour
             // Teleport immediately to the new state
             transform.position = stateData.Position;
             transform.rotation = Quaternion.Euler(stateData.Rotation);
-            Rigidbody.velocity = stateData.Velocity;
+            Rigidbody.linearVelocity = stateData.Velocity;
             Rigidbody.angularVelocity = stateData.AngularVelocity;
         }
         else
@@ -275,5 +278,50 @@ public class PlayerController : MonoBehaviour
         targetRotation = rotation;
         targetVelocity = Vector3.zero;
         targetAngularVelocity = Vector3.zero;
+    }
+
+    public void SetupCamera()
+    {
+        // Find the camera attached to this car
+        Camera carCamera = GetComponentInChildren<Camera>();
+        
+        if (carCamera != null)
+        {
+            // If this is the local player, activate the camera
+            if (IsLocal)
+            {
+                carCamera.gameObject.SetActive(true);
+                carCamera.tag = "MainCamera";
+                
+                // Disable any audio listeners on other cameras
+                AudioListener[] listeners = FindObjectsOfType<AudioListener>();
+                foreach (AudioListener listener in listeners)
+                {
+                    if (listener.gameObject != carCamera.gameObject)
+                    {
+                        listener.enabled = false;
+                    }
+                }
+                
+                // Make sure this camera's audio listener is enabled
+                AudioListener carAudioListener = carCamera.GetComponent<AudioListener>();
+                if (carAudioListener != null)
+                {
+                    carAudioListener.enabled = true;
+                }
+            }
+            else
+            {
+                // Disable camera on remote player cars
+                carCamera.gameObject.SetActive(false);
+                
+                // Disable any audio listener
+                AudioListener audioListener = carCamera.GetComponent<AudioListener>();
+                if (audioListener != null)
+                {
+                    audioListener.enabled = false;
+                }
+            }
+        }
     }
 }

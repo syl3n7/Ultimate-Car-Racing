@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
@@ -125,7 +126,7 @@ public class GameManager : MonoBehaviour
         {
             Position = playerCar.transform.position,
             Rotation = playerCar.transform.rotation.eulerAngles,
-            Velocity = playerCar.Rigidbody.velocity,  // Changed from linearVelocity to velocity
+            Velocity = playerCar.Rigidbody.linearVelocity,  // Changed from linearVelocity to velocity
             AngularVelocity = playerCar.Rigidbody.angularVelocity,
             Timestamp = Time.time
         };
@@ -189,7 +190,56 @@ public class GameManager : MonoBehaviour
         // Add to active players
         activePlayers[playerId] = playerController;
         
+        // If this is the local player, enable its camera and disable any other cameras
+        if (playerId == localPlayerId)
+        {
+            SetupLocalPlayerCamera(playerObj);
+        }
+        else
+        {
+            // For remote players, ensure their cameras are disabled
+            DisableRemotePlayerCamera(playerObj);
+        }
+        
         Debug.Log($"Spawned player {playerId} at spawn point {spawnIndex}");
+    }
+
+    private void SetupLocalPlayerCamera(GameObject playerObj)
+    {
+        // Find any camera in the scene that might be active
+        Camera[] sceneCameras = FindObjectsOfType<Camera>();
+        foreach (Camera cam in sceneCameras)
+        {
+            // Disable any camera that's not on our player car
+            if (!cam.transform.IsChildOf(playerObj.transform))
+            {
+                cam.gameObject.SetActive(false);
+            }
+        }
+        
+        // Find and enable the camera on the player car
+        Camera playerCamera = playerObj.GetComponentInChildren<Camera>();
+        if (playerCamera != null)
+        {
+            playerCamera.gameObject.SetActive(true);
+            playerCamera.tag = "MainCamera";
+            
+            Debug.Log("Activated local player camera");
+        }
+        else
+        {
+            Debug.LogWarning("No camera found on player car prefab!");
+        }
+    }
+
+    private void DisableRemotePlayerCamera(GameObject playerObj)
+    {
+        // Disable any cameras on remote player objects
+        Camera playerCamera = playerObj.GetComponentInChildren<Camera>();
+        if (playerCamera != null)
+        {
+            playerCamera.gameObject.SetActive(false);
+        }
     }
     
     private void HandleNetworkMessage(string fromClient, string message)
@@ -416,7 +466,7 @@ public class GameManager : MonoBehaviour
         if (!activePlayers.ContainsKey(playerId)) return;
         
         // Find a random spawn point
-        int spawnIndex = Random.Range(0, spawnPoints.Length);
+        int spawnIndex = UnityEngine.Random.Range(0, spawnPoints.Length);
         Vector3 spawnPosition = spawnPoints[spawnIndex].position + Vector3.up * respawnHeight;
         Quaternion spawnRotation = spawnPoints[spawnIndex].rotation;
         
