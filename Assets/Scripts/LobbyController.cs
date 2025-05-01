@@ -120,10 +120,10 @@ public class LobbyController : MonoBehaviour
     void OnStartClicked()
     {
         // Tell all players to load the game scene
-        NetworkManager.Instance.SendMessageToRoom($"LOAD_SCENE|{gameSceneName}");
+        NetworkManager.Instance.SendMessageToRoom($"LOAD_SCENE|OnGame");
         
         // Load locally
-        UnityEngine.SceneManagement.SceneManager.LoadScene(gameSceneName);
+        SceneTransitionManager.Instance.LoadScene("OnGame");
     }
 
     void OnLeaveClicked()
