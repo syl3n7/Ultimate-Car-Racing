@@ -46,16 +46,79 @@ public class GameManager : MonoBehaviour
         // Get the local player ID
         localPlayerId = NetworkManager.Instance.ClientId;
         
-        // Check if we have a valid player ID
-        if (string.IsNullOrEmpty(localPlayerId))
+        // Find spawn points if not assigned in inspector
+        if (spawnPoints == null || spawnPoints.Length == 0)
         {
-            Debug.LogWarning("Client ID not received from server yet. Will attempt to retry.");
-            StartCoroutine(WaitForClientId());
+            FindSpawnPoints();
         }
-        else
+        
+        // We're ready to start
+        SendReadyMessage();
+    }
+    
+    private void FindSpawnPoints()
+    {
+        // Look for a parent object containing spawn points
+        GameObject spawnPointsParent = GameObject.Find("SpawnPoints");
+        
+        if (spawnPointsParent != null)
         {
-            // We're ready to start
-            SendReadyMessage();
+            // Get all child transforms
+            List<Transform> points = new List<Transform>();
+            foreach (Transform child in spawnPointsParent.transform)
+            {
+                points.Add(child);
+            }
+            
+            if (points.Count > 0)
+            {
+                spawnPoints = points.ToArray();
+                Debug.Log($"Found {points.Count} spawn points in scene");
+            }
+        }
+        
+        // If we still don't have spawn points, look for objects tagged "SpawnPoint"
+        if (spawnPoints == null || spawnPoints.Length == 0)
+        {
+            GameObject[] taggedPoints = GameObject.FindGameObjectsWithTag("SpawnPoint");
+            if (taggedPoints.Length > 0)
+            {
+                spawnPoints = new Transform[taggedPoints.Length];
+                for (int i = 0; i < taggedPoints.Length; i++)
+                {
+                    spawnPoints[i] = taggedPoints[i].transform;
+                }
+                Debug.Log($"Found {taggedPoints.Length} spawn points tagged as 'SpawnPoint'");
+            }
+        }
+        
+        // If we still don't have spawn points, create default ones
+        if (spawnPoints == null || spawnPoints.Length == 0)
+        {
+            Debug.LogWarning("No spawn points found, creating default spawn points");
+            CreateDefaultSpawnPoints();
+        }
+    }
+    
+    private void CreateDefaultSpawnPoints()
+    {
+        // Create a parent object for organization
+        GameObject parent = new GameObject("SpawnPoints");
+        
+        // Create 4 spawn points in a line
+        spawnPoints = new Transform[4];
+        for (int i = 0; i < 4; i++)
+        {
+            GameObject point = new GameObject($"SpawnPoint{i+1}");
+            point.transform.SetParent(parent.transform);
+            
+            // Position them in a line with some spacing
+            point.transform.position = new Vector3(i * 5f, 0.5f, 0f);
+            
+            // Make them all face the same direction
+            point.transform.rotation = Quaternion.Euler(0f, 90f, 0f);
+            
+            spawnPoints[i] = point.transform;
         }
     }
     

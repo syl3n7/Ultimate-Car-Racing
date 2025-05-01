@@ -359,8 +359,8 @@ GameObject:
   m_Component:
   - component: {fileID: 715068170}
   m_Layer: 0
-  m_Name: Spawn1
-  m_TagString: Untagged
+  m_Name: SpawnPoint1
+  m_TagString: SpawnPoint
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -380,59 +380,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 2129514573}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &1109848405
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1109848406}
-  - component: {fileID: 1109848407}
-  m_Layer: 0
-  m_Name: GameManager
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &1109848406
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1109848405}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 27.2239, y: 4.877518, z: 29.980251}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1109848407
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1109848405}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: bcd7eb72835df42eba25382088b8ba69, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  playerCarPrefab: {fileID: 2758779497387618871, guid: 6f6addce78ebb4fcc846a2861e9a061a, type: 3}
-  spawnPoints:
-  - {fileID: 715068170}
-  - {fileID: 1917951035}
-  - {fileID: 1549237785}
-  - {fileID: 1192458356}
-  respawnHeight: 2
-  syncInterval: 0.1
-  inputSyncInterval: 0.05
 --- !u!1 &1192458355
 GameObject:
   m_ObjectHideFlags: 0
@@ -443,8 +390,8 @@ GameObject:
   m_Component:
   - component: {fileID: 1192458356}
   m_Layer: 0
-  m_Name: Spawn4
-  m_TagString: Untagged
+  m_Name: SpawnPoint4
+  m_TagString: SpawnPoint
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -474,8 +421,8 @@ GameObject:
   m_Component:
   - component: {fileID: 1549237785}
   m_Layer: 0
-  m_Name: Spawn3
-  m_TagString: Untagged
+  m_Name: SpawnPoint3
+  m_TagString: SpawnPoint
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -505,8 +452,8 @@ GameObject:
   m_Component:
   - component: {fileID: 1917951035}
   m_Layer: 0
-  m_Name: Spawn2
-  m_TagString: Untagged
+  m_Name: SpawnPoint2
+  m_TagString: SpawnPoint
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -689,5 +636,4 @@ SceneRoots:
   - {fileID: 2134813721}
   - {fileID: 584741509}
   - {fileID: 2129514573}
-  - {fileID: 1109848406}
   - {fileID: 362945211}
