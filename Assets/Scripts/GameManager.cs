@@ -191,12 +191,12 @@ public class GameManager : MonoBehaviour
         
         var playerCar = activePlayers[localPlayerId];
         
-        // Create state data
+        // Create state data using the SerializableVector3
         PlayerStateData stateData = new PlayerStateData
         {
-            Position = playerCar.transform.position,
+            Position = playerCar.transform.position, // Implicit conversion works
             Rotation = playerCar.transform.rotation.eulerAngles,
-            Velocity = playerCar.Rigidbody.velocity,  // FIXED: Changed from linearVelocity to velocity
+            Velocity = playerCar.Rigidbody.velocity,
             AngularVelocity = playerCar.Rigidbody.angularVelocity,
             Timestamp = Time.time
         };
