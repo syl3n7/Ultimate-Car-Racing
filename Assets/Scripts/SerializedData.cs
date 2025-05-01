@@ -1,3 +1,5 @@
+using UnityEngine;
+
 // Data structures for network serialization
 [System.Serializable]
 public class PlayerStateData

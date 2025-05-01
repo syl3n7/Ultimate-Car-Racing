@@ -4,6 +4,11 @@ import select
 from collections import defaultdict
 import time
 import json
+import cmd
+import datetime
+import os
+import sys
+from tabulate import tabulate
 
 class RelayServer:
     def __init__(self, tcp_port=7777, udp_port=7778):
@@ -26,6 +31,11 @@ class RelayServer:
         self.clients_lock = threading.Lock()
         self.rooms_lock = threading.Lock()
         self.next_client_id = 1
+        
+        # Player data tracking
+        self.player_positions = {}  # client_id -> {x, y, z, timestamp}
+        self.player_latencies = {}  # client_id -> latency_ms
+        self.player_names = {}      # client_id -> player_name
         
     def start(self):
         print(f"Relay server started - TCP: 0.0.0.0:{self.tcp_port}, UDP: 0.0.0.0:{self.udp_port}")
@@ -322,6 +332,29 @@ class RelayServer:
                         'type': 'PING_RESPONSE',
                         'timestamp': timestamp
                     })
+                    
+                    # Calculate and store latency
+                    current_time = time.time() * 1000  # Convert to ms
+                    if timestamp > 0:
+                        latency = current_time - timestamp
+                        self.player_latencies[client_id] = latency
+        
+        elif msg_type == 'PLAYER_INFO':
+            # Store player name and any other info
+            player_name = data.get('name')
+            if player_name:
+                self.player_names[client_id] = player_name
+        
+        elif msg_type == 'POSITION_UPDATE':
+            # Store player position
+            position = data.get('position')
+            if position and isinstance(position, dict):
+                self.player_positions[client_id] = {
+                    'x': position.get('x', 0),
+                    'y': position.get('y', 0),
+                    'z': position.get('z', 0),
+                    'timestamp': time.time()
+                }
     
     def udp_listen(self):
         """Handle incoming UDP datagrams"""
@@ -354,7 +387,7 @@ class RelayServer:
             msg_type = message.get('type')
             client_id = message.get('client_id')
             
-            if not client_id or msg_type != 'GAME_DATA':
+            if not client_id:
                 return
             
             # Update UDP endpoint for this client
@@ -365,6 +398,17 @@ class RelayServer:
                     self.clients[client_id]['udp_port'] = addr[1]
                     # Update last heartbeat time to keep connection alive
                     self.clients[client_id]['last_heartbeat'] = time.time()
+            
+            if msg_type == 'POSITION_UPDATE':
+                # Store player position from UDP updates too
+                position = message.get('position')
+                if position and isinstance(position, dict):
+                    self.player_positions[client_id] = {
+                        'x': position.get('x', 0),
+                        'y': position.get('y', 0),
+                        'z': position.get('z', 0),
+                        'timestamp': time.time()
+                    }
             
             # Handle game data relay - find target and forward
             target_id = message.get('target_id')
@@ -422,13 +466,214 @@ class RelayServer:
         except Exception as e:
             print(f"TCP send error: {e}")
 
+    def kick_player(self, client_id):
+        """Kick a player from the server"""
+        with self.clients_lock:
+            if client_id in self.clients:
+                try:
+                    # Send kick message
+                    self.send_tcp_message(self.clients[client_id]['tcp_socket'], {
+                        'type': 'KICKED',
+                        'message': 'You have been kicked from the server'
+                    })
+                except:
+                    pass
+                
+                # Remove the client
+                self.remove_client(client_id)
+                return True
+            return False
+            
+    def broadcast_message(self, message):
+        """Send a message to all connected clients"""
+        with self.clients_lock:
+            for client_id, client_data in self.clients.items():
+                try:
+                    self.send_tcp_message(client_data['tcp_socket'], {
+                        'type': 'SERVER_MESSAGE',
+                        'message': message
+                    })
+                except:
+                    pass
+                    
+    def get_player_stats(self):
+        """Get comprehensive stats about all players"""
+        stats = []
+        
+        with self.clients_lock:
+            for client_id, client_data in self.clients.items():
+                # Basic info
+                player_info = {
+                    'id': client_id,
+                    'name': self.player_names.get(client_id, 'Unknown'),
+                    'ip': client_data.get('public_ip', 'Unknown'),
+                    'connected_since': datetime.datetime.fromtimestamp(
+                        client_data.get('last_heartbeat', 0) - 60).strftime('%H:%M:%S')
+                }
+                
+                # Add latency if we have it
+                if client_id in self.player_latencies:
+                    player_info['latency'] = f"{int(self.player_latencies[client_id])}ms"
+                else:
+                    player_info['latency'] = "Unknown"
+                
+                # Add position if we have it
+                if client_id in self.player_positions:
+                    pos = self.player_positions[client_id]
+                    player_info['position'] = f"({pos['x']:.1f}, {pos['y']:.1f}, {pos['z']:.1f})"
+                else:
+                    player_info['position'] = "Unknown"
+                
+                # Find which room they're in
+                player_info['room'] = "None"
+                with self.rooms_lock:
+                    for room_id, room_data in self.game_rooms.items():
+                        if client_id in room_data['players']:
+                            player_info['room'] = room_id
+                            if room_data['host_id'] == client_id:
+                                player_info['role'] = "Host"
+                            else:
+                                player_info['role'] = "Player"
+                            break
+                    else:
+                        player_info['role'] = "Lobby"
+                
+                stats.append(player_info)
+        
+        return stats
+
+
+class AdminConsole(cmd.Cmd):
+    prompt = 'race-admin> '
+    intro = 'Welcome to the Race Server Admin Console. Type help or ? to list commands.'
+
+    def __init__(self, server):
+        super().__init__()
+        self.server = server
+        self.server_running = True
+    
+    def do_players(self, arg):
+        """List all connected players and their details"""
+        player_stats = self.server.get_player_stats()
+        
+        if not player_stats:
+            print("No players connected")
+            return
+            
+        headers = ["ID", "Name", "IP", "Latency", "Position", "Room", "Role", "Connected"]
+        table_data = []
+        
+        for player in player_stats:
+            table_data.append([
+                player['id'], 
+                player['name'], 
+                player['ip'], 
+                player['latency'],
+                player['position'],
+                player['room'],
+                player['role'],
+                player['connected_since']
+            ])
+            
+        print(tabulate(table_data, headers=headers, tablefmt="pretty"))
+    
+    def do_rooms(self, arg):
+        """List all game rooms"""
+        with self.server.rooms_lock:
+            if not self.server.game_rooms:
+                print("No active game rooms")
+                return
+                
+            headers = ["Room ID", "Name", "Host", "Players", "Max Players"]
+            table_data = []
+            
+            for room_id, room_data in self.server.game_rooms.items():
+                host_name = self.server.player_names.get(room_data['host_id'], room_data['host_id'])
+                
+                table_data.append([
+                    room_id,
+                    room_data['name'],
+                    host_name,
+                    f"{len(room_data['players'])}/{room_data['max_players']}",
+                    room_data['max_players']
+                ])
+                
+            print(tabulate(table_data, headers=headers, tablefmt="pretty"))
+    
+    def do_kick(self, arg):
+        """Kick a player: kick <player_id>"""
+        if not arg:
+            print("Please specify a player ID to kick")
+            return
+            
+        client_id = arg.strip()
+        if self.server.kick_player(client_id):
+            print(f"Player {client_id} has been kicked")
+        else:
+            print(f"Player {client_id} not found")
+    
+    def do_broadcast(self, arg):
+        """Send a message to all players: broadcast <message>"""
+        if not arg:
+            print("Please specify a message to broadcast")
+            return
+            
+        self.server.broadcast_message(arg)
+        print(f"Message broadcast: '{arg}'")
+    
+    def do_stats(self, arg):
+        """Show server statistics"""
+        with self.server.clients_lock:
+            num_clients = len(self.server.clients)
+            
+        with self.server.rooms_lock:
+            num_rooms = len(self.server.game_rooms)
+            
+        print(f"Server Statistics:")
+        print(f"- TCP Port: {self.server.tcp_port}")
+        print(f"- UDP Port: {self.server.udp_port}")
+        print(f"- Connected Clients: {num_clients}")
+        print(f"- Active Game Rooms: {num_rooms}")
+        print(f"- Server Uptime: {datetime.datetime.now() - self.server.start_time}")
+    
+    def do_clear(self, arg):
+        """Clear the console screen"""
+        os.system('cls' if os.name == 'nt' else 'clear')
+    
+    def do_exit(self, arg):
+        """Exit the admin console and shut down the server"""
+        print("Shutting down server...")
+        self.server_running = False
+        return True
+
+    def do_EOF(self, arg):
+        """Exit on Ctrl-D"""
+        print("\nShutting down server...")
+        self.server_running = False
+        return True
+
 if __name__ == "__main__":
+    # Add tabulate dependency if not present
+    try:
+        import tabulate
+    except ImportError:
+        print("Installing required dependency: tabulate")
+        import subprocess
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "tabulate"])
+        import tabulate
+    
     server = RelayServer()
+    server.start_time = datetime.datetime.now()
     server.start()
     
+    # Start admin console
+    admin = AdminConsole(server)
+    
     try:
-        # Keep the main thread alive
-        while True:
-            time.sleep(1)
+        admin.cmdloop()
     except KeyboardInterrupt:
-        print("Server shutting down...")
+        print("\nServer shutting down...")
+    
+    # Keep server running until admin console exits
+    while admin.server_running:
+        time.sleep(1)
