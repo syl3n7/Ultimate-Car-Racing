@@ -20,6 +20,7 @@ public class LobbyController : MonoBehaviour
     public TMP_Text roomInfoText;
     public TMP_Text connectionStatusText;
     public TMP_Text publicIdText;
+    public TMP_Text debugText;
 
     [Header("Settings")]
     public float serverRefreshInterval = 5f;
@@ -140,6 +141,14 @@ public class LobbyController : MonoBehaviour
         else
         {
             publicIdText.text = "Not Connected";
+        }
+
+        // Debug display
+        if (debugText != null && NetworkManager.Instance != null)
+        {
+            debugText.text = $"My ID: {NetworkManager.Instance.ClientId}\n" +
+                             $"Room: {(NetworkManager.Instance.IsHost ? "Host" : "Client")}\n" +
+                             $"Players: {playersInRoom.Count}";
         }
     }
 

@@ -50,20 +50,15 @@ public class GameManager : MonoBehaviour
         NetworkManager.Instance.OnMessageReceived += HandleNetworkMessage;
         NetworkManager.Instance.OnGameDataReceived += HandleGameData;
         
-        // Get the local player ID
+        // Get the local player ID immediately and log it
         localPlayerId = NetworkManager.Instance.ClientId;
+        Debug.Log($"Local player ID set to: {localPlayerId}");
         
-        // Find spawn points if not assigned in inspector
-        if (spawnPoints == null || spawnPoints.Length == 0)
+        // If ID is null or empty, wait for it to be assigned
+        if (string.IsNullOrEmpty(localPlayerId)) 
         {
-            FindSpawnPoints();
+            StartCoroutine(WaitForClientId());
         }
-        
-        // TEST: Force spawn after 2 seconds - comment this out after testing!
-        StartCoroutine(DelayedTestSpawn());
-        
-        // We're ready to start
-        SendReadyMessage();
     }
 
     void OnEnable()
@@ -289,10 +284,12 @@ public class GameManager : MonoBehaviour
     
     public GameObject SpawnPlayer(string playerId, int spawnIndex = 0)
     {
+        // Debug who is being spawned
+        Debug.Log($"Spawning player: {playerId}, local player is: {localPlayerId}, isLocal={playerId == localPlayerId}");
+        
         // Use configurable spawn positions
         Vector3 spawnPosition;
         
-        // If using debug spawn position, or this is first spawn in sequence
         if (useDebugSpawnPosition || spawnIndex == 0)
         {
             spawnPosition = debugSpawnPosition;
@@ -309,27 +306,32 @@ public class GameManager : MonoBehaviour
             );
         }
         
-        // Use this position when instantiating the player
+        // Create the player object
         GameObject playerObject = Instantiate(playerCarPrefab, spawnPosition, Quaternion.identity);
+        playerObject.name = $"Car_{playerId}"; // Give unique name for debugging
         
         // Set up player controller
         PlayerController controller = playerObject.GetComponent<PlayerController>();
         if (controller != null)
         {
-            // Initialize player controller with id and local flag
-            controller.Initialize(playerId, playerId == localPlayerId);
+            // Initialize with correct ownership
+            bool isLocalPlayer = (playerId == localPlayerId);
+            controller.Initialize(playerId, isLocalPlayer);
+            Debug.Log($"Initialized car for {playerId}, isLocalPlayer={isLocalPlayer}");
             
             activePlayers[playerId] = controller;
             
-            // If this is the local player, set up the camera and store reference
-            if (playerId == localPlayerId) // Use direct comparison instead of property
+            // Setup camera only for local player
+            if (isLocalPlayer)
             {
                 SetupLocalPlayerCamera(playerObject);
                 localPlayerObject = playerObject;
+                Debug.Log($"Set {playerId} as local player with camera");
             }
             else
             {
                 DisableRemotePlayerCamera(playerObject);
+                Debug.Log($"Set {playerId} as remote player without camera");
             }
         }
         
@@ -579,50 +581,33 @@ public class GameManager : MonoBehaviour
 
     private IEnumerator StartGameAfterDelay(float delay)
     {
-        Debug.Log($"Game will start in {delay} seconds");
         yield return new WaitForSeconds(delay);
-        
-        Debug.Log("Delay finished, preparing to start game");
         
         // Get all player IDs from NetworkManager
         List<string> playerIds = new List<string>();
         
-        // Add the host (local player)
-        if (string.IsNullOrEmpty(localPlayerId))
-        {
-            Debug.LogError("Local player ID is null or empty!");
-            localPlayerId = "host_player"; // Fallback
-        }
-        
+        // Add the host
         playerIds.Add(localPlayerId);
-        Debug.Log($"Added local player to list: {localPlayerId}");
+        Debug.Log($"Adding host to player list: {localPlayerId}");
         
         // Add all connected players
         var connectedPlayers = NetworkManager.Instance.ConnectedPlayers;
-        if (connectedPlayers != null && connectedPlayers.Count > 0)
+        foreach (var player in connectedPlayers)
         {
-            Debug.Log($"Found {connectedPlayers.Count} connected players");
-            foreach (var player in connectedPlayers)
+            // Make sure we don't add duplicates
+            if (!playerIds.Contains(player.clientId))
             {
-                Debug.Log($"Adding remote player: {player.clientId}");
                 playerIds.Add(player.clientId);
+                Debug.Log($"Adding remote player: {player.clientId}");
             }
         }
-        else
-        {
-            Debug.Log("No connected players found");
-        }
         
-        // Serialize the player list
+        // Serialize and send player list
         string playersJson = JsonConvert.SerializeObject(playerIds.ToArray());
-        Debug.Log($"Serialized player list: {playersJson}");
-        
-        // Send start game message to all players
+        Debug.Log($"Starting game with players: {playersJson}");
         NetworkManager.Instance.SendMessageToRoom($"START_GAME|{playersJson}");
-        Debug.Log("Sent START_GAME message to room");
         
-        // Start the game locally
-        Debug.Log("Starting game locally");
+        // Start locally
         SpawnPlayers(playerIds.ToArray());
     }
     

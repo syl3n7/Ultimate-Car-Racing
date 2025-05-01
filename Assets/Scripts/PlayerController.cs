@@ -95,6 +95,19 @@ public class PlayerController : MonoBehaviour
         
         // Setup camera
         SetupCamera();
+
+        // Make the local car blue and remote cars red
+        if (IsLocal)
+        {
+            GetComponent<Renderer>().material.color = Color.blue;
+        }
+        else
+        {
+            GetComponent<Renderer>().material.color = Color.red;
+        }
+
+        // Set the name of the player object
+        gameObject.name = IsLocal ? $"LocalCar_{playerId}" : $"RemoteCar_{playerId}";
     }
     
     void Update()
@@ -129,6 +142,13 @@ public class PlayerController : MonoBehaviour
     
     private void HandleInput()
     {
+        // First verify this is truly the local player
+        if (!IsLocal)
+        {
+            Debug.LogWarning($"HandleInput called on non-local player {PlayerId}");
+            return;
+        }
+
         float prevThrottle = CurrentThrottle;
         float prevSteering = CurrentSteering;
         float prevBrake = CurrentBrake;
