@@ -9,6 +9,16 @@ using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 
+namespace UltimateCarRacing.Networking {
+
+public enum NetworkConnectionState
+{
+    Disconnected,
+    Connecting,
+    Connected,
+    Failed
+}
+
 [DefaultExecutionOrder(-100)] // Ensures early execution
 public class NetworkManager : MonoBehaviour
 {
@@ -47,13 +57,13 @@ public class NetworkManager : MonoBehaviour
     private readonly object queueLock = new object();
     private readonly Queue<Action> mainThreadActions = new Queue<Action>();
     private float lastHeartbeatTime;
-
+    
     // Events
     public delegate void MessageReceivedHandler(string fromClient, string message);
     public delegate void GameDataReceivedHandler(string fromClient, string jsonData);
     public delegate void ServerListReceivedHandler(List<GameRoom> rooms);
     public delegate void PlayerJoinedHandler(string clientId);
-    public delegate void ConnectionStatusChangedHandler(ConnectionStatus status, string message);
+    public delegate void ConnectionStatusChangedHandler(NetworkConnectionState status, string message);
     
     public event MessageReceivedHandler OnMessageReceived;
     public event GameDataReceivedHandler OnGameDataReceived;
@@ -61,8 +71,8 @@ public class NetworkManager : MonoBehaviour
     public event PlayerJoinedHandler OnPlayerJoined;
     public event ConnectionStatusChangedHandler OnConnectionStatusChanged;
 
-    private ConnectionStatus _connectionStatus = ConnectionStatus.Disconnected;
-    public ConnectionStatus ConnectionStatus 
+    private NetworkConnectionState _connectionStatus = NetworkConnectionState.Disconnected;
+    public NetworkConnectionState ConnectionStatus 
     { 
         get { return _connectionStatus; }
         private set
@@ -73,15 +83,6 @@ public class NetworkManager : MonoBehaviour
                 OnConnectionStatusChanged?.Invoke(_connectionStatus, string.Empty);
             }
         }
-    }
-
-    // Define the enum here, not at the bottom of the class
-    public enum ConnectionStatus
-    {
-        Disconnected,
-        Connecting,
-        Connected,
-        Failed
     }
 
     void Awake()
@@ -131,7 +132,7 @@ public class NetworkManager : MonoBehaviour
     {
         try
         {
-            ConnectionStatus = ConnectionStatus.Connecting;
+            ConnectionStatus = NetworkConnectionState.Connecting;
             
             // Initialize TCP connection
             tcpClient = new TcpClient();
@@ -147,7 +148,7 @@ public class NetworkManager : MonoBehaviour
                         // We're connected, now set up the receive thread
                         SetupTcpReceive();
                         SetupUdpClient();
-                        ConnectionStatus = ConnectionStatus.Connected;
+                        ConnectionStatus = NetworkConnectionState.Connected;
                         Log("Connected to relay server");
                     });
                 }
@@ -155,7 +156,7 @@ public class NetworkManager : MonoBehaviour
                 {
                     EnqueueAction(() => {
                         LogError($"Failed to connect to relay server: {e.Message}");
-                        ConnectionStatus = ConnectionStatus.Failed;
+                        ConnectionStatus = NetworkConnectionState.Failed;
                     });
                 }
             });
@@ -166,7 +167,7 @@ public class NetworkManager : MonoBehaviour
         catch (Exception e)
         {
             LogError($"Network initialization failed: {e.Message}");
-            ConnectionStatus = ConnectionStatus.Failed;
+            ConnectionStatus = NetworkConnectionState.Failed;
         }
     }
 
@@ -254,7 +255,7 @@ public class NetworkManager : MonoBehaviour
             {
                 EnqueueAction(() => {
                     LogError($"TCP receive thread error: {e.Message}");
-                    ConnectionStatus = ConnectionStatus.Failed;
+                    ConnectionStatus = NetworkConnectionState.Failed;
                     Reconnect();
                 });
             }
@@ -542,7 +543,7 @@ public class NetworkManager : MonoBehaviour
         catch (Exception e)
         {
             LogError($"Error sending TCP message: {e.Message}");
-            ConnectionStatus = ConnectionStatus.Failed;
+            ConnectionStatus = NetworkConnectionState.Failed;
             Reconnect();
         }
     }
@@ -570,7 +571,7 @@ public class NetworkManager : MonoBehaviour
     private void Reconnect()
     {
         // Only attempt reconnect if we're marked as failed
-        if (ConnectionStatus != ConnectionStatus.Failed)
+        if (ConnectionStatus != NetworkConnectionState.Failed)
             return;
             
         Log("Attempting to reconnect...");
@@ -628,7 +629,7 @@ public class NetworkManager : MonoBehaviour
         
         if (setStatus)
         {
-            ConnectionStatus = ConnectionStatus.Disconnected;
+            ConnectionStatus = NetworkConnectionState.Disconnected;
         }
         
         Log("Disconnected from relay server");
@@ -670,6 +671,6 @@ public class NetworkManager : MonoBehaviour
         public int playerCount;
         public int maxPlayers;
     }
-    
-    // Removed duplicate ConnectionStatus enum definition
+}
+
 }

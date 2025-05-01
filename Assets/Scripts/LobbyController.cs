@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
-
+using UltimateCarRacing.Networking;
 public class LobbyController : MonoBehaviour
 {
     [Header("UI References")]
@@ -72,7 +72,7 @@ public class LobbyController : MonoBehaviour
         }
 
         // Update public ID display
-        if (publicIdText != null && NetworkManager.Instance.ConnectionStatus == NetworkManager.ConnectionStatus.Connected)
+        if (publicIdText != null && NetworkManager.Instance.ConnectionStatus == NetworkConnectionState.Connected)
         {
             publicIdText.text = $"Connected to Relay";
         }
@@ -158,29 +158,29 @@ public class LobbyController : MonoBehaviour
         roomInfoText.text = info;
     }
 
-    void HandleConnectionStatusChanged(NetworkManager.ConnectionStatus status, string message)
+    void HandleConnectionStatusChanged(NetworkConnectionState status, string message)
     {
         // Update UI based on connection status
         if (connectionStatusText != null)
         {
             switch (status)
             {
-                case NetworkManager.ConnectionStatus.Connected:
+                case NetworkConnectionState.Connected:
                     connectionStatusText.text = "Connected to Relay";
                     connectionStatusText.color = Color.green;
                     break;
                     
-                case NetworkManager.ConnectionStatus.Connecting:
+                case NetworkConnectionState.Connecting:
                     connectionStatusText.text = "Connecting...";
                     connectionStatusText.color = Color.yellow;
                     break;
                     
-                case NetworkManager.ConnectionStatus.Failed:
+                case NetworkConnectionState.Failed:
                     connectionStatusText.text = "Connection Failed";
                     connectionStatusText.color = Color.red;
                     break;
                     
-                case NetworkManager.ConnectionStatus.Disconnected:
+                case NetworkConnectionState.Disconnected:
                     connectionStatusText.text = "Disconnected";
                     connectionStatusText.color = Color.red;
                     break;
