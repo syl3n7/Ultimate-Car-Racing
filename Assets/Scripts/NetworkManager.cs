@@ -1,11 +1,13 @@
 using UnityEngine;
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
-using System.Collections.Generic;
-using System.Threading;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using Newtonsoft.Json;
 
 [DefaultExecutionOrder(-100)] // Ensures early execution
 public class NetworkManager : MonoBehaviour
@@ -13,23 +15,74 @@ public class NetworkManager : MonoBehaviour
     public static NetworkManager Instance { get; private set; }
 
     [Header("Network Settings")]
-    public int localPort = 7777;
-    public string relayServerIP = "19.116.114.89.rev.vodafone.pt";
-    public int relayPort = 7778;
+    public string relayServerIP = "127.0.0.1";
+    public int relayTcpPort = 7777;
+    public int relayUdpPort = 7778;
+    public float heartbeatInterval = 5f;
     public float connectionTimeout = 10f;
-    public float heartbeatInterval = 30f;
 
     [Header("Debug")]
     public bool showDebugLogs = true;
-    public List<ConnectedPeer> connectedPeers = new List<ConnectedPeer>();
+    
+    // TCP connection
+    private TcpClient tcpClient;
+    private NetworkStream tcpStream;
+    private byte[] tcpReceiveBuffer = new byte[8192];
+    private Thread tcpReceiveThread;
+    private bool isRunning = false;
+    private StringBuilder messageBuilder = new StringBuilder();
 
+    // UDP connection
     private UdpClient udpClient;
-    private Thread receiveThread;
-    private bool isRunning;
-    private float lastHeartbeatTime;
-    public string publicEndPoint;
-    private readonly Queue<Action> mainThreadActions = new Queue<Action>();
+    private Thread udpReceiveThread;
+    private IPEndPoint relayEndpoint;
+
+    // Room/client tracking
+    private string clientId;
+    private string currentRoomId;
+    private bool isHost = false;
+    public List<RemotePlayer> connectedPlayers = new List<RemotePlayer>();
+    
+    // Message handling
     private readonly object queueLock = new object();
+    private readonly Queue<Action> mainThreadActions = new Queue<Action>();
+    private float lastHeartbeatTime;
+
+    // Events
+    public delegate void MessageReceivedHandler(string fromClient, string message);
+    public delegate void GameDataReceivedHandler(string fromClient, string jsonData);
+    public delegate void ServerListReceivedHandler(List<GameRoom> rooms);
+    public delegate void PlayerJoinedHandler(string clientId);
+    public delegate void ConnectionStatusChangedHandler(ConnectionStatus status, string message);
+    
+    public event MessageReceivedHandler OnMessageReceived;
+    public event GameDataReceivedHandler OnGameDataReceived;
+    public event ServerListReceivedHandler OnServerListReceived;
+    public event PlayerJoinedHandler OnPlayerJoined;
+    public event ConnectionStatusChangedHandler OnConnectionStatusChanged;
+
+    private ConnectionStatus _connectionStatus = ConnectionStatus.Disconnected;
+    public ConnectionStatus ConnectionStatus 
+    { 
+        get { return _connectionStatus; }
+        private set
+        {
+            if (_connectionStatus != value)
+            {
+                _connectionStatus = value;
+                OnConnectionStatusChanged?.Invoke(_connectionStatus, string.Empty);
+            }
+        }
+    }
+
+    // Define the enum here, not at the bottom of the class
+    public enum ConnectionStatus
+    {
+        Disconnected,
+        Connecting,
+        Connected,
+        Failed
+    }
 
     void Awake()
     {
@@ -45,25 +98,6 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
-    void InitializeNetwork()
-    {
-        try
-        {
-            udpClient = new UdpClient(localPort);
-            isRunning = true;
-            receiveThread = new Thread(ReceiveThread);
-            receiveThread.IsBackground = true;
-            receiveThread.Start();
-
-            RegisterWithRelay();
-            Log("Network initialized on port " + localPort);
-        }
-        catch (Exception e)
-        {
-            LogError($"Network initialization failed: {e.Message}");
-        }
-    }
-
     void Update()
     {
         // Process main thread actions
@@ -76,307 +110,531 @@ public class NetworkManager : MonoBehaviour
         }
 
         // Send periodic heartbeats
-        if (Time.time - lastHeartbeatTime > heartbeatInterval)
+        if (isRunning && Time.time - lastHeartbeatTime > heartbeatInterval)
         {
             SendHeartbeat();
             lastHeartbeatTime = Time.time;
         }
     }
 
-    void ReceiveThread()
+    void OnDestroy()
     {
-        while (isRunning)
-        {
-            try
-            {
-                IPEndPoint remoteEP = new IPEndPoint(IPAddress.Any, 0);
-                byte[] data = udpClient.Receive(ref remoteEP);
-                string message = Encoding.UTF8.GetString(data);
-
-                ProcessRawMessage(message, remoteEP);
-            }
-            catch (SocketException e) when (e.SocketErrorCode == SocketError.Interrupted)
-            {
-                // Expected when shutting down
-            }
-            catch (Exception e)
-            {
-                LogError($"Receive error: {e.Message}");
-            }
-        }
+        Disconnect();
     }
 
-    void ProcessRawMessage(string message, IPEndPoint remoteEP)
+    void OnApplicationQuit()
     {
-        string[] parts = message.Split('|');
-        if (parts.Length == 0) return;
-
-        string command = parts[0];
-        string[] args = parts.Length > 1 ? parts[1..] : Array.Empty<string>();
-
-        switch (command)
-        {
-            case "REGISTERED":
-                publicEndPoint = $"{args[0]}:{args[1]}";
-                Log($"Registered with relay. Public endpoint: {publicEndPoint}");
-                break;
-
-            case "PEER_INFO":
-                HandlePeerInfo(args[0], args[1], int.Parse(args[2]), args[3], int.Parse(args[4]));
-                break;
-
-            case "PUNCH":
-                HandlePunchRequest(IPAddress.Parse(args[0]), int.Parse(args[1]));
-                break;
-
-            case "PUNCH_ACK":
-                HandlePunchAck(IPAddress.Parse(args[0]), int.Parse(args[1]));
-                break;
-
-            default:
-                // Forward game messages to main thread
-                EnqueueAction(() => OnNetworkMessageReceived?.Invoke(command, args, remoteEP));
-                break;
-        }
+        Disconnect();
     }
 
-    void HandlePeerInfo(string peerId, string publicIP, int publicPort, string localIP, int localPort)
+    private void InitializeNetwork()
     {
-        var peer = new IPEndPoint(IPAddress.Parse(publicIP), publicPort);
-        var localPeer = new IPEndPoint(IPAddress.Parse(localIP), localPort);
-
-        EnqueueAction(() =>
+        try
         {
-            if (!connectedPeers.Exists(p => p.peerId == peerId))
+            ConnectionStatus = ConnectionStatus.Connecting;
+            
+            // Initialize TCP connection
+            tcpClient = new TcpClient();
+            relayEndpoint = new IPEndPoint(IPAddress.Parse(relayServerIP), relayUdpPort);
+            
+            // Connect in a separate task to avoid blocking
+            Task.Run(() => 
             {
-                connectedPeers.Add(new ConnectedPeer
+                try
                 {
-                    peerId = peerId,
-                    publicEndPoint = peer,
-                    localEndPoint = localPeer,
-                    lastSeen = Time.time
+                    tcpClient.Connect(relayServerIP, relayTcpPort);
+                    EnqueueAction(() => {
+                        // We're connected, now set up the receive thread
+                        SetupTcpReceive();
+                        SetupUdpClient();
+                        ConnectionStatus = ConnectionStatus.Connected;
+                        Log("Connected to relay server");
+                    });
+                }
+                catch (Exception e)
+                {
+                    EnqueueAction(() => {
+                        LogError($"Failed to connect to relay server: {e.Message}");
+                        ConnectionStatus = ConnectionStatus.Failed;
+                    });
+                }
+            });
+            
+            isRunning = true;
+            lastHeartbeatTime = Time.time;
+        }
+        catch (Exception e)
+        {
+            LogError($"Network initialization failed: {e.Message}");
+            ConnectionStatus = ConnectionStatus.Failed;
+        }
+    }
+
+    private void SetupTcpReceive()
+    {
+        try
+        {
+            tcpStream = tcpClient.GetStream();
+            tcpReceiveThread = new Thread(TcpReceiveThread);
+            tcpReceiveThread.IsBackground = true;
+            tcpReceiveThread.Start();
+        }
+        catch (Exception e)
+        {
+            LogError($"TCP receive setup failed: {e.Message}");
+        }
+    }
+
+    private void SetupUdpClient()
+    {
+        try
+        {
+            // Create UDP client on a random port
+            udpClient = new UdpClient(0);
+            udpReceiveThread = new Thread(UdpReceiveThread);
+            udpReceiveThread.IsBackground = true;
+            udpReceiveThread.Start();
+        }
+        catch (Exception e)
+        {
+            LogError($"UDP setup failed: {e.Message}");
+        }
+    }
+
+    private void TcpReceiveThread()
+    {
+        try
+        {
+            while (isRunning && tcpClient != null && tcpClient.Connected)
+            {
+                byte[] headerBuffer = new byte[4];
+                byte[] messageBuffer = new byte[8192];
+                int bytesRead;
+
+                while ((bytesRead = tcpStream.Read(messageBuffer, 0, messageBuffer.Length)) > 0)
+                {
+                    string data = Encoding.UTF8.GetString(messageBuffer, 0, bytesRead);
+                    
+                    // Process all messages in the buffer
+                    int start = 0;
+                    int end;
+                    
+                    // Handle messages that might be split across receives
+                    messageBuilder.Append(data);
+                    string combined = messageBuilder.ToString();
+                    
+                    // Look for newline-terminated messages
+                    while ((end = combined.IndexOf('\n', start)) >= 0)
+                    {
+                        string message = combined.Substring(start, end - start);
+                        ProcessTcpMessage(message);
+                        start = end + 1;
+                    }
+                    
+                    // Keep any remaining partial message
+                    if (start < combined.Length)
+                    {
+                        messageBuilder.Clear();
+                        messageBuilder.Append(combined.Substring(start));
+                    }
+                    else
+                    {
+                        messageBuilder.Clear();
+                    }
+                }
+            }
+        }
+        catch (ThreadAbortException)
+        {
+            // Expected during shutdown
+        }
+        catch (Exception e)
+        {
+            if (isRunning)
+            {
+                EnqueueAction(() => {
+                    LogError($"TCP receive thread error: {e.Message}");
+                    ConnectionStatus = ConnectionStatus.Failed;
+                    Reconnect();
                 });
             }
-
-            AttemptPunchthrough(peerId, peer, localPeer);
-        });
-    }
-
-    void AttemptPunchthrough(string peerId, IPEndPoint publicEP, IPEndPoint localEP)
-    {
-        Log($"Attempting NAT punchthrough to {peerId}...");
-
-        // Try public endpoint
-        SendPunch(publicEP);
-
-        // Try local endpoint if different
-        if (!publicEP.Equals(localEP))
-        {
-            SendPunch(localEP);
         }
-
-        // Start timeout
-        StartCoroutine(PunchthroughTimeout(peerId));
     }
 
-    void SendPunch(IPEndPoint endpoint)
+    private void UdpReceiveThread()
     {
         try
         {
-            string message = $"PUNCH|{LocalIPAddress()}|{localPort}";
-            byte[] data = Encoding.UTF8.GetBytes(message);
-            udpClient.Send(data, data.Length, endpoint);
-        }
-        catch (Exception e)
-        {
-            LogError($"Punch send failed: {e.Message}");
-        }
-    }
-
-    IEnumerator PunchthroughTimeout(string peerId)
-    {
-        float startTime = Time.time;
-        while (Time.time - startTime < connectionTimeout)
-        {
-            yield return null;
-        }
-
-        var peer = connectedPeers.Find(p => p.peerId == peerId);
-        if (peer != null && !peer.isConnected)
-        {
-            Log($"Punchthrough to {peerId} failed, using relay");
-            peer.useRelay = true;
-        }
-    }
-
-    void HandlePunchRequest(IPAddress remoteIP, int remotePort)
-    {
-        var remoteEP = new IPEndPoint(remoteIP, remotePort);
-        Log($"Received punch from {remoteEP}");
-
-        // Respond with acknowledgement
-        try
-        {
-            string message = $"PUNCH_ACK|{LocalIPAddress()}|{localPort}";
-            byte[] data = Encoding.UTF8.GetBytes(message);
-            udpClient.Send(data, data.Length, remoteEP);
-        }
-        catch (Exception e)
-        {
-            LogError($"Punch response failed: {e.Message}");
-        }
-    }
-
-    void HandlePunchAck(IPAddress remoteIP, int remotePort)
-    {
-        var remoteEP = new IPEndPoint(remoteIP, remotePort);
-        Log($"Punchthrough succeeded with {remoteEP}");
-
-        EnqueueAction(() =>
-        {
-            var peer = connectedPeers.Find(p => 
-                p.publicEndPoint.Equals(remoteEP) || 
-                (p.localEndPoint != null && p.localEndPoint.Equals(remoteEP)));
-
-            if (peer != null)
+            while (isRunning && udpClient != null)
             {
-                peer.isConnected = true;
-                peer.useRelay = false;
-                peer.lastSeen = Time.time;
-            }
-        });
-    }
-
-    public void RegisterWithRelay()
-    {
-        try
-        {
-            string message = $"REGISTER|{LocalIPAddress()}|{localPort}";
-            byte[] data = Encoding.UTF8.GetBytes(message);
-            udpClient.Send(data, data.Length, relayServerIP, relayPort);
-        }
-        catch (Exception e)
-        {
-            LogError($"Relay registration failed: {e.Message}");
-        }
-    }
-
-    void SendHeartbeat()
-    {
-        try
-        {
-            byte[] data = Encoding.UTF8.GetBytes("HEARTBEAT");
-            udpClient.Send(data, data.Length, relayServerIP, relayPort);
-        }
-        catch (Exception e)
-        {
-            LogError($"Heartbeat failed: {e.Message}");
-        }
-    }
-
-    public void HostGame()
-    {
-        try
-        {
-            string message = $"HOST|{publicEndPoint}";
-            byte[] data = Encoding.UTF8.GetBytes(message);
-            udpClient.Send(data, data.Length, relayServerIP, relayPort);
-            Log("Game hosted successfully");
-        }
-        catch (Exception e)
-        {
-            LogError($"Host failed: {e.Message}");
-        }
-    }
-
-    public void JoinGame(string hostId)
-    {
-        try
-        {
-            string message = $"JOIN|{hostId}|{publicEndPoint}";
-            byte[] data = Encoding.UTF8.GetBytes(message);
-            udpClient.Send(data, data.Length, relayServerIP, relayPort);
-            Log($"Attempting to join game {hostId}");
-        }
-        catch (Exception e)
-        {
-            LogError($"Join failed: {e.Message}");
-        }
-    }
-
-    public void SendToPeer(string peerId, string message)
-    {
-        var peer = connectedPeers.Find(p => p.peerId == peerId);
-        if (peer == null) 
-        {
-            // If we don't have a specific peerId, try to find the first connected peer
-            // This helps with handling null peerId in HandlePlayerJoined
-            if (string.IsNullOrEmpty(peerId) && connectedPeers.Count > 0)
-            {
-                peer = connectedPeers[0];
-            }
-            else
-            {
-                return;
+                IPEndPoint remoteEndPoint = new IPEndPoint(IPAddress.Any, 0);
+                byte[] data = udpClient.Receive(ref remoteEndPoint);
+                
+                // Process received UDP data
+                string message = Encoding.UTF8.GetString(data);
+                ProcessUdpMessage(message, remoteEndPoint);
             }
         }
+        catch (ThreadAbortException)
+        {
+            // Expected during shutdown
+        }
+        catch (Exception e)
+        {
+            if (isRunning)
+            {
+                EnqueueAction(() => {
+                    LogError($"UDP receive thread error: {e.Message}");
+                });
+            }
+        }
+    }
 
+    private void ProcessTcpMessage(string jsonMessage)
+    {
         try
         {
-            byte[] data = Encoding.UTF8.GetBytes(message);
+            Dictionary<string, object> message = JsonConvert.DeserializeObject<Dictionary<string, object>>(jsonMessage);
             
-            if (peer.isConnected && !peer.useRelay)
-            {
-                // Send directly
-                udpClient.Send(data, data.Length, peer.publicEndPoint);
-            }
-            else
-            {
-                // Send via relay
-                string relayMsg = $"RELAY|{peer.peerId}|{message}";
-                byte[] relayData = Encoding.UTF8.GetBytes(relayMsg);
-                udpClient.Send(relayData, relayData.Length, relayServerIP, relayPort);
-            }
+            if (message == null || !message.ContainsKey("type"))
+                return;
+                
+            string messageType = message["type"].ToString();
+            
+            EnqueueAction(() => {
+                switch (messageType)
+                {
+                    case "REGISTERED":
+                        clientId = message["client_id"].ToString();
+                        Log($"Registered with relay server. Client ID: {clientId}");
+                        break;
+                        
+                    case "HEARTBEAT_ACK":
+                        // Just update last heartbeat time
+                        break;
+                        
+                    case "GAME_HOSTED":
+                        currentRoomId = message["room_id"].ToString();
+                        isHost = true;
+                        Log($"Game hosted successfully. Room ID: {currentRoomId}");
+                        break;
+                        
+                    case "GAME_LIST":
+                        ProcessGameList(message);
+                        break;
+                        
+                    case "JOINED_GAME":
+                        currentRoomId = message["room_id"].ToString();
+                        string hostId = message["host_id"].ToString();
+                        isHost = false;
+                        Log($"Joined game. Room ID: {currentRoomId}, Host: {hostId}");
+                        break;
+                        
+                    case "PLAYER_JOINED":
+                        string joinedClientId = message["client_id"].ToString();
+                        Log($"Player joined: {joinedClientId}");
+                        
+                        if (!connectedPlayers.Exists(p => p.clientId == joinedClientId))
+                        {
+                            connectedPlayers.Add(new RemotePlayer { clientId = joinedClientId });
+                        }
+                        
+                        OnPlayerJoined?.Invoke(joinedClientId);
+                        break;
+                        
+                    case "JOIN_FAILED":
+                        string reason = message["reason"].ToString();
+                        LogError($"Failed to join game: {reason}");
+                        break;
+                        
+                    case "RELAY":
+                        string fromClientId = message["from"].ToString();
+                        string relayMessage = message["message"].ToString();
+                        OnMessageReceived?.Invoke(fromClientId, relayMessage);
+                        break;
+                }
+            });
         }
         catch (Exception e)
         {
-            LogError($"Send to peer failed: {e.Message}");
+            EnqueueAction(() => {
+                LogError($"Error processing TCP message: {e.Message}. Message: {jsonMessage}");
+            });
         }
     }
 
-    // Implement the missing SendToAll method
-    public void SendToAll(string message)
+    private void ProcessUdpMessage(string jsonMessage, IPEndPoint sender)
     {
         try
         {
-            foreach (var peer in connectedPeers)
+            Dictionary<string, object> message = JsonConvert.DeserializeObject<Dictionary<string, object>>(jsonMessage);
+            
+            if (message == null || !message.ContainsKey("type"))
+                return;
+                
+            string messageType = message["type"].ToString();
+            
+            if (messageType == "GAME_DATA")
             {
-                SendToPeer(peer.peerId, message);
+                string fromClientId = message["from"].ToString();
+                string gameData = message["data"].ToString();
+                
+                EnqueueAction(() => {
+                    OnGameDataReceived?.Invoke(fromClientId, gameData);
+                });
             }
-            Log($"Message sent to all peers: {message}");
         }
         catch (Exception e)
         {
-            LogError($"SendToAll failed: {e.Message}");
+            EnqueueAction(() => {
+                LogError($"Error processing UDP message: {e.Message}");
+            });
         }
     }
 
-    // Implement the missing SendToRelay method
-    public void SendToRelay(string message)
+    private void ProcessGameList(Dictionary<string, object> message)
     {
         try
         {
-            byte[] data = Encoding.UTF8.GetBytes(message);
-            udpClient.Send(data, data.Length, relayServerIP, relayPort);
-            Log($"Message sent to relay: {message}");
+            var roomsData = message["rooms"] as Newtonsoft.Json.Linq.JArray;
+            if (roomsData == null) return;
+            
+            List<GameRoom> rooms = new List<GameRoom>();
+            
+            foreach (var roomData in roomsData)
+            {
+                var room = new GameRoom
+                {
+                    roomId = roomData["room_id"].ToString(),
+                    name = roomData["name"].ToString(),
+                    hostId = roomData["host_id"].ToString(),
+                    playerCount = Convert.ToInt32(roomData["player_count"]),
+                    maxPlayers = Convert.ToInt32(roomData["max_players"])
+                };
+                
+                rooms.Add(room);
+            }
+            
+            OnServerListReceived?.Invoke(rooms);
+            Log($"Received list of {rooms.Count} game rooms");
         }
         catch (Exception e)
         {
-            LogError($"SendToRelay failed: {e.Message}");
+            LogError($"Error processing game list: {e.Message}");
         }
     }
 
-    void EnqueueAction(Action action)
+    private void SendHeartbeat()
+    {
+        if (!isRunning || tcpClient == null || !tcpClient.Connected)
+            return;
+            
+        SendTcpMessage(new Dictionary<string, object>
+        {
+            { "type", "HEARTBEAT" }
+        });
+    }
+
+    public void RequestGameList()
+    {
+        SendTcpMessage(new Dictionary<string, object>
+        {
+            { "type", "LIST_GAMES" }
+        });
+        Log("Requested game list");
+    }
+
+    public void HostGame(string roomName, int maxPlayers = 4)
+    {
+        SendTcpMessage(new Dictionary<string, object>
+        {
+            { "type", "HOST_GAME" },
+            { "room_name", roomName },
+            { "max_players", maxPlayers }
+        });
+        Log($"Requested to host game: {roomName}");
+    }
+
+    public void JoinGame(string roomId)
+    {
+        SendTcpMessage(new Dictionary<string, object>
+        {
+            { "type", "JOIN_GAME" },
+            { "room_id", roomId }
+        });
+        Log($"Requested to join game: {roomId}");
+    }
+
+    public void SendMessageToPlayer(string targetClientId, string message)
+    {
+        SendTcpMessage(new Dictionary<string, object>
+        {
+            { "type", "RELAY_MESSAGE" },
+            { "target_id", targetClientId },
+            { "message", message }
+        });
+    }
+
+    public void SendMessageToRoom(string message)
+    {
+        if (string.IsNullOrEmpty(currentRoomId))
+        {
+            LogError("Cannot send message - not in a room");
+            return;
+        }
+            
+        SendTcpMessage(new Dictionary<string, object>
+        {
+            { "type", "RELAY_MESSAGE" },
+            { "room_id", currentRoomId },
+            { "message", message }
+        });
+    }
+
+    public void SendGameDataToPlayer(string targetClientId, string jsonData)
+    {
+        if (string.IsNullOrEmpty(clientId))
+        {
+            LogError("Cannot send game data - not registered");
+            return;
+        }
+            
+        SendUdpMessage(new Dictionary<string, object>
+        {
+            { "type", "GAME_DATA" },
+            { "client_id", clientId },
+            { "target_id", targetClientId },
+            { "data", jsonData }
+        });
+    }
+
+    public void SendGameDataToRoom(string jsonData)
+    {
+        if (string.IsNullOrEmpty(currentRoomId))
+        {
+            LogError("Cannot send game data - not in a room");
+            return;
+        }
+            
+        SendUdpMessage(new Dictionary<string, object>
+        {
+            { "type", "GAME_DATA" },
+            { "client_id", clientId },
+            { "room_id", currentRoomId },
+            { "data", jsonData }
+        });
+    }
+
+    private void SendTcpMessage(Dictionary<string, object> message)
+    {
+        if (!isRunning || tcpClient == null || !tcpClient.Connected)
+        {
+            LogError("Cannot send TCP message - disconnected");
+            return;
+        }
+            
+        try
+        {
+            string jsonMessage = JsonConvert.SerializeObject(message);
+            byte[] data = Encoding.UTF8.GetBytes(jsonMessage + "\n");
+            tcpStream.Write(data, 0, data.Length);
+        }
+        catch (Exception e)
+        {
+            LogError($"Error sending TCP message: {e.Message}");
+            ConnectionStatus = ConnectionStatus.Failed;
+            Reconnect();
+        }
+    }
+
+    private void SendUdpMessage(Dictionary<string, object> message)
+    {
+        if (!isRunning || udpClient == null)
+        {
+            LogError("Cannot send UDP message - client not initialized");
+            return;
+        }
+            
+        try
+        {
+            string jsonMessage = JsonConvert.SerializeObject(message);
+            byte[] data = Encoding.UTF8.GetBytes(jsonMessage);
+            udpClient.Send(data, data.Length, relayEndpoint);
+        }
+        catch (Exception e)
+        {
+            LogError($"Error sending UDP message: {e.Message}");
+        }
+    }
+
+    private void Reconnect()
+    {
+        // Only attempt reconnect if we're marked as failed
+        if (ConnectionStatus != ConnectionStatus.Failed)
+            return;
+            
+        Log("Attempting to reconnect...");
+        Disconnect(false);
+        StartCoroutine(ReconnectCoroutine());
+    }
+
+    private IEnumerator ReconnectCoroutine()
+    {
+        yield return new WaitForSeconds(2f); // Wait before reconnecting
+        InitializeNetwork();
+    }
+
+    public void Disconnect(bool setStatus = true)
+    {
+        isRunning = false;
+        
+        // Clean up TCP
+        if (tcpReceiveThread != null)
+        {
+            tcpReceiveThread.Abort();
+            tcpReceiveThread = null;
+        }
+        
+        if (tcpStream != null)
+        {
+            tcpStream.Close();
+            tcpStream = null;
+        }
+        
+        if (tcpClient != null)
+        {
+            tcpClient.Close();
+            tcpClient = null;
+        }
+        
+        // Clean up UDP
+        if (udpReceiveThread != null)
+        {
+            udpReceiveThread.Abort();
+            udpReceiveThread = null;
+        }
+        
+        if (udpClient != null)
+        {
+            udpClient.Close();
+            udpClient = null;
+        }
+        
+        // Reset state
+        clientId = null;
+        currentRoomId = null;
+        isHost = false;
+        connectedPlayers.Clear();
+        
+        if (setStatus)
+        {
+            ConnectionStatus = ConnectionStatus.Disconnected;
+        }
+        
+        Log("Disconnected from relay server");
+    }
+
+    private void EnqueueAction(Action action)
     {
         lock (queueLock)
         {
@@ -384,47 +642,34 @@ public class NetworkManager : MonoBehaviour
         }
     }
 
-    string LocalIPAddress()
+    private void Log(string message)
     {
-        var host = Dns.GetHostEntry(Dns.GetHostName());
-        foreach (var ip in host.AddressList)
-        {
-            if (ip.AddressFamily == AddressFamily.InterNetwork)
-            {
-                return ip.ToString();
-            }
-        }
-        return "127.0.0.1";
+        if (showDebugLogs)
+            Debug.Log($"[Network] {message}");
     }
 
-    void OnDestroy()
-    {
-        isRunning = false;
-        receiveThread?.Interrupt();
-        udpClient?.Close();
-    }
-
-    void Log(string message)
-    {
-        if (showDebugLogs) Debug.Log($"[Network] {message}");
-    }
-
-    void LogError(string message)
+    private void LogError(string message)
     {
         Debug.LogError($"[Network] {message}");
     }
 
-    // Events
-    public event Action<string, string[], IPEndPoint> OnNetworkMessageReceived;
-
     [System.Serializable]
-    public class ConnectedPeer
+    public class RemotePlayer
     {
-        public string peerId;
-        public IPEndPoint publicEndPoint;
-        public IPEndPoint localEndPoint;
-        public bool isConnected;
-        public bool useRelay;
+        public string clientId;
+        public string playerName;
         public float lastSeen;
     }
+
+    [System.Serializable]
+    public class GameRoom
+    {
+        public string roomId;
+        public string name;
+        public string hostId;
+        public int playerCount;
+        public int maxPlayers;
+    }
+    
+    // Removed duplicate ConnectionStatus enum definition
 }

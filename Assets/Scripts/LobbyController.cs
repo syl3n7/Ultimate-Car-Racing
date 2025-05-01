@@ -1,8 +1,8 @@
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
-using System.Collections.Generic;
-using System.Net;
 using TMPro;
 
 public class LobbyController : MonoBehaviour
@@ -24,19 +24,13 @@ public class LobbyController : MonoBehaviour
     [Header("Settings")]
     public float serverRefreshInterval = 5f;
     public string gameSceneName = "GameScene";
+    public string defaultRoomName = "Race Room";
 
-    private Dictionary<string, ServerInfo> availableServers = new Dictionary<string, ServerInfo>();
     private float lastRefreshTime;
     private string localPlayerName = "Player";
-
-    private class ServerInfo
-    {
-        public string serverId;
-        public string serverName;
-        public string hostName;
-        public int playerCount;
-        public int maxPlayers;
-    }
+    private Dictionary<string, NetworkManager.GameRoom> availableRooms = 
+        new Dictionary<string, NetworkManager.GameRoom>();
+    private List<string> playersInRoom = new List<string>();
 
     void Awake()
     {
@@ -50,7 +44,7 @@ public class LobbyController : MonoBehaviour
         
         // Setup button listeners
         hostButton.onClick.AddListener(OnHostClicked);
-        refreshButton.onClick.AddListener(RefreshServerList);
+        refreshButton.onClick.AddListener(RefreshRoomList);
         startButton.onClick.AddListener(OnStartClicked);
         leaveButton.onClick.AddListener(OnLeaveClicked);
         
@@ -60,27 +54,31 @@ public class LobbyController : MonoBehaviour
     void Start()
     {
         // Register network events
-        NetworkManager.Instance.OnNetworkMessageReceived += HandleNetworkMessage;
+        NetworkManager.Instance.OnServerListReceived += HandleServerList;
+        NetworkManager.Instance.OnMessageReceived += HandleNetworkMessage;
+        NetworkManager.Instance.OnPlayerJoined += HandlePlayerJoined;
+        NetworkManager.Instance.OnConnectionStatusChanged += HandleConnectionStatusChanged;
         
         // Initial refresh
-        RefreshServerList();
+        RefreshRoomList();
     }
 
     void Update()
     {
-        // Periodically refresh server list
-        if (Time.time - lastRefreshTime > serverRefreshInterval)
+        // Periodically refresh server list when in lobby
+        if (lobbyPanel.activeSelf && Time.time - lastRefreshTime > serverRefreshInterval)
         {
-            RefreshServerList();
+            RefreshRoomList();
         }
 
-        // Update connection status
-        UpdateConnectionStatus();
-        
         // Update public ID display
-        if (publicIdText != null && !string.IsNullOrEmpty(NetworkManager.Instance.publicEndPoint))
+        if (publicIdText != null && NetworkManager.Instance.ConnectionStatus == NetworkManager.ConnectionStatus.Connected)
         {
-            publicIdText.text = $"Your ID: {NetworkManager.Instance.publicEndPoint.Split(':')[1]}";
+            publicIdText.text = $"Connected to Relay";
+        }
+        else
+        {
+            publicIdText.text = "Not Connected";
         }
     }
 
@@ -89,7 +87,10 @@ public class LobbyController : MonoBehaviour
         // Clean up network events
         if (NetworkManager.Instance != null)
         {
-            NetworkManager.Instance.OnNetworkMessageReceived -= HandleNetworkMessage;
+            NetworkManager.Instance.OnServerListReceived -= HandleServerList;
+            NetworkManager.Instance.OnMessageReceived -= HandleNetworkMessage;
+            NetworkManager.Instance.OnPlayerJoined -= HandlePlayerJoined;
+            NetworkManager.Instance.OnConnectionStatusChanged -= HandleConnectionStatusChanged;
         }
     }
 
@@ -101,20 +102,25 @@ public class LobbyController : MonoBehaviour
 
     void OnHostClicked()
     {
-        NetworkManager.Instance.HostGame();
+        // Use player name as room name if available
+        string roomName = string.IsNullOrEmpty(localPlayerName) ? defaultRoomName : $"{localPlayerName}'s Room";
+        
+        NetworkManager.Instance.HostGame(roomName);
         
         // Switch to room view
         lobbyPanel.SetActive(false);
         roomPanel.SetActive(true);
         
         // Update room info
-        UpdateRoomInfo(new List<string> { localPlayerName });
+        playersInRoom.Clear();
+        playersInRoom.Add($"{localPlayerName} (Host)");
+        UpdateRoomInfo();
     }
 
     void OnStartClicked()
     {
-        // Tell all peers to load the game scene
-        NetworkManager.Instance.SendToAll("LOAD_SCENE|" + gameSceneName);
+        // Tell all players to load the game scene
+        NetworkManager.Instance.SendMessageToRoom($"LOAD_SCENE|{gameSceneName}");
         
         // Load locally
         UnityEngine.SceneManagement.SceneManager.LoadScene(gameSceneName);
@@ -122,166 +128,151 @@ public class LobbyController : MonoBehaviour
 
     void OnLeaveClicked()
     {
-        // If we're host, disband the room
-        NetworkManager.Instance.SendToAll("ROOM_CLOSED");
+        // Tell all players the room is closed
+        NetworkManager.Instance.SendMessageToRoom("ROOM_CLOSED");
         
         // Return to lobby
         roomPanel.SetActive(false);
         lobbyPanel.SetActive(true);
         
-        // Re-register with relay
-        NetworkManager.Instance.RegisterWithRelay();
+        // Refresh room list
+        RefreshRoomList();
     }
 
-    void RefreshServerList()
+    void RefreshRoomList()
     {
-        // Request server list from relay
-        NetworkManager.Instance.SendToRelay("LIST_SERVERS");
+        NetworkManager.Instance.RequestGameList();
         lastRefreshTime = Time.time;
     }
 
-    void UpdateConnectionStatus()
-    {
-        if (connectionStatusText == null) return;
-
-        int connectedCount = NetworkManager.Instance.connectedPeers.Count;
-        if (connectedCount > 0)
-        {
-            connectionStatusText.text = $"Connected to {connectedCount} peer(s)";
-            connectionStatusText.color = Color.green;
-        }
-        else if (roomPanel.activeSelf)
-        {
-            connectionStatusText.text = "Connecting...";
-            connectionStatusText.color = Color.yellow;
-        }
-        else
-        {
-            connectionStatusText.text = "Not connected";
-            connectionStatusText.color = Color.red;
-        }
-    }
-
-    void UpdateRoomInfo(List<string> playerNames)
+    void UpdateRoomInfo()
     {
         if (roomInfoText == null) return;
 
-        string info = $"Room Host: {localPlayerName}\nPlayers:\n";
-        foreach (string name in playerNames)
+        string info = "Players in Room:\n";
+        foreach (string player in playersInRoom)
         {
-            info += $"- {name}\n";
+            info += $"- {player}\n";
         }
 
         roomInfoText.text = info;
     }
 
-    void HandleNetworkMessage(string command, string[] args, IPEndPoint endpoint)
+    void HandleConnectionStatusChanged(NetworkManager.ConnectionStatus status, string message)
     {
+        // Update UI based on connection status
+        if (connectionStatusText != null)
+        {
+            switch (status)
+            {
+                case NetworkManager.ConnectionStatus.Connected:
+                    connectionStatusText.text = "Connected to Relay";
+                    connectionStatusText.color = Color.green;
+                    break;
+                    
+                case NetworkManager.ConnectionStatus.Connecting:
+                    connectionStatusText.text = "Connecting...";
+                    connectionStatusText.color = Color.yellow;
+                    break;
+                    
+                case NetworkManager.ConnectionStatus.Failed:
+                    connectionStatusText.text = "Connection Failed";
+                    connectionStatusText.color = Color.red;
+                    break;
+                    
+                case NetworkManager.ConnectionStatus.Disconnected:
+                    connectionStatusText.text = "Disconnected";
+                    connectionStatusText.color = Color.red;
+                    break;
+            }
+        }
+    }
+
+    void HandleServerList(List<NetworkManager.GameRoom> rooms)
+    {
+        // Update available rooms
+        availableRooms.Clear();
+        foreach (var room in rooms)
+        {
+            availableRooms[room.roomId] = room;
+        }
+        
+        // Update UI
+        UpdateRoomListUI();
+    }
+
+    void HandlePlayerJoined(string clientId)
+    {
+        // Add player to our list if not already present
+        if (!playersInRoom.Contains(clientId))
+        {
+            playersInRoom.Add(clientId);
+            
+            // Update the room info display
+            UpdateRoomInfo();
+            
+            // Tell the new player our name
+            NetworkManager.Instance.SendMessageToPlayer(clientId, $"PLAYER_INFO|{localPlayerName}");
+        }
+    }
+
+    void HandleNetworkMessage(string fromClient, string message)
+    {
+        string[] parts = message.Split('|');
+        if (parts.Length == 0) return;
+        
+        string command = parts[0];
+        string[] args = parts.Length > 1 ? new string[parts.Length - 1] : new string[0];
+        
+        for (int i = 0; i < args.Length; i++)
+        {
+            args[i] = parts[i + 1];
+        }
+        
         switch (command)
         {
-            case "SERVER_LIST":
-                HandleServerList(args);
-                break;
-                
-            case "PLAYER_JOINED":
-                HandlePlayerJoined(args);
-                break;
-                
-            case "PLAYER_LIST":
-                HandlePlayerList(args);
+            case "PLAYER_INFO":
+                // Update player name in our list
+                HandlePlayerInfo(fromClient, args);
                 break;
                 
             case "LOAD_SCENE":
+                // Load the specified scene
                 HandleLoadScene(args);
                 break;
                 
             case "ROOM_CLOSED":
+                // Return to lobby
                 HandleRoomClosed();
                 break;
         }
     }
 
-    void HandleServerList(string[] servers)
+    void HandlePlayerInfo(string clientId, string[] args)
     {
-        // Clear current list
-        availableServers.Clear();
+        if (args.Length < 1) return;
         
-        // Parse server list (format: id|name|host|players/max)
-        for (int i = 0; i < servers.Length; i += 4)
+        string playerName = args[0];
+        
+        // Update the player's name in our list
+        for (int i = 0; i < playersInRoom.Count; i++)
         {
-            var info = new ServerInfo
+            if (playersInRoom[i] == clientId)
             {
-                serverId = servers[i],
-                serverName = servers[i+1],
-                hostName = servers[i+2],
-                playerCount = int.Parse(servers[i+3].Split('/')[0]),
-                maxPlayers = int.Parse(servers[i+3].Split('/')[1])
-            };
-            
-            availableServers[info.serverId] = info;
-        }
-        
-        // Update UI
-        UpdateServerListUI();
-    }
-
-    void UpdateServerListUI()
-    {
-        // Clear existing entries
-        foreach (Transform child in serverListContent)
-        {
-            Destroy(child.gameObject);
-        }
-        
-        // Create new entries
-        foreach (var server in availableServers.Values)
-        {
-            GameObject entry = Instantiate(serverEntryPrefab, serverListContent);
-            ServerListEntry entryScript = entry.GetComponent<ServerListEntry>();
-            
-            if (entryScript != null)
-            {
-                entryScript.Setup(
-                    server.serverName,
-                    $"{server.hostName}'s Game",
-                    $"{server.playerCount}/{server.maxPlayers}",
-                    () => JoinSelectedServer(server.serverId)
-                );
+                playersInRoom[i] = playerName;
+                break;
             }
         }
-    }
-
-    void JoinSelectedServer(string serverId)
-    {
-        NetworkManager.Instance.JoinGame(serverId);
         
-        // Switch to room view
-        lobbyPanel.SetActive(false);
-        roomPanel.SetActive(true);
-    }
-
-    void HandlePlayerJoined(string[] args)
-    {
-        // args: playerName
-        if (args.Length < 1) return;
-        
-        // Request updated player list
-        string endpoint = null;
-        NetworkManager.Instance.SendToPeer(endpoint, "REQUEST_PLAYERS");
-    }
-
-    void HandlePlayerList(string[] args)
-    {
-        // args: name1,name2,name3
-        if (args.Length < 1) return;
-        
-        var playerNames = new List<string>(args[0].Split(','));
-        UpdateRoomInfo(playerNames);
+        // Update room info display
+        UpdateRoomInfo();
     }
 
     void HandleLoadScene(string[] args)
     {
         if (args.Length < 1) return;
+        
+        // Load the specified scene
         UnityEngine.SceneManagement.SceneManager.LoadScene(args[0]);
     }
 
@@ -290,22 +281,48 @@ public class LobbyController : MonoBehaviour
         // Return to lobby
         roomPanel.SetActive(false);
         lobbyPanel.SetActive(true);
+        
+        // Refresh room list
+        RefreshRoomList();
     }
 
-    // Helper method to send to all connected peers
-    void SendToAll(string message)
+    void UpdateRoomListUI()
     {
-        foreach (var peer in NetworkManager.Instance.connectedPeers)
+        // Clear existing entries
+        foreach (Transform child in serverListContent)
         {
-            NetworkManager.Instance.SendToPeer(peer.peerId, message);
+            Destroy(child.gameObject);
+        }
+        
+        // Create new entries
+        foreach (var room in availableRooms.Values)
+        {
+            GameObject entry = Instantiate(serverEntryPrefab, serverListContent);
+            ServerListEntry entryScript = entry.GetComponent<ServerListEntry>();
+            
+            if (entryScript != null)
+            {
+                entryScript.InitializeEntry(
+                    room.name,
+                    $"Room {room.roomId.Substring(5)}",  // "room_X" -> "Room X"
+                    $"{room.playerCount}/{room.maxPlayers}",
+                    () => JoinSelectedRoom(room.roomId)
+                );
+            }
         }
     }
-}
 
-internal partial class ServerListEntry
-{
-    public void Setup(string serverServerName, string s, string s1, Action action)
+    void JoinSelectedRoom(string roomId)
     {
-        throw new NotImplementedException();
+        NetworkManager.Instance.JoinGame(roomId);
+        
+        // Switch to room view
+        lobbyPanel.SetActive(false);
+        roomPanel.SetActive(true);
+        
+        // Initialize our player list with just our name for now
+        playersInRoom.Clear();
+        playersInRoom.Add(localPlayerName);
+        UpdateRoomInfo();
     }
 }
