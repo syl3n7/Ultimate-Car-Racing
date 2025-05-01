@@ -196,7 +196,7 @@ public class GameManager : MonoBehaviour
         {
             Position = playerCar.transform.position, // Implicit conversion works
             Rotation = playerCar.transform.rotation.eulerAngles,
-            Velocity = playerCar.Rigidbody.velocity,
+            Velocity = playerCar.Rigidbody.linearVelocity,
             AngularVelocity = playerCar.Rigidbody.angularVelocity,
             Timestamp = Time.time
         };

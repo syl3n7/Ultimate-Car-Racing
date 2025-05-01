@@ -652,6 +652,45 @@ class AdminConsole(cmd.Cmd):
         self.server_running = False
         return True
 
+    def do_resetpos(self, arg):
+        """Reset a player's position: resetpos <player_id>"""
+        if not arg:
+            print("Please specify a player ID to reset")
+            return
+            
+        client_id = arg.strip()
+        
+        # Check if player exists
+        with self.server.clients_lock:
+            if client_id not in self.server.clients:
+                print(f"Player {client_id} not found")
+                return
+        
+        # Send position reset message to the client
+        try:
+            with self.server.clients_lock:
+                if client_id in self.server.clients:
+                    self.server.send_tcp_message(self.server.clients[client_id]['tcp_socket'], {
+                        'type': 'RESET_POSITION',
+                        'position': {
+                            'x': 50.0,
+                            'y': 10.0,
+                            'z': 50.0
+                        }
+                    })
+            
+            # Update position in server's tracking
+            self.server.player_positions[client_id] = {
+                'x': 50.0,
+                'y': 10.0,
+                'z': 50.0,
+                'timestamp': time.time()
+            }
+            
+            print(f"Reset position for player {client_id} to (50, 10, 50)")
+        except Exception as e:
+            print(f"Error resetting position: {e}")
+
 if __name__ == "__main__":
     # Add tabulate dependency if not present
     try:
