@@ -324,4 +324,22 @@ public class PlayerController : MonoBehaviour
             }
         }
     }
+    public void SetIsLocal(bool isLocal)
+    {
+        // Use reflection to set the value since the property is read-only
+        var field = this.GetType().GetField("IsLocal", 
+                    System.Reflection.BindingFlags.Instance | 
+                    System.Reflection.BindingFlags.NonPublic);
+        
+        if (field != null)
+        {
+            field.SetValue(this, isLocal);
+        }
+        else
+        {
+            // Alternative approach if the field can't be found
+            // This uses the Initialize method which we know works
+            Initialize(this.PlayerId, isLocal);
+        }
+    }
 }

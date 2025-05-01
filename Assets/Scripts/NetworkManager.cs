@@ -71,12 +71,14 @@ public class NetworkManager : MonoBehaviour
     public delegate void ServerListReceivedHandler(List<GameRoom> rooms);
     public delegate void PlayerJoinedHandler(string clientId);
     public delegate void ConnectionStatusChangedHandler(NetworkConnectionState status, string message);
+    public delegate void PositionResetHandler(Vector3 newPosition);
     
     public event MessageReceivedHandler OnMessageReceived;
     public event GameDataReceivedHandler OnGameDataReceived;
     public event ServerListReceivedHandler OnServerListReceived;
     public event PlayerJoinedHandler OnPlayerJoined;
     public event ConnectionStatusChangedHandler OnConnectionStatusChanged;
+    public event PositionResetHandler OnPositionReset;
 
     private NetworkConnectionState _connectionStatus = NetworkConnectionState.Disconnected;
     public NetworkConnectionState ConnectionStatus 
@@ -421,6 +423,23 @@ public class NetworkManager : MonoBehaviour
                     case "PING_RESPONSE":
                         float pingTime = Convert.ToSingle(message["timestamp"]);
                         ProcessPingResponse(pingTime);
+                        break;
+
+                    case "RESET_POSITION":
+                        // Extract position data
+                        var posData = message["position"] as Newtonsoft.Json.Linq.JObject;
+                        if (posData != null)
+                        {
+                            Vector3 newPosition = new Vector3(
+                                Convert.ToSingle(posData["x"]),
+                                Convert.ToSingle(posData["y"]),
+                                Convert.ToSingle(posData["z"])
+                            );
+                            
+                            // Trigger an event that GameManager can listen to
+                            OnPositionReset?.Invoke(newPosition);
+                            Log($"Received position reset command to {newPosition}");
+                        }
                         break;
                 }
             });

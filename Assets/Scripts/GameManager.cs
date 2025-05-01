@@ -14,6 +14,7 @@ public class GameManager : MonoBehaviour
     public GameObject playerCarPrefab;
     public Transform[] spawnPoints;
     public float respawnHeight = 2f; // Height above spawn point
+    public int maxPlayers = 4;  // Add this for calculating spawn positions
     
     [Header("Network Settings")]
     public float syncInterval = 0.1f; // How often to send full sync (seconds)
@@ -28,6 +29,7 @@ public class GameManager : MonoBehaviour
     private float lastSyncTime;
     private float lastInputSyncTime;
     private bool gameStarted = false;
+    private GameObject localPlayerObject;
     
     void Awake()
     {
@@ -62,6 +64,19 @@ public class GameManager : MonoBehaviour
         
         // We're ready to start
         SendReadyMessage();
+    }
+
+    void OnEnable()
+    {
+        // Listen for position reset commands
+        NetworkManager.Instance.OnPositionReset += HandlePositionReset;
+    }
+
+    void OnDisable()
+    {
+        // Remove listener when disabled
+        if (NetworkManager.Instance != null)
+            NetworkManager.Instance.OnPositionReset -= HandlePositionReset;
     }
     
     private void FindSpawnPoints()
@@ -207,7 +222,7 @@ public class GameManager : MonoBehaviour
         {
             Position = new SerializableVector3(playerCar.transform.position),
             Rotation = new SerializableVector3(playerCar.transform.eulerAngles),
-            Velocity = new SerializableVector3(playerCar.Rigidbody.velocity),
+            Velocity = new SerializableVector3(playerCar.Rigidbody.linearVelocity),
             AngularVelocity = new SerializableVector3(playerCar.Rigidbody.angularVelocity),
             Timestamp = Time.time
         };
@@ -272,48 +287,54 @@ public class GameManager : MonoBehaviour
         }
     }
     
-    private void SpawnPlayer(string playerId, int spawnIndex)
+    public GameObject SpawnPlayer(string playerId, int spawnIndex = 0)
     {
-        // Determine spawn position based on debug settings
+        // Use configurable spawn positions
         Vector3 spawnPosition;
-        Quaternion spawnRotation;
         
-        if (useDebugSpawnPosition)
+        // If using debug spawn position, or this is first spawn in sequence
+        if (useDebugSpawnPosition || spawnIndex == 0)
         {
-            // Use the debug spawn position
             spawnPosition = debugSpawnPosition;
-            spawnRotation = Quaternion.identity; // Default rotation
-            Debug.Log($"Using debug spawn position {debugSpawnPosition} for player {playerId}");
         }
         else
         {
-            // Use normal spawn points
-            spawnPosition = spawnPoints[spawnIndex].position + Vector3.up * respawnHeight;
-            spawnRotation = spawnPoints[spawnIndex].rotation;
+            // Calculate different positions for additional players
+            float angle = spawnIndex * (360f / maxPlayers);
+            float radius = 5f;
+            spawnPosition = new Vector3(
+                debugSpawnPosition.x + radius * Mathf.Cos(angle * Mathf.Deg2Rad),
+                debugSpawnPosition.y,
+                debugSpawnPosition.z + radius * Mathf.Sin(angle * Mathf.Deg2Rad)
+            );
         }
         
-        // Instantiate the player car
-        GameObject playerObj = Instantiate(playerCarPrefab, spawnPosition, spawnRotation);
-        PlayerController playerController = playerObj.GetComponent<PlayerController>();
+        // Use this position when instantiating the player
+        GameObject playerObject = Instantiate(playerCarPrefab, spawnPosition, Quaternion.identity);
         
-        // Setup the player controller
-        playerController.Initialize(playerId, playerId == localPlayerId);
-        
-        // Add to active players
-        activePlayers[playerId] = playerController;
-        
-        // If this is the local player, enable its camera and disable any other cameras
-        if (playerId == localPlayerId)
+        // Set up player controller
+        PlayerController controller = playerObject.GetComponent<PlayerController>();
+        if (controller != null)
         {
-            SetupLocalPlayerCamera(playerObj);
-        }
-        else
-        {
-            // For remote players, ensure their cameras are disabled
-            DisableRemotePlayerCamera(playerObj);
+            // Initialize player controller with id and local flag
+            controller.Initialize(playerId, playerId == localPlayerId);
+            
+            activePlayers[playerId] = controller;
+            
+            // If this is the local player, set up the camera and store reference
+            if (playerId == localPlayerId) // Use direct comparison instead of property
+            {
+                SetupLocalPlayerCamera(playerObject);
+                localPlayerObject = playerObject;
+            }
+            else
+            {
+                DisableRemotePlayerCamera(playerObject);
+            }
         }
         
-        Debug.Log($"Spawned player {playerId} at position {spawnPosition}");
+        Debug.Log($"Spawned player {playerId} at position ({spawnPosition.x:F2}, {spawnPosition.y:F2}, {spawnPosition.z:F2})");
+        return playerObject;
     }
 
     private void SetupLocalPlayerCamera(GameObject playerObj)
@@ -654,5 +675,45 @@ public class GameManager : MonoBehaviour
         yield return new WaitForSeconds(2f);
         Debug.Log("Forcing test player spawn");
         TestSpawnSinglePlayer();
+    }
+
+    private void HandlePositionReset(Vector3 newPosition)
+    {
+        // Reset position of local player
+        if (localPlayerObject != null)
+        {
+            Debug.Log($"Resetting player position to {newPosition}");
+            
+            // If using a character controller:
+            var controller = localPlayerObject.GetComponent<CharacterController>();
+            if (controller != null)
+            {
+                controller.enabled = false;
+                localPlayerObject.transform.position = newPosition;
+                controller.enabled = true;
+            }
+            // If using rigidbody:
+            else
+            {
+                var rb = localPlayerObject.GetComponent<Rigidbody>();
+                if (rb != null)
+                {
+                    rb.linearVelocity = Vector3.zero;
+                    rb.angularVelocity = Vector3.zero;
+                    rb.position = newPosition;
+                }
+                else
+                {
+                    localPlayerObject.transform.position = newPosition;
+                }
+            }
+        }
+    }
+
+    // only for testing purposes
+    public void TestResetPosition()
+    {
+        // Manually trigger the position reset
+        HandlePositionReset(new Vector3(50f, 10f, 50f));
     }
 }
