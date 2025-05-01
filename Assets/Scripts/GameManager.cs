@@ -18,6 +18,10 @@ public class GameManager : MonoBehaviour
     public float syncInterval = 0.1f; // How often to send full sync (seconds)
     public float inputSyncInterval = 0.05f; // How often to send input (seconds)
     
+    [Header("Debug Options")]
+    public bool useDebugSpawnPosition = false;
+    public Vector3 debugSpawnPosition = new Vector3(50f, 10f, 50f);
+    
     private Dictionary<string, PlayerController> activePlayers = new Dictionary<string, PlayerController>();
     private string localPlayerId;
     private float lastSyncTime;
@@ -192,7 +196,7 @@ public class GameManager : MonoBehaviour
         {
             Position = playerCar.transform.position,
             Rotation = playerCar.transform.rotation.eulerAngles,
-            Velocity = playerCar.Rigidbody.linearVelocity,  // FIXED: Changed from linearVelocity to velocity
+            Velocity = playerCar.Rigidbody.velocity,  // FIXED: Changed from linearVelocity to velocity
             AngularVelocity = playerCar.Rigidbody.angularVelocity,
             Timestamp = Time.time
         };
@@ -257,8 +261,23 @@ public class GameManager : MonoBehaviour
     
     private void SpawnPlayer(string playerId, int spawnIndex)
     {
-        Vector3 spawnPosition = spawnPoints[spawnIndex].position + Vector3.up * respawnHeight;
-        Quaternion spawnRotation = spawnPoints[spawnIndex].rotation;
+        // Determine spawn position based on debug settings
+        Vector3 spawnPosition;
+        Quaternion spawnRotation;
+        
+        if (useDebugSpawnPosition)
+        {
+            // Use the debug spawn position
+            spawnPosition = debugSpawnPosition;
+            spawnRotation = Quaternion.identity; // Default rotation
+            Debug.Log($"Using debug spawn position {debugSpawnPosition} for player {playerId}");
+        }
+        else
+        {
+            // Use normal spawn points
+            spawnPosition = spawnPoints[spawnIndex].position + Vector3.up * respawnHeight;
+            spawnRotation = spawnPoints[spawnIndex].rotation;
+        }
         
         // Instantiate the player car
         GameObject playerObj = Instantiate(playerCarPrefab, spawnPosition, spawnRotation);
@@ -281,7 +300,7 @@ public class GameManager : MonoBehaviour
             DisableRemotePlayerCamera(playerObj);
         }
         
-        Debug.Log($"Spawned player {playerId} at spawn point {spawnIndex}");
+        Debug.Log($"Spawned player {playerId} at position {spawnPosition}");
     }
 
     private void SetupLocalPlayerCamera(GameObject playerObj)
