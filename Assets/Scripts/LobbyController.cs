@@ -53,14 +53,75 @@ public class LobbyController : MonoBehaviour
 
     void Start()
     {
-        // Register network events
-        NetworkManager.Instance.OnServerListReceived += HandleServerList;
-        NetworkManager.Instance.OnMessageReceived += HandleNetworkMessage;
-        NetworkManager.Instance.OnPlayerJoined += HandlePlayerJoined;
-        NetworkManager.Instance.OnConnectionStatusChanged += HandleConnectionStatusChanged;
+        // Load saved player name
+        if (PlayerPrefs.HasKey("PlayerName"))
+        {
+            localPlayerName = PlayerPrefs.GetString("PlayerName");
+            if (playerNameInput != null)
+            {
+                playerNameInput.text = localPlayerName;
+            }
+        }
         
-        // Initial refresh
-        RefreshRoomList();
+        // Register for network events
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.OnServerListReceived += HandleServerList;
+            NetworkManager.Instance.OnMessageReceived += HandleNetworkMessage;
+            NetworkManager.Instance.OnPlayerJoined += HandlePlayerJoined;
+            NetworkManager.Instance.OnConnectionStatusChanged += HandleConnectionStatusChanged;
+            
+            // Check initial connection status
+            HandleConnectionStatusChanged(NetworkManager.Instance.ConnectionStatus, string.Empty);
+        }
+        
+        // Set up UI event handlers
+        if (playerNameInput != null)
+        {
+            playerNameInput.onEndEdit.AddListener(OnNameChanged);
+        }
+        
+        if (hostButton != null)
+        {
+            hostButton.onClick.AddListener(OnHostClicked);
+        }
+        
+        if (refreshButton != null)
+        {
+            refreshButton.onClick.AddListener(() => RefreshRoomList());
+        }
+        
+        if (startButton != null)
+        {
+            startButton.onClick.AddListener(OnStartClicked);
+        }
+        
+        if (leaveButton != null)
+        {
+            leaveButton.onClick.AddListener(OnLeaveClicked);
+        }
+        
+        // Don't refresh immediately - wait for connection and use a coroutine
+        StartCoroutine(DelayedRoomRefresh());
+    }
+
+    private IEnumerator DelayedRoomRefresh()
+    {
+        // Wait for the NetworkManager to establish connection (up to 5 seconds)
+        float startTime = Time.time;
+        while (Time.time - startTime < 5.0f && 
+              (NetworkManager.Instance == null || 
+               NetworkManager.Instance.ConnectionStatus != NetworkConnectionState.Connected))
+        {
+            yield return new WaitForSeconds(0.5f);
+        }
+        
+        // Now request the game list if we're connected
+        if (NetworkManager.Instance != null && 
+            NetworkManager.Instance.ConnectionStatus == NetworkConnectionState.Connected)
+        {
+            RefreshRoomList();
+        }
     }
 
     void Update()
@@ -119,11 +180,67 @@ public class LobbyController : MonoBehaviour
 
     void OnStartClicked()
     {
+        // Check for null references
+        if (NetworkManager.Instance == null)
+        {
+            Debug.LogError("Cannot start game: NetworkManager.Instance is null");
+            return;
+        }
+        
+        if (SceneTransitionManager.Instance == null)
+        {
+            Debug.LogError("Cannot start game: SceneTransitionManager.Instance is null");
+            
+            // Try to find the SceneTransitionManager in the scene
+            SceneTransitionManager transitionManager = FindObjectOfType<SceneTransitionManager>();
+            if (transitionManager != null)
+            {
+                Debug.Log("Found SceneTransitionManager, but its Instance property is not set correctly");
+            }
+            else
+            {
+                Debug.Log("Creating SceneTransitionManager...");
+                // Try to create a SceneTransitionManager
+                GameObject managerObj = new GameObject("SceneTransitionManager");
+                transitionManager = managerObj.AddComponent<SceneTransitionManager>();
+                
+                // Wait for it to initialize
+                StartCoroutine(LoadSceneAfterManagerInitialized("GameOn"));
+                return;
+            }
+            return;
+        }
+        
         // Tell all players to load the game scene
-        NetworkManager.Instance.SendMessageToRoom($"LOAD_SCENE|OnGame");
+        NetworkManager.Instance.SendMessageToRoom($"LOAD_SCENE|GameOn");
         
         // Load locally
-        SceneTransitionManager.Instance.LoadScene("OnGame");
+        SceneTransitionManager.Instance.LoadScene("GameOn");
+    }
+
+    private IEnumerator LoadSceneAfterManagerInitialized(string sceneName)
+    {
+        // Wait for SceneTransitionManager to be initialized
+        yield return new WaitForSeconds(0.5f);
+        
+        if (SceneTransitionManager.Instance != null)
+        {
+            // Tell all players to load the game scene
+            if (NetworkManager.Instance != null)
+            {
+                NetworkManager.Instance.SendMessageToRoom($"LOAD_SCENE|{sceneName}");
+            }
+            
+            // Load locally
+            SceneTransitionManager.Instance.LoadScene(sceneName);
+        }
+        else
+        {
+            Debug.LogError("SceneTransitionManager.Instance is still null after initialization attempt");
+            
+            // Fallback: use direct scene loading
+            UnityEngine.SceneManagement.SceneManager.LoadScene(sceneName);
+        }
     }
 
     void OnLeaveClicked()
@@ -139,10 +256,19 @@ public class LobbyController : MonoBehaviour
         RefreshRoomList();
     }
 
-    void RefreshRoomList()
+    private void RefreshRoomList()
     {
-        NetworkManager.Instance.RequestGameList();
-        lastRefreshTime = Time.time;
+        // Only request game list if connected
+        if (NetworkManager.Instance != null && 
+            NetworkManager.Instance.ConnectionStatus == NetworkConnectionState.Connected)
+        {
+            NetworkManager.Instance.RequestGameList();
+            lastRefreshTime = Time.time;
+        }
+        else
+        {
+            Debug.Log("Cannot refresh room list - not connected to relay server");
+        }
     }
 
     void UpdateRoomInfo()

@@ -311,6 +311,16 @@ class RelayServer:
                                         'from': client_id,
                                         'message': message
                                     })
+        
+        elif msg_type == 'PING':
+            # Send ping response
+            timestamp = data.get('timestamp', 0)
+            with self.clients_lock:
+                if client_id in self.clients:
+                    self.send_tcp_message(self.clients[client_id]['tcp_socket'], {
+                        'type': 'PING_RESPONSE',
+                        'timestamp': timestamp
+                    })
     
     def udp_listen(self):
         """Handle incoming UDP datagrams"""
@@ -321,6 +331,20 @@ class RelayServer:
             except Exception as e:
                 print(f"UDP receive error: {e}")
     
+    def get_active_players_in_room(self, room_id):
+        """Get a list of active players in a room"""
+        if room_id not in self.game_rooms:
+            return []
+            
+        room = self.game_rooms[room_id]
+        active_players = []
+        
+        for player_id in room['players']:
+            if player_id in self.clients:
+                active_players.append(player_id)
+        
+        return active_players
+
     def handle_udp_message(self, data, addr):
         """Process a message received over UDP"""
         try:
@@ -338,6 +362,8 @@ class RelayServer:
                     # Add/update UDP endpoint info
                     self.clients[client_id]['udp_ip'] = addr[0]
                     self.clients[client_id]['udp_port'] = addr[1]
+                    # Update last heartbeat time to keep connection alive
+                    self.clients[client_id]['last_heartbeat'] = time.time()
             
             # Handle game data relay - find target and forward
             target_id = message.get('target_id')
@@ -357,20 +383,30 @@ class RelayServer:
                         self.udp_socket.sendto(json.dumps(forwarded_data).encode('utf-8'), target_addr)
             
             elif room_id:
-                # Send to all in room
+                # Send to all in room with optimized locking
+                active_players = []
+                
                 with self.rooms_lock:
                     if room_id in self.game_rooms:
-                        room = self.game_rooms[room_id]
-                        with self.clients_lock:
-                            for player_id in room['players']:
-                                if player_id != client_id and player_id in self.clients and 'udp_ip' in self.clients[player_id]:
-                                    target_addr = (self.clients[player_id]['udp_ip'], self.clients[player_id]['udp_port'])
-                                    forwarded_data = {
-                                        'type': 'GAME_DATA',
-                                        'from': client_id,
-                                        'data': game_data
-                                    }
-                                    self.udp_socket.sendto(json.dumps(forwarded_data).encode('utf-8'), target_addr)
+                        active_players = self.get_active_players_in_room(room_id)
+                
+                # Send the data outside the lock to prevent bottlenecks
+                if active_players:
+                    forwarded_data = {
+                        'type': 'GAME_DATA',
+                        'from': client_id,
+                        'data': game_data
+                    }
+                    serialized_data = json.dumps(forwarded_data).encode('utf-8')
+                    
+                    with self.clients_lock:
+                        for player_id in active_players:
+                            if player_id != client_id and player_id in self.clients and 'udp_ip' in self.clients[player_id]:
+                                target_addr = (self.clients[player_id]['udp_ip'], self.clients[player_id]['udp_port'])
+                                try:
+                                    self.udp_socket.sendto(serialized_data, target_addr)
+                                except Exception as e:
+                                    print(f"Error sending UDP data to {player_id}: {e}")
                 
         except json.JSONDecodeError:
             print(f"Invalid UDP JSON from {addr}")

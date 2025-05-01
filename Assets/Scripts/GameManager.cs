@@ -45,8 +45,39 @@ public class GameManager : MonoBehaviour
         // Get the local player ID
         localPlayerId = NetworkManager.Instance.ClientId;
         
-        // We're ready to start
-        SendReadyMessage();
+        // Check if we have a valid player ID
+        if (string.IsNullOrEmpty(localPlayerId))
+        {
+            Debug.LogWarning("Client ID not received from server yet. Will attempt to retry.");
+            StartCoroutine(WaitForClientId());
+        }
+        else
+        {
+            // We're ready to start
+            SendReadyMessage();
+        }
+    }
+    
+    private IEnumerator WaitForClientId()
+    {
+        // Wait for the client ID to be set (max 10 seconds)
+        float startTime = Time.time;
+        while (string.IsNullOrEmpty(NetworkManager.Instance.ClientId) && Time.time - startTime < 10f)
+        {
+            yield return new WaitForSeconds(0.5f);
+        }
+        
+        // Check if we got the client ID
+        localPlayerId = NetworkManager.Instance.ClientId;
+        if (!string.IsNullOrEmpty(localPlayerId))
+        {
+            Debug.Log($"Received client ID: {localPlayerId}");
+            SendReadyMessage();
+        }
+        else
+        {
+            Debug.LogError("Failed to get client ID from server after timeout.");
+        }
     }
     
     void OnDestroy()
@@ -94,7 +125,7 @@ public class GameManager : MonoBehaviour
         {
             Position = playerCar.transform.position,
             Rotation = playerCar.transform.rotation.eulerAngles,
-            Velocity = playerCar.Rigidbody.velocity,
+            Velocity = playerCar.Rigidbody.velocity,  // Changed from linearVelocity to velocity
             AngularVelocity = playerCar.Rigidbody.angularVelocity,
             Timestamp = Time.time
         };
@@ -196,23 +227,103 @@ public class GameManager : MonoBehaviour
         // Ignore our own data
         if (fromClient == localPlayerId) return;
         
-        string[] parts = jsonData.Split('|', 2);
-        if (parts.Length < 2) return;
-        
-        string dataType = parts[0];
-        string data = parts[1];
-        
-        switch (dataType)
+        try
         {
-            case "STATE":
-                // Handle full state update
-                HandlePlayerState(fromClient, data);
-                break;
-                
-            case "INPUT":
-                // Handle input update (for prediction)
-                HandlePlayerInput(fromClient, data);
-                break;
+            string[] parts = jsonData.Split('|', 2);
+            if (parts.Length < 2) return;
+            
+            string dataType = parts[0];
+            string data = parts[1];
+            
+            switch (dataType)
+            {
+                case "STATE":
+                    // Handle full state update
+                    PlayerStateData stateData = JsonConvert.DeserializeObject<PlayerStateData>(data);
+                    OptimizePlayerStateSync(fromClient, stateData);
+                    break;
+                    
+                case "INPUT":
+                    // Handle input update (for prediction)
+                    PlayerInputData inputData = JsonConvert.DeserializeObject<PlayerInputData>(data);
+                    if (activePlayers.ContainsKey(fromClient) && !activePlayers[fromClient].IsLocal)
+                    {
+                        activePlayers[fromClient].ApplyRemoteInput(inputData);
+                    }
+                    break;
+                    
+                case "EVENT":
+                    // Handle game events like respawns, powerups, etc.
+                    HandleGameEvent(fromClient, data);
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Error processing game data: {ex.Message}");
+        }
+    }
+    
+    private void OptimizePlayerStateSync(string playerId, PlayerStateData stateData)
+    {
+        // Skip sync for inactive players
+        if (!activePlayers.ContainsKey(playerId))
+            return;
+        
+        var player = activePlayers[playerId];
+        
+        // For remote players, we need to update their state
+        if (!player.IsLocal)
+        {
+            // Calculate the time since this state was generated
+            float latency = Time.time - stateData.Timestamp;
+            
+            // If we get an old state (out of order packets), ignore it
+            if (player.LastStateTimestamp > stateData.Timestamp)
+                return;
+            
+            player.LastStateTimestamp = stateData.Timestamp;
+            
+            // For small position changes, use interpolation
+            float distanceDiff = Vector3.Distance(player.transform.position, stateData.Position);
+            
+            // If the difference is too large, teleport to avoid weird movement
+            if (distanceDiff > player.desyncThreshold)
+            {
+                player.ApplyRemoteState(stateData, true); // true = force teleport
+            }
+            else
+            {
+                player.ApplyRemoteState(stateData, false); // false = use interpolation
+            }
+        }
+    }
+    
+    private void HandleGameEvent(string fromClient, string eventData)
+    {
+        try
+        {
+            Dictionary<string, object> eventInfo = JsonConvert.DeserializeObject<Dictionary<string, object>>(eventData);
+            string eventType = eventInfo["event"].ToString();
+            
+            switch (eventType)
+            {
+                case "respawn":
+                    Vector3 position = JsonUtility.FromJson<Vector3>(eventInfo["position"].ToString());
+                    Quaternion rotation = JsonUtility.FromJson<Quaternion>(eventInfo["rotation"].ToString());
+                    
+                    if (activePlayers.ContainsKey(fromClient))
+                    {
+                        activePlayers[fromClient].Respawn(position, rotation);
+                    }
+                    break;
+                    
+                // Add other event types as needed
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Error handling game event: {ex.Message}");
         }
     }
     
@@ -277,9 +388,17 @@ public class GameManager : MonoBehaviour
         playerIds.Add(localPlayerId);
         
         // Add all connected players
-        foreach (var player in NetworkManager.Instance.ConnectedPlayers)
+        var connectedPlayers = NetworkManager.Instance.ConnectedPlayers;
+        if (connectedPlayers != null)
         {
-            playerIds.Add(player.clientId);
+            foreach (var player in connectedPlayers)
+            {
+                playerIds.Add(player.clientId);
+            }
+        }
+        else
+        {
+            Debug.LogWarning("No connected players found or ConnectedPlayers is null");
         }
         
         // Serialize the player list

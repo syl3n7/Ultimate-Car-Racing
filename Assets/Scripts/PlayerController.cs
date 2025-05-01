@@ -55,6 +55,10 @@ public class PlayerController : MonoBehaviour
     
     private float lastInputChangeTime;
     private bool isInitialized = false;
+
+    // Add these properties to PlayerController
+    public float LastStateTimestamp { get; set; }
+    public float LastInputTimestamp { get; set; }
     
     void Awake()
     {
@@ -144,7 +148,7 @@ public class PlayerController : MonoBehaviour
     private void ApplyDriving()
     {
         // Apply forward/backward force
-        float currentSpeed = Vector3.Dot(Rigidbody.velocity, transform.forward);
+        float currentSpeed = Vector3.Dot(Rigidbody.linearVelocity, transform.forward);
         float speedRatio = Mathf.Clamp01(Mathf.Abs(currentSpeed) / maxSpeed);
         
         // Reduce available acceleration at higher speeds
@@ -161,7 +165,7 @@ public class PlayerController : MonoBehaviour
         if (CurrentBrake > 0)
         {
             // Apply stronger braking force when moving faster
-            Vector3 brakeForceVector = -Rigidbody.velocity.normalized * brakeForce * CurrentBrake * speedRatio;
+            Vector3 brakeForceVector = -Rigidbody.linearVelocity.normalized * brakeForce * CurrentBrake * speedRatio;
             Rigidbody.AddForce(brakeForceVector, ForceMode.Acceleration);
         }
         
@@ -179,13 +183,17 @@ public class PlayerController : MonoBehaviour
         // Apply artificial drag to limit top speed
         if (currentSpeed > maxSpeed)
         {
-            Vector3 dragForce = -Rigidbody.velocity.normalized * (currentSpeed - maxSpeed) * 0.5f;
+            Vector3 dragForce = -Rigidbody.linearVelocity.normalized * (currentSpeed - maxSpeed) * 0.5f;
             Rigidbody.AddForce(dragForce, ForceMode.Acceleration);
         }
     }
     
+    // Add interpolation factor based on network conditions
     private void SmoothRemoteTransform()
     {
+        // Calculate interpolation factor based on network conditions
+        float lerpFactor = Time.deltaTime * Mathf.Clamp(positionLerpSpeed / NetworkManager.Instance.GetAverageLatency(), 0.5f, 2.0f);
+        
         // Smooth position - but detect large desync
         if (Vector3.Distance(transform.position, targetPosition) > desyncThreshold)
         {
@@ -198,8 +206,8 @@ public class PlayerController : MonoBehaviour
         else
         {
             // Otherwise smoothly lerp
-            transform.position = Vector3.Lerp(transform.position, targetPosition, positionLerpSpeed * Time.deltaTime);
-            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationLerpSpeed * Time.deltaTime);
+            transform.position = Vector3.Lerp(transform.position, targetPosition, lerpFactor);
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, lerpFactor);
             Rigidbody.velocity = Vector3.Lerp(Rigidbody.velocity, targetVelocity, velocityLerpSpeed * Time.deltaTime);
             Rigidbody.angularVelocity = Vector3.Lerp(Rigidbody.angularVelocity, targetAngularVelocity, velocityLerpSpeed * Time.deltaTime);
         }
@@ -223,13 +231,25 @@ public class PlayerController : MonoBehaviour
         // Implement wheel rotation based on car speed in a real implementation
     }
     
-    public void ApplyRemoteState(GameManager.PlayerStateData stateData)
+    // Modify the ApplyRemoteState method to support teleporting
+    public void ApplyRemoteState(GameManager.PlayerStateData stateData, bool teleport = false)
     {
-        // Update target state for smooth interpolation
-        targetPosition = stateData.Position;
-        targetRotation = Quaternion.Euler(stateData.Rotation);
-        targetVelocity = stateData.Velocity;
-        targetAngularVelocity = stateData.AngularVelocity;
+        if (teleport)
+        {
+            // Teleport immediately to the new state
+            transform.position = stateData.Position;
+            transform.rotation = Quaternion.Euler(stateData.Rotation);
+            Rigidbody.velocity = stateData.Velocity;
+            Rigidbody.angularVelocity = stateData.AngularVelocity;
+        }
+        else
+        {
+            // Update target state for smooth interpolation
+            targetPosition = stateData.Position;
+            targetRotation = Quaternion.Euler(stateData.Rotation);
+            targetVelocity = stateData.Velocity;
+            targetAngularVelocity = stateData.AngularVelocity;
+        }
     }
     
     public void ApplyRemoteInput(GameManager.PlayerInputData inputData)
@@ -243,7 +263,7 @@ public class PlayerController : MonoBehaviour
     public void Respawn(Vector3 position, Quaternion rotation)
     {
         // Reset physics state
-        Rigidbody.velocity = Vector3.zero;
+        Rigidbody.linearVelocity = Vector3.zero;
         Rigidbody.angularVelocity = Vector3.zero;
         
         // Set new position and rotation

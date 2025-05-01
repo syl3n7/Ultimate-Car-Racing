@@ -58,6 +58,12 @@ public class NetworkManager : MonoBehaviour
     private readonly Queue<Action> mainThreadActions = new Queue<Action>();
     private float lastHeartbeatTime;
     
+    // Add these fields to NetworkManager
+    private Queue<float> latencyMeasurements = new Queue<float>(20); // Keep last 20 measurements
+    private float _averageLatency = 0.05f; // Default to 50ms
+    private float lastPingSentTime;
+    private const float PING_INTERVAL = 2.0f; // Measure latency every 2 seconds
+
     // Events
     public delegate void MessageReceivedHandler(string fromClient, string message);
     public delegate void GameDataReceivedHandler(string fromClient, string jsonData);
@@ -83,6 +89,28 @@ public class NetworkManager : MonoBehaviour
                 OnConnectionStatusChanged?.Invoke(_connectionStatus, string.Empty);
             }
         }
+    }
+
+    public string ClientId 
+    { 
+        get { return clientId; } 
+    }
+
+    public bool IsHost
+    {
+        get { return isHost; }
+    }
+
+    // Add this property to expose the connected players
+    public IReadOnlyList<RemotePlayer> ConnectedPlayers
+    {
+        get { return connectedPlayers.AsReadOnly(); }
+    }
+
+    // Add this property
+    public float GetAverageLatency()
+    {
+        return _averageLatency;
     }
 
     void Awake()
@@ -116,6 +144,14 @@ public class NetworkManager : MonoBehaviour
             SendHeartbeat();
             lastHeartbeatTime = Time.time;
         }
+
+        // Send periodic pings to measure latency
+        if (isRunning && ConnectionStatus == NetworkConnectionState.Connected && 
+            Time.time - lastPingSentTime > PING_INTERVAL)
+        {
+            SendPing();
+            lastPingSentTime = Time.time;
+        }
     }
 
     void OnDestroy()
@@ -132,6 +168,13 @@ public class NetworkManager : MonoBehaviour
     {
         try
         {
+            // Only initialize if not already running
+            if (isRunning)
+            {
+                Log("Network already initialized");
+                return;
+            }
+            
             ConnectionStatus = NetworkConnectionState.Connecting;
             
             // Initialize TCP connection
@@ -143,7 +186,13 @@ public class NetworkManager : MonoBehaviour
             {
                 try
                 {
+                    // Set a reasonable timeout for connection
+                    tcpClient.SendTimeout = 5000;
+                    tcpClient.ReceiveTimeout = 5000;
+                    
+                    // Try to connect
                     tcpClient.Connect(relayServerIP, relayTcpPort);
+                    
                     EnqueueAction(() => {
                         // We're connected, now set up the receive thread
                         SetupTcpReceive();
@@ -157,6 +206,13 @@ public class NetworkManager : MonoBehaviour
                     EnqueueAction(() => {
                         LogError($"Failed to connect to relay server: {e.Message}");
                         ConnectionStatus = NetworkConnectionState.Failed;
+                        
+                        // Make sure we clean up the TCP client if connection failed
+                        if (tcpClient != null)
+                        {
+                            tcpClient.Close();
+                            tcpClient = null;
+                        }
                     });
                 }
             });
@@ -353,6 +409,11 @@ public class NetworkManager : MonoBehaviour
                         string relayMessage = message["message"].ToString();
                         OnMessageReceived?.Invoke(fromClientId, relayMessage);
                         break;
+
+                    case "PING_RESPONSE":
+                        float pingTime = Convert.ToSingle(message["timestamp"]);
+                        ProcessPingResponse(pingTime);
+                        break;
                 }
             });
         }
@@ -528,12 +589,34 @@ public class NetworkManager : MonoBehaviour
 
     private void SendTcpMessage(Dictionary<string, object> message)
     {
-        if (!isRunning || tcpClient == null || !tcpClient.Connected)
+        // First check if we're running and have valid connections
+        if (!isRunning)
         {
-            LogError("Cannot send TCP message - disconnected");
+            LogError("Cannot send TCP message - network is not running");
             return;
         }
-            
+        
+        if (tcpClient == null)
+        {
+            LogError("Cannot send TCP message - TCP client not initialized");
+            return;
+        }
+        
+        if (!tcpClient.Connected)
+        {
+            LogError("Cannot send TCP message - TCP client not connected");
+            ConnectionStatus = NetworkConnectionState.Failed;
+            Reconnect();
+            return;
+        }
+        
+        if (tcpStream == null)
+        {
+            LogError("Cannot send TCP message - TCP stream not initialized");
+            return;
+        }
+        
+        // Now try to send the message
         try
         {
             string jsonMessage = JsonConvert.SerializeObject(message);
@@ -566,6 +649,36 @@ public class NetworkManager : MonoBehaviour
         {
             LogError($"Error sending UDP message: {e.Message}");
         }
+    }
+
+    private void SendPing()
+    {
+        SendTcpMessage(new Dictionary<string, object>
+        {
+            { "type", "PING" },
+            { "timestamp", Time.time }
+        });
+    }
+
+    private void ProcessPingResponse(float pingTime)
+    {
+        float latency = Time.time - pingTime;
+        
+        // Add to our measurements
+        latencyMeasurements.Enqueue(latency);
+        if (latencyMeasurements.Count > 20)
+            latencyMeasurements.Dequeue();
+        
+        // Recalculate average
+        float sum = 0;
+        foreach (float value in latencyMeasurements)
+            sum += value;
+        
+        _averageLatency = sum / latencyMeasurements.Count;
+        
+        // Log latency value
+        if (showDebugLogs)
+            Debug.Log($"[Network] Measured latency: {latency*1000:F1}ms, Average: {_averageLatency*1000:F1}ms");
     }
 
     private void Reconnect()

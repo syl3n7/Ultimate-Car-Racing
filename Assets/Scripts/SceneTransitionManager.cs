@@ -103,7 +103,7 @@ public class SceneTransitionManager : MonoBehaviour
         }
         
         // If we loaded the game scene, make sure necessary objects are present
-        if (sceneName == "OnGame")
+        if (sceneName == "GameOn")
         {
             EnsureGameManagerExists();
         }
