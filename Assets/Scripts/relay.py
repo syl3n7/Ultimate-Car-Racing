@@ -36,6 +36,9 @@ class RelayServer:
         self.player_positions = {}  # client_id -> {x, y, z, timestamp}
         self.player_latencies = {}  # client_id -> latency_ms
         self.player_names = {}      # client_id -> player_name
+
+        # Add spawn position tracking
+        self.room_spawn_positions = {}  # room_id -> {position_index: client_id}
         
     def start(self):
         print(f"Relay server started - TCP: 0.0.0.0:{self.tcp_port}, UDP: 0.0.0.0:{self.udp_port}")
@@ -72,15 +75,15 @@ class RelayServer:
     
     def remove_client(self, client_id):
         """Remove a client from all data structures"""
+        rooms_affected = []
+        
         with self.clients_lock:
             if client_id in self.clients:
+                # Close TCP socket and remove from clients dictionary
                 try:
-                    # Close TCP socket
                     self.clients[client_id]['tcp_socket'].close()
                 except:
                     pass
-                
-                # Remove from clients dictionary
                 del self.clients[client_id]
         
         # Remove from any game rooms
@@ -91,14 +94,20 @@ class RelayServer:
                 # If this client is the host, mark room for removal
                 if room_data['host_id'] == client_id:
                     rooms_to_remove.append(room_id)
+                    rooms_affected.append(room_id)
                 # Otherwise, just remove from player list
                 elif client_id in room_data['players']:
                     room_data['players'].remove(client_id)
+                    rooms_affected.append(room_id)
             
             # Remove any rooms where this client was the host
             for room_id in rooms_to_remove:
                 del self.game_rooms[room_id]
-                
+        
+        # Release any spawn positions this client was using
+        for room_id in rooms_affected:
+            self.release_spawn_position(room_id, client_id)
+    
     def tcp_listen(self):
         """Handle incoming TCP connections"""
         while True:
@@ -383,6 +392,61 @@ class RelayServer:
                         if len(room['players']) == 0 or room['host_id'] == client_id:
                             del self.game_rooms[room_id]
                             print(f"Room {room_id} deleted - empty or host left")
+
+        elif msg_type == 'START_GAME':
+            room_id = data.get('room_id')
+            
+            with self.rooms_lock:
+                if room_id in self.game_rooms:
+                    room = self.game_rooms[room_id]
+                    
+                    # Only the host can start the game
+                    if room['host_id'] != client_id:
+                        return
+                    
+                    # Notify all players about the game start with their positions
+                    with self.clients_lock:
+                        # First make a complete player list for everyone
+                        player_ids = room['players']
+                        
+                        for player_id in player_ids:
+                            if player_id in self.clients:
+                                # Assign a spawn position for this player
+                                spawn_position = self.assign_spawn_position(room_id, player_id)
+                                
+                                # Send the game started message with position
+                                player_data = {
+                                    'type': 'GAME_STARTED',
+                                    'player_ids': player_ids,
+                                    'spawn_position': spawn_position
+                                }
+                                self.send_tcp_message(self.clients[player_id]['tcp_socket'], player_data)
+                    
+                    print(f"Game started in room {room_id}")
+
+        elif msg_type == 'JOIN_ROOM':
+            room_id = data.get('room_id')
+            # ... existing code ...
+            
+            # If game is already running, assign a spawn position immediately
+            if room.get('game_started', False):
+                spawn_position = self.assign_spawn_position(room_id, client_id)
+                response = {
+                    'type': 'ROOM_JOINED',
+                    'room_id': room_id,
+                    'players': room['players'],
+                    'game_started': True,
+                    'spawn_position': spawn_position
+                }
+            else:
+                response = {
+                    'type': 'ROOM_JOINED',
+                    'room_id': room_id,
+                    'players': room['players'],
+                    'game_started': False
+                }
+            
+            self.send_tcp_message(client_socket, response)
     
     def udp_listen(self):
         """Handle incoming UDP datagrams"""
@@ -569,6 +633,70 @@ class RelayServer:
                 stats.append(player_info)
         
         return stats
+
+    def assign_spawn_position(self, room_id, client_id):
+        """Find the first unoccupied spawn position in a room"""
+        if room_id not in self.room_spawn_positions:
+            self.room_spawn_positions[room_id] = {}
+        
+        # Base position coordinates
+        base_x, base_y, base_z = 50.0, 10.0, 50.0
+        
+        # Find first unoccupied position index
+        position_index = 0
+        occupied_positions = self.room_spawn_positions[room_id]
+        
+        # Find the first available spot
+        while position_index in occupied_positions:
+            position_index += 1
+        
+        # Mark this position as occupied by this client
+        occupied_positions[position_index] = client_id
+        
+        # Calculate the actual position coordinates
+        spawn_position = {
+            'x': base_x + (position_index * 5.0),
+            'y': base_y,
+            'z': base_z,
+            'index': position_index  # Include the index for reference
+        }
+        
+        print(f"Assigned spawn position {position_index} to client {client_id} in room {room_id}")
+        return spawn_position
+
+    def release_spawn_position(self, room_id, client_id):
+        """Release a spawn position when a player leaves"""
+        if room_id in self.room_spawn_positions:
+            positions = self.room_spawn_positions[room_id]
+            # Find and remove any positions occupied by this client
+            positions_to_remove = [idx for idx, cid in positions.items() if cid == client_id]
+            for idx in positions_to_remove:
+                del positions[idx]
+                print(f"Released spawn position {idx} from client {client_id} in room {room_id}")
+
+    # Add a method to handle player disconnection from a room
+    def handle_player_disconnect(self, room_id, client_id):
+        # Release the spawn position
+        self.release_spawn_position(room_id, client_id)
+        
+        # Notify other players about the disconnection
+        with self.rooms_lock:
+            if room_id in self.game_rooms:
+                room = self.game_rooms[room_id]
+                # Only notify if this player was part of the room
+                if client_id in room['players']:
+                    room['players'].remove(client_id)
+                    
+                    # Tell remaining players about the disconnection
+                    message = {
+                        'type': 'PLAYER_DISCONNECTED',
+                        'player_id': client_id
+                    }
+                    
+                    with self.clients_lock:
+                        for player_id in room['players']:
+                            if player_id in self.clients:
+                                self.send_tcp_message(self.clients[player_id]['tcp_socket'], message)
 
 
 class AdminConsole(cmd.Cmd):

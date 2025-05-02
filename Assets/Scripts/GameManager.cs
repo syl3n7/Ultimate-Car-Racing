@@ -30,6 +30,10 @@ public class GameManager : MonoBehaviour
     private float lastInputSyncTime;
     private bool gameStarted = false;
     private GameObject localPlayerObject;
+
+    private Vector3 assignedSpawnPosition;
+    private int assignedSpawnIndex = -1;
+    private bool hasAssignedPosition = false;
     
     void Awake()
     {
@@ -50,7 +54,8 @@ public class GameManager : MonoBehaviour
         NetworkManager.Instance.OnMessageReceived += HandleNetworkMessage;
         NetworkManager.Instance.OnGameDataReceived += HandleGameData;
         NetworkManager.Instance.OnPositionReset += HandlePositionReset; // Ensure reset is registered here too
-        
+        NetworkManager.Instance.OnSpawnPositionAssigned += HandleSpawnPositionAssigned;
+
         // Get the local player ID immediately and log it
         localPlayerId = NetworkManager.Instance.ClientId;
         Debug.Log($"Local player ID set to: {localPlayerId}");
@@ -384,7 +389,13 @@ public class GameManager : MonoBehaviour
         // Use configurable spawn positions
         Vector3 spawnPosition;
         
-        if (useDebugSpawnPosition)
+        if (playerId == localPlayerId && hasAssignedPosition)
+        {
+            // Use the position assigned by the server
+            spawnPosition = assignedSpawnPosition;
+            Debug.Log($"Using server-assigned position for local player: {spawnPosition} (index: {assignedSpawnIndex})");
+        }
+        else if (useDebugSpawnPosition)
         {
             spawnPosition = debugSpawnPosition;
         }
@@ -968,6 +979,7 @@ public class GameManager : MonoBehaviour
             NetworkManager.Instance.OnMessageReceived -= HandleNetworkMessage;
             NetworkManager.Instance.OnGameDataReceived -= HandleGameData;
             NetworkManager.Instance.OnPositionReset -= HandlePositionReset;
+            NetworkManager.Instance.OnSpawnPositionAssigned -= HandleSpawnPositionAssigned;
         }
         
         Debug.Log("GameManager destroyed, cleaned up event handlers");
@@ -1020,5 +1032,13 @@ public class GameManager : MonoBehaviour
                 UnityEditor.Handles.Label(player.Value.transform.position + Vector3.up * 4f, player.Key);
             }
         }
+    }
+
+    private void HandleSpawnPositionAssigned(Vector3 position, int index)
+    {
+        Debug.Log($"Server assigned spawn position {index}: {position}");
+        assignedSpawnPosition = position;
+        assignedSpawnIndex = index;
+        hasAssignedPosition = true;
     }
 }

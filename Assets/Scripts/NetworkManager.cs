@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
+using Newtonsoft.Json.Linq;
 
 namespace UltimateCarRacing.Networking {
 
@@ -79,6 +80,9 @@ public class NetworkManager : MonoBehaviour
     public event PlayerJoinedHandler OnPlayerJoined;
     public event ConnectionStatusChangedHandler OnConnectionStatusChanged;
     public event PositionResetHandler OnPositionReset;
+
+    // Add to NetworkManager.cs
+    public event Action<Vector3, int> OnSpawnPositionAssigned;
 
     private NetworkConnectionState _connectionStatus = NetworkConnectionState.Disconnected;
     public NetworkConnectionState ConnectionStatus 
@@ -440,6 +444,29 @@ public class NetworkManager : MonoBehaviour
                             OnPositionReset?.Invoke(newPosition);
                             Log($"Received position reset command to {newPosition}");
                         }
+                        break;
+
+                    // Add to ProcessMessage method
+                    case "GAME_STARTED":
+                        string[] playerIds = JsonConvert.DeserializeObject<string[]>(message["player_ids"].ToString());
+                        
+                        // Get the assigned spawn position
+                        JObject spawnPosObj = (JObject)message["spawn_position"];
+                        Vector3 spawnPosition = new Vector3(
+                            spawnPosObj["x"].ToObject<float>(),
+                            spawnPosObj["y"].ToObject<float>(),
+                            spawnPosObj["z"].ToObject<float>()
+                        );
+                        int spawnIndex = spawnPosObj["index"].ToObject<int>();
+                        
+                        Debug.Log($"Game started with spawn position: {spawnPosition} (index: {spawnIndex})");
+                        
+                        // Notify the GameManager
+                        OnSpawnPositionAssigned?.Invoke(spawnPosition, spawnIndex);
+                        
+                        // Convert player IDs to string array and broadcast START_GAME message
+                        string playerIdsJson = JsonConvert.SerializeObject(playerIds);
+                        SendMessageToRoom($"START_GAME|{playerIdsJson}");
                         break;
                 }
             });
