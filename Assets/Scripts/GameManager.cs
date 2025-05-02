@@ -137,7 +137,7 @@ public class GameManager : MonoBehaviour
             point.transform.SetParent(parent.transform);
             
             // Position them in a line with some spacing
-            point.transform.position = new Vector3(i * 5f, 0.5f, 0f);
+            point.transform.position = new Vector3(i * 50f, 10f, 50f);
             
             // Make them all face the same direction
             point.transform.rotation = Quaternion.Euler(0f, 90f, 0f);
