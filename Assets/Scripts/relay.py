@@ -202,14 +202,26 @@ class RelayServer:
             max_players = data.get('max_players', 4)
             
             with self.rooms_lock:
-                room_id = f"room_{len(self.game_rooms) + 1}"
-                self.game_rooms[room_id] = {
-                    'host_id': client_id,
-                    'name': room_name,
-                    'players': [client_id],
-                    'max_players': max_players
-                }
-                
+                # Check if client already hosts a room
+                existing_room_id = None
+                for room_id, room_data in self.game_rooms.items():
+                    if room_data['host_id'] == client_id:
+                        existing_room_id = room_id
+                        break
+                        
+                if existing_room_id:
+                    print(f"Client {client_id} already hosts room {existing_room_id}, using that instead of creating new room")
+                    room_id = existing_room_id
+                else:
+                    room_id = f"room_{len(self.game_rooms) + 1}"
+                    self.game_rooms[room_id] = {
+                        'host_id': client_id,
+                        'name': room_name,
+                        'players': [client_id],
+                        'max_players': max_players
+                    }
+                    print(f"New game room created: {room_id} by {client_id}")
+                        
                 # Tell client they're now hosting
                 with self.clients_lock:
                     if client_id in self.clients:
@@ -217,8 +229,6 @@ class RelayServer:
                             'type': 'GAME_HOSTED',
                             'room_id': room_id
                         })
-                
-                print(f"New game room created: {room_id} by {client_id}")
         
         elif msg_type == 'LIST_GAMES':
             # Client wants list of available games

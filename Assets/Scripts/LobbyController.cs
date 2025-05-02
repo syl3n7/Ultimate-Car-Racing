@@ -33,6 +33,9 @@ public class LobbyController : MonoBehaviour
         new Dictionary<string, NetworkManager.GameRoom>();
     private List<string> playersInRoom = new List<string>();
 
+    private float lastRefreshRequestTime = 0f;
+    private const float MIN_REFRESH_INTERVAL = 0.5f; // Minimum seconds between refreshes
+
     void Awake()
     {
         // Initialize UI
@@ -267,16 +270,19 @@ public class LobbyController : MonoBehaviour
 
     private void RefreshRoomList()
     {
-        // Only request game list if connected
+        // Only request game list if connected and not too soon after last request
         if (NetworkManager.Instance != null && 
-            NetworkManager.Instance.ConnectionStatus == NetworkConnectionState.Connected)
+            NetworkManager.Instance.ConnectionStatus == NetworkConnectionState.Connected &&
+            Time.time - lastRefreshRequestTime > MIN_REFRESH_INTERVAL)
         {
             NetworkManager.Instance.RequestGameList();
             lastRefreshTime = Time.time;
+            lastRefreshRequestTime = Time.time;
+            Debug.Log("Sent refresh request for room list");
         }
         else
         {
-            Debug.Log("Cannot refresh room list - not connected to relay server");
+            Debug.Log($"Skipped refresh - either not connected or too soon (last: {Time.time - lastRefreshRequestTime:F1}s ago)");
         }
     }
 
@@ -423,23 +429,30 @@ public class LobbyController : MonoBehaviour
 
     void UpdateRoomListUI()
     {
-        // Clear existing entries
+        // Clear existing UI elements first
         foreach (Transform child in serverListContent)
         {
             Destroy(child.gameObject);
         }
         
-        // Create new entries
-        foreach (var room in availableRooms.Values)
+        Debug.Log($"Updating room list UI with {availableRooms.Count} rooms");
+        
+        // Create UI entries for each room
+        foreach (var roomEntry in availableRooms)
         {
-            GameObject entry = Instantiate(serverEntryPrefab, serverListContent);
-            ServerListEntry entryScript = entry.GetComponent<ServerListEntry>();
+            var room = roomEntry.Value;
             
-            if (entryScript != null)
+            // Log each room to verify there are no duplicates
+            Debug.Log($"Adding room to UI: {room.roomId} - {room.name} ({room.playerCount}/{room.maxPlayers})");
+            
+            GameObject entryObj = Instantiate(serverEntryPrefab, serverListContent);
+            ServerListEntry entry = entryObj.GetComponent<ServerListEntry>();
+            
+            if (entry != null)
             {
-                entryScript.InitializeEntry(
+                entry.InitializeEntry(
                     room.name,
-                    $"Room {room.roomId.Substring(5)}",  // "room_X" -> "Room X"
+                    room.hostId,
                     $"{room.playerCount}/{room.maxPlayers}",
                     () => JoinSelectedRoom(room.roomId)
                 );
