@@ -74,6 +74,19 @@ public class PlayerController : MonoBehaviour
     
     public void Initialize(string playerId, bool isLocal)
     {
+        // If already initialized for this player ID, just update local status if needed
+        if (isInitialized && PlayerId == playerId)
+        {
+            if (IsLocal != isLocal)
+            {
+                // Set the new local status and update camera
+                SetIsLocal(isLocal);
+                SetupCamera();
+                UnityEngine.Debug.Log($"Updated player {playerId} local status to {isLocal}");
+            }
+            return;
+        }
+        
         UnityEngine.Debug.Log($"Initializing player {playerId}, isLocal={isLocal}");
         PlayerId = playerId;
         IsLocal = isLocal;

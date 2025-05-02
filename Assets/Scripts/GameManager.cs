@@ -197,6 +197,15 @@ public class GameManager : MonoBehaviour
             SyncPlayerInput();
             lastInputSyncTime = Time.time;
         }
+
+        
+        if (Input.GetKeyDown(KeyCode.F8)) {
+            Debug.Log("Forcing local player removal for testing");
+            if (localPlayerObject != null) {
+                Destroy(localPlayerObject);
+                // Don't clean dictionaries - let the recovery handle it
+            }
+        }
     }
     
     private void SendReadyMessage()
@@ -273,37 +282,68 @@ public class GameManager : MonoBehaviour
             return;
         }
         
-        // IMPORTANT CHANGE: Keep track of which players we've already spawned
-        HashSet<string> existingPlayerIds = new HashSet<string>();
-        foreach (var kvp in activePlayers)
+        // IMPORTANT: First check for existing players that need to be preserved
+        HashSet<string> playerIdsToSpawn = new HashSet<string>(playerIds);
+        HashSet<string> existingPlayerIds = new HashSet<string>(activePlayers.Keys);
+        
+        // Log the players we're dealing with
+        Debug.Log($"Existing players: {string.Join(", ", existingPlayerIds)}");
+        Debug.Log($"Players to ensure exist: {string.Join(", ", playerIdsToSpawn)}");
+        
+        // First handle any players that need to be removed
+        List<string> playersToRemove = new List<string>();
+        foreach (string existingId in existingPlayerIds)
         {
-            existingPlayerIds.Add(kvp.Key);
+            if (!playerIdsToSpawn.Contains(existingId))
+            {
+                playersToRemove.Add(existingId);
+            }
         }
         
-        // Create a list to track which players to spawn
-        List<string> playersToSpawn = new List<string>();
+        // Remove players that shouldn't exist anymore
+        foreach (string removeId in playersToRemove)
+        {
+            Debug.Log($"Removing player that's no longer in the game: {removeId}");
+            if (activePlayers[removeId] != null)
+            {
+                Destroy(activePlayers[removeId].gameObject);
+            }
+            activePlayers.Remove(removeId);
+        }
         
-        // Log which players already exist
-        Debug.Log($"Existing players before spawn: {string.Join(", ", existingPlayerIds)}");
-        
-        // Decide which players need spawning
+        // Now, only spawn players that don't already exist
+        List<string> newPlayersToSpawn = new List<string>();
         foreach (string playerId in playerIds)
         {
-            // If the player doesn't exist yet, or their object is null, we need to spawn them
-            if (!existingPlayerIds.Contains(playerId) || activePlayers[playerId] == null)
+            if (!existingPlayerIds.Contains(playerId) || 
+                activePlayers[playerId] == null || 
+                activePlayers[playerId].gameObject == null)
             {
-                playersToSpawn.Add(playerId);
+                newPlayersToSpawn.Add(playerId);
             }
             else
             {
-                Debug.Log($"Player {playerId} already exists, skipping spawn");
+                Debug.Log($"Player {playerId} already exists with valid object, preserving");
+                
+                // Ensure local player is properly flagged as local
+                if (playerId == localPlayerId)
+                {
+                    var player = activePlayers[playerId];
+                    if (!player.IsLocal)
+                    {
+                        Debug.Log($"Fixing ownership for player {playerId} - setting to local");
+                        player.SetIsLocal(true);
+                        SetupLocalPlayerCamera(player.gameObject);
+                        localPlayerObject = player.gameObject;
+                    }
+                }
             }
         }
         
         // Now spawn only the new players
-        for (int i = 0; i < playersToSpawn.Count; i++)
+        for (int i = 0; i < newPlayersToSpawn.Count; i++)
         {
-            string playerId = playersToSpawn[i];
+            string playerId = newPlayersToSpawn[i];
             int spawnIndex = i % spawnPoints.Length; // Wrap around if more players than spawn points
             
             SpawnPlayer(playerId, spawnIndex);
@@ -447,11 +487,34 @@ public class GameManager : MonoBehaviour
                 
             case "START_GAME":
                 Debug.Log($"Start game command received with data: {(parts.Length > 1 ? parts[1] : "none")}");
-                // Game starting, spawn players
                 try {
                     string[] playerIds = JsonConvert.DeserializeObject<string[]>(parts[1]);
                     Debug.Log($"Deserialized {playerIds.Length} player IDs: {String.Join(", ", playerIds)}");
-                    SpawnPlayers(playerIds);
+                    
+                    // IMPORTANT: Only spawn if we haven't already or if the player list has changed
+                    bool shouldSpawn = !gameStarted;
+                    
+                    if (gameStarted)
+                    {
+                        // Check if the player list has changed
+                        HashSet<string> newPlayerSet = new HashSet<string>(playerIds);
+                        HashSet<string> currentPlayerSet = new HashSet<string>(activePlayers.Keys);
+                        
+                        if (!newPlayerSet.SetEquals(currentPlayerSet))
+                        {
+                            Debug.Log("Player list has changed, respawning players");
+                            shouldSpawn = true;
+                        }
+                        else
+                        {
+                            Debug.Log("Same players, no need to respawn");
+                        }
+                    }
+                    
+                    if (shouldSpawn)
+                    {
+                        SpawnPlayers(playerIds);
+                    }
                 }
                 catch (Exception ex) {
                     Debug.LogError($"Error deserializing player IDs: {ex.Message}");
@@ -786,10 +849,48 @@ public class GameManager : MonoBehaviour
             return;
         }
         
-        if (localPlayerObject == null || !activePlayers.ContainsKey(localPlayerId) || activePlayers[localPlayerId] == null)
+        bool playerMissing = localPlayerObject == null || 
+                             !activePlayers.ContainsKey(localPlayerId) || 
+                             activePlayers[localPlayerId] == null ||
+                             activePlayers[localPlayerId].gameObject == null;
+        
+        if (playerMissing)
         {
             Debug.LogWarning("Local player is missing, respawning...");
+            
+            // Clean up any existing broken references
+            if (activePlayers.ContainsKey(localPlayerId))
+            {
+                activePlayers.Remove(localPlayerId);
+            }
+            
+            // Spawn a new local player
             SpawnPlayer(localPlayerId, 0);
+        }
+        else if (!activePlayers[localPlayerId].IsLocal)
+        {
+            // Fix ownership if it's wrong
+            Debug.LogWarning("Local player exists but has wrong ownership, fixing...");
+            activePlayers[localPlayerId].SetIsLocal(true);
+            SetupLocalPlayerCamera(activePlayers[localPlayerId].gameObject);
+            localPlayerObject = activePlayers[localPlayerId].gameObject;
+        }
+    }
+
+    public void RemovePlayer(string playerId)
+    {
+        if (activePlayers.ContainsKey(playerId))
+        {
+            Debug.Log($"Removing player {playerId} from active players list");
+            
+            // Check if this is our local player
+            if (playerId == localPlayerId)
+            {
+                Debug.LogWarning("Local player was removed! Will attempt to respawn if needed.");
+                localPlayerObject = null;
+            }
+            
+            activePlayers.Remove(playerId);
         }
     }
 
