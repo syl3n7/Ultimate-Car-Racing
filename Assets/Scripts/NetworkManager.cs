@@ -904,6 +904,15 @@ public class NetworkManager : MonoBehaviour
         public int playerCount;
         public int maxPlayers;
     }
+
+    // Add to HandleGameData method:
+    private void HandleGameData(string fromClient, string jsonData)
+    {
+        // Log all incoming game data for debugging
+        Debug.Log($"Received game data from {fromClient}: {jsonData}");
+        
+        // Regular processing...
+    }
 }
 
 }

@@ -396,4 +396,15 @@ public class PlayerController : MonoBehaviour
             #endif
         }
     }
+
+    void OnDestroy()
+    {
+        Debug.Log($"[CRITICAL] PlayerController for {PlayerId} (isLocal: {IsLocal}) is being destroyed!");
+        
+        // If this is a local player being destroyed, log the stack trace
+        if (IsLocal)
+        {
+            Debug.LogError($"LOCAL PLAYER DESTROYED! Stack trace: {System.Environment.StackTrace}");
+        }
+    }
 }

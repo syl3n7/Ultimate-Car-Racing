@@ -179,6 +179,17 @@ public class GameManager : MonoBehaviour
     
     void Update()
     {
+        // Check if local player's car has gone missing
+        if (gameStarted && localPlayerObject != null)
+        {
+            if (localPlayerObject == null)
+            {
+                Debug.LogError("Local player object is null even though it was previously assigned!");
+            }
+        }
+        
+        // Rest of update code...
+        
         if (!gameStarted) return;
         
         // Periodically sync full state
@@ -262,7 +273,7 @@ public class GameManager : MonoBehaviour
     
     public void SpawnPlayers(string[] playerIds)
     {
-        Debug.Log($"SpawnPlayers called with {playerIds.Length} players");
+        Debug.Log($"SpawnPlayers called with {playerIds.Length} players: {string.Join(", ", playerIds)}");
         
         if (playerCarPrefab == null)
         {
@@ -270,10 +281,25 @@ public class GameManager : MonoBehaviour
             return;
         }
         
-        if (spawnPoints == null || spawnPoints.Length == 0)
+        // Clear any existing players first to prevent duplicates
+        bool hadPlayers = activePlayers.Count > 0;
+        if (hadPlayers)
         {
-            Debug.LogError("No spawn points available! Cannot spawn players.");
-            return;
+            Debug.Log("Clearing existing players before spawning new ones");
+            // Only destroy remote player objects, not local player
+            foreach (var kvp in activePlayers)
+            {
+                if (kvp.Key != localPlayerId && kvp.Value != null)
+                {
+                    Destroy(kvp.Value.gameObject);
+                }
+            }
+        }
+        
+        // Start with a clean dictionary if we didn't have players before
+        if (!hadPlayers)
+        {
+            activePlayers.Clear();
         }
         
         gameStarted = true;
@@ -283,6 +309,13 @@ public class GameManager : MonoBehaviour
         {
             string playerId = playerIds[i];
             int spawnIndex = i % spawnPoints.Length; // Wrap around if more players than spawn points
+            
+            // Skip if this player is already spawned (avoid respawning the local player)
+            if (activePlayers.ContainsKey(playerId) && activePlayers[playerId] != null)
+            {
+                Debug.Log($"Player {playerId} already exists, skipping spawn");
+                continue;
+            }
             
             SpawnPlayer(playerId, spawnIndex);
         }
@@ -347,30 +380,44 @@ public class GameManager : MonoBehaviour
 
     private void SetupLocalPlayerCamera(GameObject playerObj)
     {
-        // Find any camera in the scene that might be active
-        Camera[] sceneCameras = FindObjectsOfType<Camera>();
-        foreach (Camera cam in sceneCameras)
+        Debug.Log($"Setting up camera for local player: {localPlayerId}");
+        
+        // Find the camera on the player object
+        Camera playerCamera = playerObj.GetComponentInChildren<Camera>(true);
+        if (playerCamera == null)
         {
-            // Disable any camera that's not on our player car
-            if (!cam.transform.IsChildOf(playerObj.transform))
-            {
-                cam.gameObject.SetActive(false);
-            }
+            Debug.LogError("No camera found on player car prefab!");
+            return;
         }
         
-        // Find and enable the camera on the player car
-        Camera playerCamera = playerObj.GetComponentInChildren<Camera>();
-        if (playerCamera != null)
+        // Activate this camera
+        playerCamera.gameObject.SetActive(true);
+        playerCamera.tag = "MainCamera";
+        
+        // Disable all other cameras in the scene
+        Camera[] allCameras = FindObjectsOfType<Camera>();
+        foreach (Camera cam in allCameras)
         {
-            playerCamera.gameObject.SetActive(true);
-            playerCamera.tag = "MainCamera";
+            // Skip the player's camera
+            if (cam == playerCamera) continue;
             
-            Debug.Log("Activated local player camera");
+            // Otherwise disable this camera
+            cam.gameObject.SetActive(false);
+            Debug.Log($"Disabled camera: {cam.gameObject.name}");
+        }
+        
+        // Make sure audio listener is set up
+        AudioListener audioListener = playerCamera.GetComponent<AudioListener>();
+        if (audioListener == null)
+        {
+            playerCamera.gameObject.AddComponent<AudioListener>();
         }
         else
         {
-            Debug.LogWarning("No camera found on player car prefab!");
+            audioListener.enabled = true;
         }
+        
+        Debug.Log($"Local player camera activated: {playerCamera.gameObject.name}");
     }
 
     private void DisableRemotePlayerCamera(GameObject playerObj)
@@ -408,7 +455,7 @@ public class GameManager : MonoBehaviour
                 // Game starting, spawn players
                 try {
                     string[] playerIds = JsonConvert.DeserializeObject<string[]>(parts[1]);
-                    Debug.Log($"Deserialized {playerIds.Length} player IDs: {string.Join(", ", playerIds)}");
+                    Debug.Log($"Deserialized {playerIds.Length} player IDs: {string.join(", ", playerIds)}");
                     SpawnPlayers(playerIds);
                 }
                 catch (Exception ex) {
@@ -592,28 +639,31 @@ public class GameManager : MonoBehaviour
         // Get all player IDs from NetworkManager
         List<string> playerIds = new List<string>();
         
-        // Add the host
+        // Always add the local player ID first
+        Debug.Log($"Adding local player to spawn list: {localPlayerId}");
         playerIds.Add(localPlayerId);
-        Debug.Log($"Adding host to player list: {localPlayerId}");
         
-        // Add all connected players
+        // Add all connected players from NetworkManager
         var connectedPlayers = NetworkManager.Instance.ConnectedPlayers;
         foreach (var player in connectedPlayers)
         {
-            // Make sure we don't add duplicates
-            if (!playerIds.Contains(player.clientId))
-            {
-                playerIds.Add(player.clientId);
-                Debug.Log($"Adding remote player: {player.clientId}");
-            }
+            // Skip if this is our own ID (already added)
+            if (player.clientId == localPlayerId)
+                continue;
+                
+            // Add this remote player
+            Debug.Log($"Adding remote player to spawn list: {player.clientId}");
+            playerIds.Add(player.clientId);
         }
         
-        // Serialize and send player list
+        // Log the complete player list for debugging
+        Debug.Log($"Starting game with {playerIds.Count} players: {string.Join(", ", playerIds)}");
+        
+        // Serialize and send player list to all clients
         string playersJson = JsonConvert.SerializeObject(playerIds.ToArray());
-        Debug.Log($"Starting game with players: {playersJson}");
         NetworkManager.Instance.SendMessageToRoom($"START_GAME|{playersJson}");
         
-        // Start locally
+        // Start the game locally
         SpawnPlayers(playerIds.ToArray());
     }
     
@@ -718,5 +768,15 @@ public class GameManager : MonoBehaviour
     {
         // Manually trigger the position reset
         HandlePositionReset(new Vector3(50f, 10f, 50f));
+    }
+
+    private void OnConnectionStatusChanged(NetworkConnectionState status, string message)
+    {
+        if (status == NetworkConnectionState.Connected)
+        {
+            // When connected, get our client ID
+            localPlayerId = NetworkManager.Instance.ClientId;
+            Debug.Log($"Connected to server! Local player ID: {localPlayerId}");
+        }
     }
 }

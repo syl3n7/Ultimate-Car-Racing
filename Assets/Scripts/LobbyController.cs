@@ -486,4 +486,51 @@ public class LobbyController : MonoBehaviour
         playersInRoom.Add(localPlayerName);
         UpdateRoomInfo();
     }
+
+    private void OnStartGameClicked()
+    {
+        // Wait a moment to ensure all clients are ready
+        StartCoroutine(StartWithDelay());
+    }
+
+    private IEnumerator StartWithDelay()
+    {
+        // Wait a moment to let messages propagate
+        yield return new WaitForSeconds(1.0f);
+        
+        // Send starting message to all players
+        NetworkManager.Instance.SendMessageToRoom("STARTING_GAME");
+        
+        // Wait a bit more before actually starting
+        yield return new WaitForSeconds(1.0f);
+        
+        // Only the host needs to send the START_GAME command
+        if (NetworkManager.Instance.IsHost)
+        {
+            // The GameManager will handle this message and spawn players
+            List<string> playerIds = new List<string>();
+            
+            // Add the host
+            playerIds.Add(NetworkManager.Instance.ClientId);
+            
+            // Add all connected players
+            foreach (var player in NetworkManager.Instance.ConnectedPlayers)
+            {
+                if (!playerIds.Contains(player.clientId))
+                {
+                    playerIds.Add(player.clientId);
+                }
+            }
+            
+            // Log the player list
+            Debug.Log($"Starting game with players: {string.Join(", ", playerIds)}");
+            
+            // Send this to all clients
+            string playersJson = JsonConvert.SerializeObject(playerIds.ToArray());
+            NetworkManager.Instance.SendMessageToRoom($"START_GAME|{playersJson}");
+        }
+        
+        // Load game scene
+        SceneManager.LoadScene(gameSceneName);
+    }
 }
