@@ -257,8 +257,21 @@ public class LobbyController : MonoBehaviour
 
     void OnLeaveClicked()
     {
-        // Tell all players the room is closed
-        NetworkManager.Instance.SendMessageToRoom("ROOM_CLOSED");
+        // Only the host should tell others the room is closed
+        if (NetworkManager.Instance.IsHost)
+        {
+            // Tell all players the room is closed
+            NetworkManager.Instance.SendMessageToRoom("ROOM_CLOSED");
+            Debug.Log("Host closed room, notifying all players");
+        }
+        else
+        {
+            // Non-host players just leave silently
+            Debug.Log("Client leaving room");
+        }
+        
+        // Explicitly leave the room on the server
+        NetworkManager.Instance.LeaveRoom();
         
         // Return to lobby
         roomPanel.SetActive(false);

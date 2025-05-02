@@ -847,6 +847,27 @@ public class NetworkManager : MonoBehaviour
         Log("Disconnected from relay server");
     }
 
+    public void LeaveRoom()
+    {
+        if (string.IsNullOrEmpty(currentRoomId))
+            return;
+            
+        // Send explicit LEAVE_ROOM message to server
+        SendTcpMessage(new Dictionary<string, object>
+        {
+            { "type", "LEAVE_ROOM" },
+            { "room_id", currentRoomId }
+        });
+        
+        // Reset local room state
+        string oldRoomId = currentRoomId;
+        currentRoomId = null;
+        isHost = false;
+        connectedPlayers.Clear();
+        
+        Log($"Left room: {oldRoomId}");
+    }
+
     private void EnqueueAction(Action action)
     {
         lock (queueLock)

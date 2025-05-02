@@ -365,6 +365,24 @@ class RelayServer:
                     'z': position.get('z', 0),
                     'timestamp': time.time()
                 }
+
+        elif msg_type == 'LEAVE_ROOM':
+            # Client wants to leave a room
+            room_id = data.get('room_id')
+            
+            with self.rooms_lock:
+                if room_id in self.game_rooms:
+                    room = self.game_rooms[room_id]
+                    
+                    # Remove client from player list
+                    if client_id in room['players']:
+                        room['players'].remove(client_id)
+                        print(f"Client {client_id} left room {room_id}")
+                        
+                        # If room is now empty or host left, remove the room
+                        if len(room['players']) == 0 or room['host_id'] == client_id:
+                            del self.game_rooms[room_id]
+                            print(f"Room {room_id} deleted - empty or host left")
     
     def udp_listen(self):
         """Handle incoming UDP datagrams"""
