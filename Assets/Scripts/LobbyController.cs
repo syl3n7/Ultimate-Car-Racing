@@ -5,6 +5,8 @@ using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using UltimateCarRacing.Networking;
+using Newtonsoft.Json;
+using UnityEngine.SceneManagement; 
 public class LobbyController : MonoBehaviour
 {
     [Header("UI References")]
@@ -503,7 +505,7 @@ public class LobbyController : MonoBehaviour
         
         // Wait a bit more before actually starting
         yield return new WaitForSeconds(1.0f);
-        
+
         // Only the host needs to send the START_GAME command
         if (NetworkManager.Instance.IsHost)
         {
@@ -523,7 +525,7 @@ public class LobbyController : MonoBehaviour
             }
             
             // Log the player list
-            Debug.Log($"Starting game with players: {string.Join(", ", playerIds)}");
+            Debug.Log($"Starting game with players: {String.Join(", ", playerIds)}");
             
             // Send this to all clients
             string playersJson = JsonConvert.SerializeObject(playerIds.ToArray());

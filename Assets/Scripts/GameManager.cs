@@ -455,7 +455,7 @@ public class GameManager : MonoBehaviour
                 // Game starting, spawn players
                 try {
                     string[] playerIds = JsonConvert.DeserializeObject<string[]>(parts[1]);
-                    Debug.Log($"Deserialized {playerIds.Length} player IDs: {string.join(", ", playerIds)}");
+                    Debug.Log($"Deserialized {playerIds.Length} player IDs: {String.Join(", ", playerIds)}");
                     SpawnPlayers(playerIds);
                 }
                 catch (Exception ex) {
