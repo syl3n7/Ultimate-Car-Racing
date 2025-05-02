@@ -59,12 +59,11 @@ public class NetworkManager : MonoBehaviour
     private readonly object queueLock = new object();
     private readonly Queue<Action> mainThreadActions = new Queue<Action>();
     private float lastHeartbeatTime;
-    
-    // Add these fields to NetworkManager
     private Queue<float> latencyMeasurements = new Queue<float>(20); // Keep last 20 measurements
     private float _averageLatency = 0.05f; // Default to 50ms
     private float lastPingSentTime;
     private const float PING_INTERVAL = 2.0f; // Measure latency every 2 seconds
+    private bool gameStarted = false;
 
     // Events
     public delegate void MessageReceivedHandler(string fromClient, string message);
@@ -464,9 +463,20 @@ public class NetworkManager : MonoBehaviour
                         // Notify the GameManager
                         OnSpawnPositionAssigned?.Invoke(spawnPosition, spawnIndex);
                         
-                        // Convert player IDs to string array and broadcast START_GAME message
-                        string playerIdsJson = JsonConvert.SerializeObject(playerIds);
-                        SendMessageToRoom($"START_GAME|{playerIdsJson}");
+                        // ONLY send START_GAME if this is the first time we're joining
+                        // This prevents re-spawning when new players join an existing game
+                        if (!gameStarted) {
+                            string playerIdsJson = JsonConvert.SerializeObject(playerIds);
+                            SendMessageToRoom($"START_GAME|{playerIdsJson}");
+                            gameStarted = true;
+                        }
+                        break;
+                        
+                    // Handle START_GAME relay message here
+                    case "START_GAME":
+                        // Process the START_GAME message that's relayed from another client
+                        // This happens after GAME_STARTED is received from the server
+                        gameStarted = true;
                         break;
                 }
             });
@@ -939,6 +949,36 @@ public class NetworkManager : MonoBehaviour
         Debug.Log($"Received game data from {fromClient}: {jsonData}");
         
         // Regular processing...
+    }
+
+    public void SpawnPlayers(string[] playerIds)
+    {
+        Debug.Log($"SpawnPlayers called with {playerIds.Length} players: {string.Join(", ", playerIds)}");
+        
+        // IMPORTANT: First check if we need to spawn at all
+        if (gameStarted)
+        {
+            // Check if all players in playerIds already exist 
+            bool allPlayersExist = true;
+            foreach (string playerId in playerIds)
+            {
+                if (!activePlayers.ContainsKey(playerId) || 
+                    activePlayers[playerId] == null || 
+                    activePlayers[playerId].gameObject == null)
+                {
+                    allPlayersExist = false;
+                    break;
+                }
+            }
+            
+            if (allPlayersExist)
+            {
+                Debug.Log("All players already exist, skipping spawn");
+                return;
+            }
+        }
+        
+        // Rest of your existing SpawnPlayers method...
     }
 }
 
