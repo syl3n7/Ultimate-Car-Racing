@@ -172,12 +172,10 @@ public class GameManager : MonoBehaviour
     void Update()
     {
         // Check if local player's car has gone missing
-        if (gameStarted && localPlayerObject != null)
+        if (gameStarted && localPlayerObject == null)
         {
-            if (localPlayerObject == null)
-            {
-                Debug.LogError("Local player object is null even though it was previously assigned!");
-            }
+            Debug.LogWarning("Local player object is missing! Attempting recovery...");
+            EnsureLocalPlayerExists();
         }
         
         // Rest of update code...
