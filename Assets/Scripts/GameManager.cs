@@ -129,21 +129,27 @@ public class GameManager : MonoBehaviour
         // Create a parent object for organization
         GameObject parent = new GameObject("SpawnPoints");
         
-        // Create 4 spawn points in a line
+        // Create 4 spawn points with proper spacing
         spawnPoints = new Transform[4];
         for (int i = 0; i < 4; i++)
         {
             GameObject point = new GameObject($"SpawnPoint{i+1}");
             point.transform.SetParent(parent.transform);
             
-            // Position them in a line with some spacing
-            point.transform.position = new Vector3(i * 50f, 10f, 50f);
+            // Position them with the first at (50, 10, 50) and 5 unit increments
+            point.transform.position = new Vector3(50f + (i * 5f), 10f, 50f);
             
             // Make them all face the same direction
             point.transform.rotation = Quaternion.Euler(0f, 90f, 0f);
             
             spawnPoints[i] = point.transform;
         }
+        
+        Debug.Log("Created default spawn points at: " +
+                  "1:(50, 10, 50), " +
+                  "2:(55, 10, 50), " +
+                  "3:(60, 10, 50), " +
+                  "4:(65, 10, 50)");
     }
     
     private IEnumerator WaitForClientId()
