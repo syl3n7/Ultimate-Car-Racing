@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UltimateCarRacing.Networking;
+using System.Diagnostics;
 
 [RequireComponent(typeof(Rigidbody))]
 public class PlayerController : MonoBehaviour
@@ -73,7 +74,7 @@ public class PlayerController : MonoBehaviour
     
     public void Initialize(string playerId, bool isLocal)
     {
-        Debug.Log($"Initializing player {playerId}, isLocal={isLocal}");
+        UnityEngine.Debug.Log($"Initializing player {playerId}, isLocal={isLocal}");
         PlayerId = playerId;
         IsLocal = isLocal;
         isInitialized = true;
@@ -89,7 +90,7 @@ public class PlayerController : MonoBehaviour
         if (renderer != null)
         {
             renderer.material.color = IsLocal ? Color.blue : Color.red;
-            Debug.Log($"Setting car color for {playerId} to {(IsLocal ? "blue" : "red")}");
+            UnityEngine.Debug.Log($"Setting car color for {playerId} to {(IsLocal ? "blue" : "red")}");
         }
         else
         {
@@ -99,7 +100,7 @@ public class PlayerController : MonoBehaviour
             {
                 childRenderer.material.color = IsLocal ? Color.blue : Color.red;
             }
-            Debug.Log($"Set {childRenderers.Length} child renderers for {playerId}");
+            UnityEngine.Debug.Log($"Set {childRenderers.Length} child renderers for {playerId}");
         }
         
         // Setup camera
@@ -147,7 +148,7 @@ public class PlayerController : MonoBehaviour
         // First verify this is truly the local player
         if (!IsLocal)
         {
-            Debug.LogWarning($"HandleInput called on non-local player {PlayerId}");
+            UnityEngine.Debug.LogWarning($"HandleInput called on non-local player {PlayerId}");
             return;
         }
 
@@ -309,14 +310,14 @@ public class PlayerController : MonoBehaviour
         
         if (carCamera != null)
         {
-            Debug.Log($"Found camera on {PlayerId}, isLocal={IsLocal}");
+            UnityEngine.Debug.Log($"Found camera on {PlayerId}, isLocal={IsLocal}");
             
             // If this is the local player, activate the camera
             if (IsLocal)
             {
                 carCamera.gameObject.SetActive(true);
                 carCamera.tag = "MainCamera";
-                Debug.Log($"Activated camera for local player {PlayerId}");
+                UnityEngine.Debug.Log($"Activated camera for local player {PlayerId}");
                 
                 // Disable any audio listeners on other cameras
                 AudioListener[] listeners = FindObjectsOfType<AudioListener>();
@@ -338,14 +339,14 @@ public class PlayerController : MonoBehaviour
                 {
                     // Add an audio listener if it doesn't exist
                     carCamera.gameObject.AddComponent<AudioListener>();
-                    Debug.Log("Added missing AudioListener to player camera");
+                    UnityEngine.Debug.Log("Added missing AudioListener to player camera");
                 }
             }
             else
             {
                 // Disable camera on remote player cars
                 carCamera.gameObject.SetActive(false);
-                Debug.Log($"Disabled camera for remote player {PlayerId}");
+                UnityEngine.Debug.Log($"Disabled camera for remote player {PlayerId}");
                 
                 // Disable any audio listener
                 AudioListener audioListener = carCamera.GetComponent<AudioListener>();
@@ -357,7 +358,7 @@ public class PlayerController : MonoBehaviour
         }
         else
         {
-            Debug.LogWarning($"No camera found on player {PlayerId}!");
+            UnityEngine.Debug.LogWarning($"No camera found on player {PlayerId}!");
         }
     }
 
@@ -399,12 +400,19 @@ public class PlayerController : MonoBehaviour
 
     void OnDestroy()
     {
-        Debug.Log($"[CRITICAL] PlayerController for {PlayerId} (isLocal: {IsLocal}) is being destroyed!");
-        
+        UnityEngine.Debug.Log($"[CRITICAL] PlayerController for {PlayerId} (isLocal: {IsLocal}) is being destroyed!");
+    
         // If this is a local player being destroyed, log the stack trace
         if (IsLocal)
         {
-            Debug.LogError($"LOCAL PLAYER DESTROYED! Stack trace: {System.Environment.StackTrace}");
+            UnityEngine.Debug.LogError($"LOCAL PLAYER DESTROYED! Stack trace:\n{System.Environment.StackTrace}");
+            
+            // Also log who is calling Destroy
+            StackTrace stackTrace = new StackTrace(true);
+            foreach (StackFrame frame in stackTrace.GetFrames())
+            {
+                UnityEngine.Debug.LogError($"Frame: {frame.GetMethod().Name} in {frame.GetFileName()} at line {frame.GetFileLineNumber()}");
+            }
         }
     }
 }

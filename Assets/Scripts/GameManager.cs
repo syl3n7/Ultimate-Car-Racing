@@ -168,14 +168,6 @@ public class GameManager : MonoBehaviour
         }
     }
     
-    void OnDestroy()
-    {
-        if (NetworkManager.Instance != null)
-        {
-            NetworkManager.Instance.OnMessageReceived -= HandleNetworkMessage;
-            NetworkManager.Instance.OnGameDataReceived -= HandleGameData;
-        }
-    }
     
     void Update()
     {
@@ -281,44 +273,43 @@ public class GameManager : MonoBehaviour
             return;
         }
         
-        // Clear any existing players first to prevent duplicates
-        bool hadPlayers = activePlayers.Count > 0;
-        if (hadPlayers)
+        // IMPORTANT CHANGE: Keep track of which players we've already spawned
+        HashSet<string> existingPlayerIds = new HashSet<string>();
+        foreach (var kvp in activePlayers)
         {
-            Debug.Log("Clearing existing players before spawning new ones");
-            // Only destroy remote player objects, not local player
-            foreach (var kvp in activePlayers)
+            existingPlayerIds.Add(kvp.Key);
+        }
+        
+        // Create a list to track which players to spawn
+        List<string> playersToSpawn = new List<string>();
+        
+        // Log which players already exist
+        Debug.Log($"Existing players before spawn: {string.Join(", ", existingPlayerIds)}");
+        
+        // Decide which players need spawning
+        foreach (string playerId in playerIds)
+        {
+            // If the player doesn't exist yet, or their object is null, we need to spawn them
+            if (!existingPlayerIds.Contains(playerId) || activePlayers[playerId] == null)
             {
-                if (kvp.Key != localPlayerId && kvp.Value != null)
-                {
-                    Destroy(kvp.Value.gameObject);
-                }
+                playersToSpawn.Add(playerId);
             }
-        }
-        
-        // Start with a clean dictionary if we didn't have players before
-        if (!hadPlayers)
-        {
-            activePlayers.Clear();
-        }
-        
-        gameStarted = true;
-        
-        // Find a spawn point for each player
-        for (int i = 0; i < playerIds.Length; i++)
-        {
-            string playerId = playerIds[i];
-            int spawnIndex = i % spawnPoints.Length; // Wrap around if more players than spawn points
-            
-            // Skip if this player is already spawned (avoid respawning the local player)
-            if (activePlayers.ContainsKey(playerId) && activePlayers[playerId] != null)
+            else
             {
                 Debug.Log($"Player {playerId} already exists, skipping spawn");
-                continue;
             }
+        }
+        
+        // Now spawn only the new players
+        for (int i = 0; i < playersToSpawn.Count; i++)
+        {
+            string playerId = playersToSpawn[i];
+            int spawnIndex = i % spawnPoints.Length; // Wrap around if more players than spawn points
             
             SpawnPlayer(playerId, spawnIndex);
         }
+        
+        gameStarted = true;
     }
     
     public GameObject SpawnPlayer(string playerId, int spawnIndex = 0)
@@ -390,8 +381,10 @@ public class GameManager : MonoBehaviour
             return;
         }
         
-        // Activate this camera
+        // First enable the camera object in case it was disabled
         playerCamera.gameObject.SetActive(true);
+        
+        // Set the tag - this will make it the main camera
         playerCamera.tag = "MainCamera";
         
         // Disable all other cameras in the scene
@@ -401,8 +394,11 @@ public class GameManager : MonoBehaviour
             // Skip the player's camera
             if (cam == playerCamera) continue;
             
-            // Otherwise disable this camera
+            // Otherwise disable this camera and its audio listener
             cam.gameObject.SetActive(false);
+            AudioListener otherListener = cam.GetComponent<AudioListener>();
+            if (otherListener) otherListener.enabled = false;
+            
             Debug.Log($"Disabled camera: {cam.gameObject.name}");
         }
         
@@ -410,12 +406,11 @@ public class GameManager : MonoBehaviour
         AudioListener audioListener = playerCamera.GetComponent<AudioListener>();
         if (audioListener == null)
         {
-            playerCamera.gameObject.AddComponent<AudioListener>();
+            audioListener = playerCamera.gameObject.AddComponent<AudioListener>();
         }
-        else
-        {
-            audioListener.enabled = true;
-        }
+        
+        // Make sure it's enabled
+        audioListener.enabled = true;
         
         Debug.Log($"Local player camera activated: {playerCamera.gameObject.name}");
     }
@@ -468,6 +463,9 @@ public class GameManager : MonoBehaviour
                 RespawnPlayer(fromClient);
                 break;
         }
+
+        // After processing any network messages that might affect player spawn
+        EnsureLocalPlayerExists();
     }
     
     private void HandleGameData(string fromClient, string jsonData)
@@ -778,5 +776,33 @@ public class GameManager : MonoBehaviour
             localPlayerId = NetworkManager.Instance.ClientId;
             Debug.Log($"Connected to server! Local player ID: {localPlayerId}");
         }
+    }
+
+    private void EnsureLocalPlayerExists()
+    {
+        if (string.IsNullOrEmpty(localPlayerId))
+        {
+            Debug.LogWarning("Cannot ensure local player exists - localPlayerId is null");
+            return;
+        }
+        
+        if (localPlayerObject == null || !activePlayers.ContainsKey(localPlayerId) || activePlayers[localPlayerId] == null)
+        {
+            Debug.LogWarning("Local player is missing, respawning...");
+            SpawnPlayer(localPlayerId, 0);
+        }
+    }
+
+    void OnDestroy()
+    {
+        // Clean up event handlers to prevent memory leaks
+        if (NetworkManager.Instance != null)
+        {
+            NetworkManager.Instance.OnMessageReceived -= HandleNetworkMessage;
+            NetworkManager.Instance.OnGameDataReceived -= HandleGameData;
+            NetworkManager.Instance.OnPositionReset -= HandlePositionReset;
+        }
+        
+        Debug.Log("GameManager destroyed, cleaned up event handlers");
     }
 }
