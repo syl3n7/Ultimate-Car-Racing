@@ -428,4 +428,31 @@ public class PlayerController : MonoBehaviour
             }
         }
     }
+
+    // Add a version of OnGUI to the PlayerController
+    void OnGUI()
+    {
+        // Only show for the local player or if in debug mode
+        if (!IsLocal) return;
+        
+        // Display connection and sync stats at the bottom of the screen
+        GUIStyle style = new GUIStyle();
+        style.normal.textColor = Color.yellow;
+        style.fontSize = 12;
+        style.padding = new RectOffset(5, 5, 5, 5);
+        
+        string latency = NetworkManager.Instance != null ? 
+            $"{NetworkManager.Instance.GetAverageLatency() * 1000:F0}ms" : "N/A";
+        
+        GUI.Box(new Rect(10, Screen.height - 70, 300, 60), "");
+        
+        GUI.Label(new Rect(15, Screen.height - 65, 290, 20),
+            $"Network Stats: Latency: {latency}", style);
+        
+        GUI.Label(new Rect(15, Screen.height - 45, 290, 20),
+            $"Players: {PlayerId} (Local: {IsLocal})", style);
+        
+        GUI.Label(new Rect(15, Screen.height - 25, 290, 20),
+            $"Position: {transform.position.ToString("F1")}", style);
+    }
 }

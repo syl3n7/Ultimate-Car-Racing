@@ -204,6 +204,26 @@ public class GameManager : MonoBehaviour
                 // Don't clean dictionaries - let the recovery handle it
             }
         }
+
+        // Add this to Update method, right after the F8 test
+        if (Input.GetKeyDown(KeyCode.F9)) {
+            Debug.Log("Checking for missing players...");
+            
+            // Log connected players from NetworkManager
+            if (NetworkManager.Instance != null) {
+                var players = NetworkManager.Instance.ConnectedPlayers;
+                Debug.Log($"Connected players according to NetworkManager: {players.Count}");
+                foreach (var player in players) {
+                    Debug.Log($"Player: {player.clientId}");
+                    
+                    // Check if this player exists in our dictionary
+                    if (!activePlayers.ContainsKey(player.clientId)) {
+                        Debug.Log($"Player {player.clientId} is connected but not spawned! Spawning now...");
+                        SpawnPlayer(player.clientId);
+                    }
+                }
+            }
+        }
     }
     
     private void SendReadyMessage()
@@ -241,8 +261,8 @@ public class GameManager : MonoBehaviour
         // Use the configured settings when serializing
         string jsonData = JsonConvert.SerializeObject(playerState, settings);
         
-        // Send the data to other players
-        NetworkManager.Instance.SendGameDataToRoom(jsonData);
+        // Send the data to other players - CRITICAL FIX: properly format as STATE
+        NetworkManager.Instance.SendGameDataToRoom($"STATE|{jsonData}");
     }
     
     private void SyncPlayerInput()
@@ -358,13 +378,20 @@ public class GameManager : MonoBehaviour
         // Use configurable spawn positions
         Vector3 spawnPosition;
         
-        if (useDebugSpawnPosition || spawnIndex == 0)
+        if (useDebugSpawnPosition)
         {
             spawnPosition = debugSpawnPosition;
         }
+        else if (spawnPoints != null && spawnPoints.Length > 0)
+        {
+            // Use actual spawn points if available
+            int actualIndex = spawnIndex % spawnPoints.Length;
+            spawnPosition = spawnPoints[actualIndex].position + Vector3.up * respawnHeight;
+            Debug.Log($"Using spawn point {actualIndex} for player {playerId}");
+        }
         else
         {
-            // Calculate different positions for additional players
+            // Fallback to debug position with offset based on index
             float angle = spawnIndex * (360f / maxPlayers);
             float radius = 5f;
             spawnPosition = new Vector3(
@@ -372,6 +399,7 @@ public class GameManager : MonoBehaviour
                 debugSpawnPosition.y,
                 debugSpawnPosition.z + radius * Mathf.Sin(angle * Mathf.Deg2Rad)
             );
+            Debug.Log($"Using calculated spawn position for player {playerId}");
         }
         
         // Create the player object
@@ -536,8 +564,15 @@ public class GameManager : MonoBehaviour
         
         try
         {
+            // Add debugging to see what's being received
+            Debug.Log($"Received game data from {fromClient}: {jsonData.Substring(0, Mathf.Min(50, jsonData.Length))}...");
+            
             string[] parts = jsonData.Split('|', 2);
-            if (parts.Length < 2) return;
+            if (parts.Length < 2) 
+            {
+                Debug.LogWarning($"Invalid game data format from {fromClient}: {jsonData}");
+                return;
+            }
             
             string dataType = parts[0];
             string data = parts[1];
@@ -546,6 +581,7 @@ public class GameManager : MonoBehaviour
             {
                 case "STATE":
                     // Handle full state update
+                    Debug.Log($"Processing STATE data from {fromClient}");
                     PlayerStateData stateData = JsonConvert.DeserializeObject<PlayerStateData>(data);
                     OptimizePlayerStateSync(fromClient, stateData);
                     break;
@@ -563,19 +599,34 @@ public class GameManager : MonoBehaviour
                     // Handle game events like respawns, powerups, etc.
                     HandleGameEvent(fromClient, data);
                     break;
+                    
+                default:
+                    Debug.LogWarning($"Unknown data type: {dataType} from {fromClient}");
+                    break;
             }
         }
         catch (Exception ex)
         {
-            Debug.LogError($"Error processing game data: {ex.Message}");
+            Debug.LogError($"Error processing game data from {fromClient}: {ex.Message}\nData: {jsonData}");
         }
     }
     
     private void OptimizePlayerStateSync(string playerId, PlayerStateData stateData)
     {
-        // Skip sync for inactive players
-        if (!activePlayers.ContainsKey(playerId))
+        // Skip if this is our own data (shouldn't happen but just in case)
+        if (playerId == localPlayerId)
             return;
+        
+        // IMPORTANT: If we get data for a player that doesn't exist, spawn them
+        if (!activePlayers.ContainsKey(playerId))
+        {
+            Debug.Log($"Received state data for unknown player {playerId}. Spawning them now.");
+            SpawnPlayer(playerId);
+            
+            // Since we just spawned them, we need a small delay before applying state
+            StartCoroutine(ApplyStateAfterDelay(playerId, stateData, 0.1f));
+            return;
+        }
         
         var player = activePlayers[playerId];
         
@@ -603,6 +654,17 @@ public class GameManager : MonoBehaviour
             {
                 player.ApplyRemoteState(stateData, false); // false = use interpolation
             }
+        }
+    }
+
+    private IEnumerator ApplyStateAfterDelay(string playerId, PlayerStateData stateData, float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        
+        if (activePlayers.ContainsKey(playerId))
+        {
+            var player = activePlayers[playerId];
+            player.ApplyRemoteState(stateData, true); // Force teleport for first state
         }
     }
     
@@ -903,5 +965,54 @@ public class GameManager : MonoBehaviour
         }
         
         Debug.Log("GameManager destroyed, cleaned up event handlers");
+    }
+
+    void OnGUI()
+    {
+        // Add simple UI to show active players
+        GUIStyle style = new GUIStyle();
+        style.normal.textColor = Color.white;
+        style.fontSize = 14;
+        style.fontStyle = FontStyle.Bold;
+        
+        // Draw a background box
+        GUI.Box(new Rect(10, 10, 300, 25 + activePlayers.Count * 25), "");
+        
+        // Draw title
+        GUI.Label(new Rect(15, 15, 290, 20), "Active Players:", style);
+        
+        // List all active players
+        int i = 0;
+        foreach (var player in activePlayers)
+        {
+            string status = player.Value != null ? "Active" : "NULL";
+            string localTag = player.Key == localPlayerId ? " (LOCAL)" : "";
+            string posInfo = player.Value != null ? $" at {player.Value.transform.position}" : "";
+            
+            GUI.Label(new Rect(15, 40 + i * 25, 290, 20), 
+                $"{player.Key}{localTag}: {status}{posInfo}", style);
+            i++;
+        }
+    }
+
+    void OnDrawGizmos()
+    {
+        // Only draw in play mode
+        if (!Application.isPlaying) return;
+        
+        // Draw spheres at player positions for better visibility
+        foreach (var player in activePlayers)
+        {
+            if (player.Value != null)
+            {
+                // Draw a colored sphere above each player
+                Gizmos.color = player.Key == localPlayerId ? Color.blue : Color.red;
+                Gizmos.DrawSphere(player.Value.transform.position + Vector3.up * 3f, 1f);
+                
+                // Draw player ID as text
+                UnityEditor.Handles.color = Color.white;
+                UnityEditor.Handles.Label(player.Value.transform.position + Vector3.up * 4f, player.Key);
+            }
+        }
     }
 }
