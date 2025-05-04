@@ -1027,9 +1027,12 @@ public class GameManager : MonoBehaviour
                 Gizmos.color = player.Key == localPlayerId ? Color.blue : Color.red;
                 Gizmos.DrawSphere(player.Value.transform.position + Vector3.up * 3f, 1f);
                 
+                // Only use UnityEditor.Handles in the editor
+                #if UNITY_EDITOR
                 // Draw player ID as text
                 UnityEditor.Handles.color = Color.white;
                 UnityEditor.Handles.Label(player.Value.transform.position + Vector3.up * 4f, player.Key);
+                #endif
             }
         }
     }
