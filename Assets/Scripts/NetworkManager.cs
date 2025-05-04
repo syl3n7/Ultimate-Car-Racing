@@ -126,6 +126,15 @@ public class NetworkManager : MonoBehaviour
         get { return _averageLatency; } 
     }
 
+    // Add this public property
+    public string CurrentRoomId
+    {
+        get { return currentRoomId; }
+    }
+
+    // Add this field declaration near the top of the NetworkManager class, in the field declarations area
+    private Dictionary<string, GameObject> activePlayers = new Dictionary<string, GameObject>();
+
     void Awake()
     {
         if (Instance == null)
@@ -716,6 +725,22 @@ public class NetworkManager : MonoBehaviour
             ConnectionStatus = NetworkConnectionState.Failed;
             Reconnect();
         }
+    }
+
+    // public overload method with a different signature
+    public void SendTcpMessage(string messageType, Dictionary<string, object> messageData)
+    {
+        // Create the full message dictionary
+        Dictionary<string, object> fullMessage = new Dictionary<string, object>(messageData);
+        
+        // Add or update the message type
+        if (fullMessage.ContainsKey("type"))
+            fullMessage["type"] = messageType;
+        else
+            fullMessage.Add("type", messageType);
+        
+        // Call the existing private method
+        SendTcpMessage(fullMessage);
     }
 
     private void SendUdpMessage(Dictionary<string, object> message)

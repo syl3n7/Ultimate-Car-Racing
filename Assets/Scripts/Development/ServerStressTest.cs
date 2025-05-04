@@ -102,7 +102,9 @@ namespace UltimateCarRacing.Development
 
         private void StartStressTest()
         {
-            if (isStressTestRunning || !NetworkManager.Instance.IsConnected)
+            // Check connection using the ConnectionStatus property that exists in NetworkManager
+            if (isStressTestRunning || NetworkManager.Instance == null || 
+                NetworkManager.Instance.ConnectionStatus != UltimateCarRacing.Networking.NetworkConnectionState.Connected)
                 return;
                 
             int botCount = Mathf.RoundToInt(botsSlider.value);
@@ -136,13 +138,15 @@ namespace UltimateCarRacing.Development
             isStressTestRunning = true;
             
             // Tell the server we're starting a stress test
-            Dictionary<string, object> startMessage = new Dictionary<string, object>
+            // Use SendMessageToRoom instead of SendTcpMessage
+            Dictionary<string, object> startMessageData = new Dictionary<string, object>
             {
                 { "type", "STRESS_TEST_START" },
                 { "bot_count", botCount }
             };
             
-            NetworkManager.Instance.SendTcpMessage(startMessage);
+            string startMessage = JsonConvert.SerializeObject(startMessageData);
+            NetworkManager.Instance.SendMessageToRoom(startMessage);
             
             // Wait for bot creation confirmation
             yield return new WaitForSeconds(1.0f);
@@ -154,20 +158,14 @@ namespace UltimateCarRacing.Development
                 foreach (string botId in botClientIds)
                 {
                     // Create a message with random data to simulate payload
-                    Dictionary<string, object> message = new Dictionary<string, object>
+                    Dictionary<string, object> messageData = new Dictionary<string, object>
                     {
-                        { "type", "STRESS_TEST_MESSAGE" },
                         { "from_bot", botId },
                         { "data", generatedData }
                     };
-                    
-                    // Send to room (will reach all bots)
-                    if (NetworkManager.Instance.CurrentRoomId != null)
-                    {
-                        message["room_id"] = NetworkManager.Instance.CurrentRoomId;
-                        NetworkManager.Instance.SendMessageToRoom(JsonConvert.SerializeObject(message));
-                        messagesSent++;
-                    }
+
+                    NetworkManager.Instance.SendTcpMessage("STRESS_TEST_MESSAGE", messageData);
+                    messagesSent++;
                 }
                 
                 yield return new WaitForSeconds(messageInterval);
@@ -177,12 +175,13 @@ namespace UltimateCarRacing.Development
         private IEnumerator CleanupBots()
         {
             // Tell server to clean up bots
-            Dictionary<string, object> stopMessage = new Dictionary<string, object>
+            Dictionary<string, object> stopMessageData = new Dictionary<string, object>
             {
                 { "type", "STRESS_TEST_STOP" }
             };
             
-            NetworkManager.Instance.SendTcpMessage(stopMessage);
+            string stopMessage = JsonConvert.SerializeObject(stopMessageData);
+            NetworkManager.Instance.SendMessageToRoom(stopMessage);
             
             // Wait for confirmation
             yield return new WaitForSeconds(1.0f);
