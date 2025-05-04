@@ -1,4 +1,4 @@
-# Ultimate Car Racing - Relay Server
+# Ultimate Car Racing - Server
 
 ![Game Server](https://img.shields.io/badge/Game%20Server-Racing-brightgreen)
 ![Python](https://img.shields.io/badge/Python-3.7%2B-blue)
@@ -6,7 +6,7 @@
 
 ## Overview
 
-The Race Relay Server is a high-performance networking server designed to facilitate multiplayer racing games. It provides both TCP and UDP communication channels for game clients, handling player connections, game room management, position synchronization, and message relaying between players.
+The Ultimate Car Racing Server is a high-performance networking server designed to facilitate multiplayer racing games. It provides both TCP and UDP communication channels for game clients, handling player connections, game room management, position synchronization, and message relaying between players.
 
 ## Features
 
