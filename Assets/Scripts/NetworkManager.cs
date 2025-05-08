@@ -63,7 +63,6 @@ public class NetworkManager : MonoBehaviour
     private float _averageLatency = 0.05f; // Default to 50ms
     private float lastPingSentTime;
     private const float PING_INTERVAL = 2.0f; // Measure latency every 2 seconds
-    private bool gameStarted = false;
 
     // Events
     public delegate void MessageReceivedHandler(string fromClient, string message);
@@ -462,7 +461,8 @@ public class NetworkManager : MonoBehaviour
                         }
                         break;
 
-                    // Add to ProcessMessage method
+                    // In the ProcessTcpMessage method, update all references to gameStarted:
+
                     case "GAME_STARTED":
                         string[] playerIds = JsonConvert.DeserializeObject<string[]>(message["player_ids"].ToString());
                         
@@ -482,19 +482,19 @@ public class NetworkManager : MonoBehaviour
                         
                         // ONLY send START_GAME if this is the first time we're joining
                         // This prevents re-spawning when new players join an existing game
-                        if (!gameStarted) {
+                        if (!this.gameStarted) {
                             string playerIdsJson = JsonConvert.SerializeObject(playerIds);
                             SendMessageToRoom($"START_GAME|{playerIdsJson}");
-                            gameStarted = true;
+                            this.gameStarted = true;
                         }
                         
-                        gameStarted = true;
+                        this.gameStarted = true;
                         break;
                         
                     // Handle START_GAME relay message here
                     case "START_GAME":
                         // Process the START_GAME message that's relayed from another client
-                        gameStarted = true;
+                        this.gameStarted = true;
                         break;
                 }
             });
