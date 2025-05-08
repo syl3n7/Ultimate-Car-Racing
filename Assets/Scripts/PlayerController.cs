@@ -9,18 +9,28 @@ public class PlayerController : MonoBehaviour
 {
     [Header("Car Settings")]
     public float maxSpeed = 30f;
-    public float acceleration = 10f;
-    public float brakeForce = 15f;
-    public float steeringSpeed = 100f;
-    public float steeringAngle = 35f;
-    public Transform centerOfMass;
-    
-    [Header("Wheels")]
-    public Transform frontLeftWheel;
-    public Transform frontRightWheel;
-    public Transform rearLeftWheel;
-    public Transform rearRightWheel;
-    
+    public float acceleration = 150f; // Adjusted torque value
+    public float brakeForce = 300f;    // Adjusted brake power
+    public float steeringAngle = 35f;  // Maximum steer angle in degrees
+
+    [Header("Custom Wheels")]
+    public CustomWheel frontLeftCustomWheel;  // Reference to the CustomWheel script on FL_Wheel_Physics
+    public CustomWheel frontRightCustomWheel; // Reference to the CustomWheel script on FR_Wheel_Physics
+    public CustomWheel rearLeftCustomWheel;   // Reference to the CustomWheel script on RL_Wheel_Physics
+    public CustomWheel rearRightCustomWheel;  // Reference to the CustomWheel script on RR_Wheel_Physics
+
+    [Header("Wheel Transforms")]
+    public Transform frontLeftWheel;  // Reference to FL_Wheel_Visual
+    public Transform frontRightWheel; // Reference to FR_Wheel_Visual
+    public Transform rearLeftWheel;   // Reference to RL_Wheel_Visual
+    public Transform rearRightWheel;  // Reference to RR_Wheel_Visual
+
+    [Header("Suspension Settings")]
+    public float suspensionDistance = 0.3f;
+    public float springStrength = 30000f;
+    public float damperStrength = 3000f;
+    public float wheelRadius = 0.37f;
+
     [Header("Visual")]
     public GameObject driverModel;
     public TextMesh playerNameText;
@@ -30,8 +40,8 @@ public class PlayerController : MonoBehaviour
     public float rotationLerpSpeed = 10f;
     public float velocityLerpSpeed = 5f;
     public float inputSmoothing = 0.2f;
-    public float desyncThreshold = 5f; // Teleport if more than this distance off
-    
+    public float desyncThreshold = 5f; // Teleport if too far off
+
     // Expose these for the GameManager to read/write
     public Rigidbody Rigidbody { get; private set; }
     public bool IsLocal { get; private set; }
@@ -49,15 +59,15 @@ public class PlayerController : MonoBehaviour
     private Vector3 targetVelocity;
     private Vector3 targetAngularVelocity;
     
-    // Smoothed input values for remote players
+    // Smoothed input values for prediction
     private float targetThrottle;
     private float targetSteering;
     private float targetBrake;
     
     private float lastInputChangeTime;
     private bool isInitialized = false;
-
-    // Add these properties to PlayerController
+    
+    // Network sync properties
     public float LastStateTimestamp { get; set; }
     public float LastInputTimestamp { get; set; }
     
@@ -65,21 +75,23 @@ public class PlayerController : MonoBehaviour
     {
         Rigidbody = GetComponent<Rigidbody>();
         
-        // Set center of mass
-        if (centerOfMass != null)
-        {
-            Rigidbody.centerOfMass = centerOfMass.localPosition;
-        }
+        // Set a lower center of mass
+        Rigidbody.centerOfMass = new Vector3(0, -0.5f, 0);
+        
+        // Increase gravity effect on the car
+        Rigidbody.useGravity = true;
+        Physics.gravity = new Vector3(0, -20.0f, 0); // Double gravity
+        
+        // Setup all wheels with the centralized settings
+        SetupWheels();
     }
-    
+
     public void Initialize(string playerId, bool isLocal)
     {
-        // If already initialized for this player ID, just update local status if needed
         if (isInitialized && PlayerId == playerId)
         {
             if (IsLocal != isLocal)
             {
-                // Set the new local status and update camera
                 SetIsLocal(isLocal);
                 SetupCamera();
                 UnityEngine.Debug.Log($"Updated player {playerId} local status to {isLocal}");
@@ -92,37 +104,27 @@ public class PlayerController : MonoBehaviour
         IsLocal = isLocal;
         isInitialized = true;
         
-        // Setup visual appearance
         if (playerNameText != null)
         {
             playerNameText.text = playerId;
         }
         
-        // Set distinct colors for better visibility
+        // Set colors for visibility
         Renderer renderer = GetComponent<Renderer>();
         if (renderer != null)
         {
             renderer.material.color = IsLocal ? Color.blue : Color.red;
-            UnityEngine.Debug.Log($"Setting car color for {playerId} to {(IsLocal ? "blue" : "red")}");
         }
         else
         {
-            // If the main object doesn't have a renderer, try to find renderers in children
-            Renderer[] childRenderers = GetComponentsInChildren<Renderer>();
-            foreach (Renderer childRenderer in childRenderers)
+            foreach (Renderer childRenderer in GetComponentsInChildren<Renderer>())
             {
                 childRenderer.material.color = IsLocal ? Color.blue : Color.red;
             }
-            UnityEngine.Debug.Log($"Set {childRenderers.Length} child renderers for {playerId}");
         }
         
-        // Setup camera
         SetupCamera();
-        
-        // Set the name of the player object
         gameObject.name = IsLocal ? $"LocalCar_{playerId}" : $"RemoteCar_{playerId}";
-        
-        // Force wake up the Rigidbody
         Rigidbody.WakeUp();
     }
     
@@ -132,16 +134,13 @@ public class PlayerController : MonoBehaviour
         
         if (IsLocal)
         {
-            // Handle local player input
             HandleInput();
         }
         else
         {
-            // Smooth remote player position and rotation
             SmoothRemoteTransform();
         }
         
-        // Update wheel visuals
         UpdateWheels();
     }
     
@@ -151,14 +150,12 @@ public class PlayerController : MonoBehaviour
         
         if (IsLocal)
         {
-            // Apply physics to local player
             ApplyDriving();
         }
     }
     
     private void HandleInput()
     {
-        // First verify this is truly the local player
         if (!IsLocal)
         {
             UnityEngine.Debug.LogWarning($"HandleInput called on non-local player {PlayerId}");
@@ -169,12 +166,10 @@ public class PlayerController : MonoBehaviour
         float prevSteering = CurrentSteering;
         float prevBrake = CurrentBrake;
         
-        // Get input
         CurrentThrottle = Input.GetAxis("Vertical");
         CurrentSteering = Input.GetAxis("Horizontal");
         CurrentBrake = Input.GetKey(KeyCode.Space) ? 1f : 0f;
         
-        // Check if input has changed significantly
         if (Mathf.Abs(CurrentThrottle - prevThrottle) > 0.05f ||
             Mathf.Abs(CurrentSteering - prevSteering) > 0.05f ||
             Mathf.Abs(CurrentBrake - prevBrake) > 0.05f)
@@ -184,59 +179,216 @@ public class PlayerController : MonoBehaviour
         }
     }
     
+    // Replace the existing ApplyDriving method with this custom implementation
     private void ApplyDriving()
     {
-        // Apply forward/backward force
-        float currentSpeed = Vector3.Dot(Rigidbody.linearVelocity, transform.forward);
-        float speedRatio = Mathf.Clamp01(Mathf.Abs(currentSpeed) / maxSpeed);
+        if (Rigidbody == null) return;
         
-        // Reduce available acceleration at higher speeds
-        float availableAcceleration = acceleration * (1f - speedRatio * 0.5f);
+        float throttleInput = CurrentThrottle;
+        float steeringInput = CurrentSteering;
+        float brakeInput = CurrentBrake;
         
-        // Apply acceleration force
-        if (CurrentThrottle != 0)
+        // Get local velocity for determining forward/sideways motion
+        Vector3 localVelocity = transform.InverseTransformDirection(Rigidbody.linearVelocity);
+        
+        // Calculate the car's forward speed
+        float currentSpeed = localVelocity.z;
+        float normalizedSpeed = Mathf.Clamp01(Mathf.Abs(currentSpeed) / maxSpeed);
+        
+        // Apply steering forces - the faster you go, the less you can steer
+        Vector3 steeringDirectionInitial = transform.right * steeringInput * (1.0f - normalizedSpeed * 0.5f);
+        
+        // Calculate wheel positions for force application
+        Vector3 flPos = frontLeftWheel.position;
+        Vector3 frPos = frontRightWheel.position;
+        Vector3 rlPos = rearLeftWheel.position;
+        Vector3 rrPos = rearRightWheel.position;
+        
+        // Visualize rotation of wheels based on steering
+        if (frontLeftWheel != null && frontRightWheel != null)
         {
-            Vector3 accelerationForce = transform.forward * CurrentThrottle * availableAcceleration;
-            Rigidbody.AddForce(accelerationForce, ForceMode.Acceleration);
-        }
-        
-        // Apply braking
-        if (CurrentBrake > 0)
-        {
-            // Apply stronger braking force when moving faster
-            Vector3 brakeForceVector = -Rigidbody.linearVelocity.normalized * brakeForce * CurrentBrake * speedRatio;
-            Rigidbody.AddForce(brakeForceVector, ForceMode.Acceleration);
-        }
-        
-        // Apply steering
-        if (CurrentSteering != 0)
-        {
-            // Reduce steering effectiveness at higher speeds
-            float steeringEffectiveness = Mathf.Lerp(1f, 0.5f, speedRatio);
-            float turnAmount = CurrentSteering * steeringAngle * steeringEffectiveness;
+            // Determine the correct rotation axis for steering
+            Vector3 steerAxis = Vector3.up; // Default world up axis
             
-            // Apply torque for steering
-            Rigidbody.AddTorque(transform.up * turnAmount * steeringSpeed * Time.fixedDeltaTime, ForceMode.Acceleration);
+            // Apply steering rotation around the correct axis
+            Quaternion steerRotation = Quaternion.AngleAxis(steeringInput * steeringAngle, steerAxis);
+            
+            // Apply the rotation to the wheel transforms
+            // Note: We're using localRotation if the wheels are children of the car
+            frontLeftWheel.localRotation = steerRotation;
+            frontRightWheel.localRotation = steerRotation;
+            
+            // Visualize steering axis
+            UnityEngine.Debug.DrawRay(frontLeftWheel.position, steerAxis * 0.5f, Color.yellow);
         }
         
-        // Apply artificial drag to limit top speed
-        if (currentSpeed > maxSpeed)
+        // Ground check and suspension (simplified)
+        bool flGrounded = IsWheelGrounded(flPos, out Vector3 flNormal);
+        bool frGrounded = IsWheelGrounded(frPos, out Vector3 frNormal);
+        bool rlGrounded = IsWheelGrounded(rlPos, out Vector3 rlNormal);
+        bool rrGrounded = IsWheelGrounded(rrPos, out Vector3 rrNormal);
+        
+        // Calculate wheel rotations for visual effect
+        float wheelRadius = 0.37f; // FIXED: Use consistent wheel radius
+        float wheelCircumference = 2f * Mathf.PI * wheelRadius;
+        float wheelRotationSpeed = (currentSpeed / wheelCircumference) * 360f;
+        
+        // Apply driving force (rear wheel drive)
+        if (rlGrounded || rrGrounded)
         {
-            Vector3 dragForce = -Rigidbody.linearVelocity.normalized * (currentSpeed - maxSpeed) * 0.5f;
-            Rigidbody.AddForce(dragForce, ForceMode.Acceleration);
+            // Apply driving force at the rear wheels
+            Vector3 driveForce = transform.forward * throttleInput * acceleration;
+            
+            // Reduce force based on speed to implement max speed
+            float speedFactor = 1.0f - Mathf.Clamp01(Mathf.Abs(currentSpeed) / maxSpeed);
+            driveForce *= speedFactor;
+            
+            if (rlGrounded) Rigidbody.AddForceAtPosition(driveForce, rlPos, ForceMode.Force);
+            if (rrGrounded) Rigidbody.AddForceAtPosition(driveForce, rrPos, ForceMode.Force);
         }
+        
+        // Apply steering forces (front wheels)
+        if (flGrounded || frGrounded)
+        {
+            // Calculate steering direction based on car's current orientation
+            Vector3 steeringDirection = transform.right * steeringInput; 
+            
+            // Calculate steering force based on car's forward direction and steering input
+            Vector3 steeringForce = Vector3.Cross(steeringDirection.normalized, Vector3.up) * acceleration * 0.3f;
+            
+            // Debug visualization
+            UnityEngine.Debug.DrawRay(transform.position, steeringDirection, Color.cyan);
+            UnityEngine.Debug.DrawRay(transform.position, steeringForce, Color.magenta);
+            
+            if (flGrounded) Rigidbody.AddForceAtPosition(steeringForce, flPos, ForceMode.Force);
+            if (frGrounded) Rigidbody.AddForceAtPosition(steeringForce, frPos, ForceMode.Force);
+        }
+        
+        // Apply braking force to all wheels
+        if (brakeInput > 0)
+        {
+            // Braking force is applied opposite to velocity direction
+            Vector3 brakeForceVector = -Rigidbody.linearVelocity.normalized * brakeForce * brakeInput;
+            
+            if (flGrounded) Rigidbody.AddForceAtPosition(brakeForceVector, flPos, ForceMode.Force);
+            if (frGrounded) Rigidbody.AddForceAtPosition(brakeForceVector, frPos, ForceMode.Force);
+            if (rlGrounded) Rigidbody.AddForceAtPosition(brakeForceVector, rlPos, ForceMode.Force);
+            if (rrGrounded) Rigidbody.AddForceAtPosition(brakeForceVector, rrPos, ForceMode.Force);
+        }
+        
+        // Apply friction/grip forces
+        ApplyWheelFriction(flPos, flGrounded, flNormal);
+        ApplyWheelFriction(frPos, frGrounded, frNormal);
+        ApplyWheelFriction(rlPos, rlGrounded, rlNormal);
+        ApplyWheelFriction(rrPos, rrGrounded, rrNormal);
+        
+        // Apply downforce (increases with speed)
+        float downforce = 3000f + (normalizedSpeed * 2000f); // Constant base downforce + speed-based component
+        Rigidbody.AddForce(-transform.up * downforce, ForceMode.Force);
+
+        // Add stabilization torque to prevent tipping
+        Vector3 carUp = transform.up;
+        Vector3 worldUp = Vector3.up;
+        float rightDot = Vector3.Dot(carUp, worldUp);
+        float stabilizationFactor = 1.0f - rightDot; // 0 when upright, 1 when sideways
+
+        if (stabilizationFactor > 0.1f) // Only apply when tilting
+        {
+            // Calculate stabilization torque (tries to align car up with world up)
+            Vector3 stabilizationTorque = Vector3.Cross(carUp, worldUp) * stabilizationFactor * 5000f;
+            Rigidbody.AddTorque(stabilizationTorque, ForceMode.Force);
+            
+            // Debug visualization
+            UnityEngine.Debug.DrawRay(transform.position, stabilizationTorque.normalized * 2f, Color.magenta);
+        }
+
+        // Add this to your ApplyDriving method:
+
+        // Calculate wheel spin based on car's velocity
+        float forwardSpeed = Vector3.Dot(Rigidbody.linearVelocity, transform.forward);
+        // Reuse the existing wheelCircumference variable
+        float rotationSpeed = (forwardSpeed / wheelCircumference) * 360f; // Degrees per second
+
+        // Apply rotation to wheels - properly using the wheel's own forward axis
+        if (frontLeftWheel != null) 
+            frontLeftWheel.Rotate(frontLeftWheel.right, rotationSpeed * Time.fixedDeltaTime, Space.World);
+        if (frontRightWheel != null)
+            frontRightWheel.Rotate(frontRightWheel.right, rotationSpeed * Time.fixedDeltaTime, Space.World);
+        if (rearLeftWheel != null)
+            rearLeftWheel.Rotate(rearLeftWheel.right, rotationSpeed * Time.fixedDeltaTime, Space.World);
+        if (rearRightWheel != null)
+            rearRightWheel.Rotate(rearRightWheel.right, rotationSpeed * Time.fixedDeltaTime, Space.World);
+    }
+
+    // Helper method to check if a wheel is touching the ground
+    private bool IsWheelGrounded(Vector3 wheelPosition, out Vector3 groundNormal)
+    {
+        float rayDistance = 1.0f;
+        int layerMask = 1 << 3; // Use ONLY the ground layer (layer 3)
+        
+        RaycastHit hit;
+        // FIXED: Use Vector3.down instead of -transform.up to ensure consistent Y-axis checking
+        if (Physics.Raycast(wheelPosition, Vector3.down, out hit, rayDistance, layerMask))
+        {
+            groundNormal = hit.normal;
+            UnityEngine.Debug.DrawLine(wheelPosition, hit.point, Color.green);
+            return true;
+        }
+        
+        // Second raycast is already world space
+        if (Physics.Raycast(wheelPosition, Vector3.down, out hit, rayDistance, layerMask))
+        {
+            groundNormal = hit.normal;
+            UnityEngine.Debug.DrawLine(wheelPosition, hit.point, Color.yellow);
+            return true;
+        }
+        
+        groundNormal = Vector3.up;
+        return false;
+    }
+
+    // Apply friction to keep the car from sliding sideways
+    private void ApplyWheelFriction(Vector3 wheelPosition, bool isGrounded, Vector3 groundNormal)
+    {
+        if (!isGrounded) return;
+        
+        // Get the local velocity at the wheel position
+        Vector3 wheelVelocity = Rigidbody.GetPointVelocity(wheelPosition);
+        Vector3 wheelLocalVel = transform.InverseTransformDirection(wheelVelocity);
+        
+        // Calculate lateral (sideways) velocity component
+        Vector3 lateralVelocity = transform.right * wheelLocalVel.x;
+        
+        // Calculate friction force (opposite to lateral velocity)
+        float frictionCoefficient = 2.0f; // Increased from 0.5f
+        Vector3 frictionForce = -lateralVelocity * frictionCoefficient * Rigidbody.mass;
+        
+        // Apply the friction force at the wheel position
+        Rigidbody.AddForceAtPosition(frictionForce, wheelPosition, ForceMode.Force);
+    }
+
+    // Spin the wheel mesh based on current speed
+    private void RotateWheel(Transform wheel, float rotationSpeed)
+    {
+        if (wheel == null) return;
+        
+        // Add rotation around local X axis (forward motion)
+        wheel.Rotate(rotationSpeed * Time.deltaTime, 0, 0, Space.Self);
+    }
+
+    // Replace the UpdateWheels method with this simplified version
+    private void UpdateWheels()
+    {
+        // We're now handling wheel visual updates manually in ApplyDriving
+        // This method could be removed or used for additional wheel effects
     }
     
-    // Add interpolation factor based on network conditions
+    // For remote players – smooth transforms (unchanged)
     private void SmoothRemoteTransform()
     {
-        // Calculate interpolation factor based on network conditions
-        float lerpFactor = Time.deltaTime * Mathf.Clamp(positionLerpSpeed / NetworkManager.Instance.GetAverageLatency(), 0.5f, 2.0f);
-        
-        // Smooth position - but detect large desync
+        float lerpFactor = Time.deltaTime * positionLerpSpeed;
         if (Vector3.Distance(transform.position, targetPosition) > desyncThreshold)
         {
-            // Teleport if desync is too large
             transform.position = targetPosition;
             Rigidbody.linearVelocity = targetVelocity;
             transform.rotation = targetRotation;
@@ -244,30 +396,64 @@ public class PlayerController : MonoBehaviour
         }
         else
         {
-            // Otherwise smoothly lerp
             transform.position = Vector3.Lerp(transform.position, targetPosition, lerpFactor);
             transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, lerpFactor);
             Rigidbody.linearVelocity = Vector3.Lerp(Rigidbody.linearVelocity, targetVelocity, velocityLerpSpeed * Time.deltaTime);
             Rigidbody.angularVelocity = Vector3.Lerp(Rigidbody.angularVelocity, targetAngularVelocity, velocityLerpSpeed * Time.deltaTime);
         }
         
-        // Smooth input values for prediction
         CurrentThrottle = Mathf.Lerp(CurrentThrottle, targetThrottle, inputSmoothing);
         CurrentSteering = Mathf.Lerp(CurrentSteering, targetSteering, inputSmoothing);
         CurrentBrake = Mathf.Lerp(CurrentBrake, targetBrake, inputSmoothing);
     }
     
-    private void UpdateWheels()
+    public void SetupCamera()
     {
-        // Update wheel visuals based on steering and speed
-        if (frontLeftWheel != null && frontRightWheel != null)
+        Camera carCamera = GetComponentInChildren<Camera>(true);
+        if (carCamera != null)
         {
-            // Front wheels turn with steering
-            frontLeftWheel.localRotation = Quaternion.Euler(0, CurrentSteering * steeringAngle, 0);
-            frontRightWheel.localRotation = Quaternion.Euler(0, CurrentSteering * steeringAngle, 0);
+            UnityEngine.Debug.Log($"Found camera on {PlayerId}, isLocal={IsLocal}");
+            
+            if (IsLocal)
+            {
+                carCamera.gameObject.SetActive(true);
+                carCamera.tag = "MainCamera";
+                AudioListener[] listeners = FindObjectsOfType<AudioListener>();
+                foreach (AudioListener listener in listeners)
+                {
+                    if (listener.gameObject != carCamera.gameObject)
+                        listener.enabled = false;
+                }
+                AudioListener carAudioListener = carCamera.GetComponent<AudioListener>();
+                if (carAudioListener != null)
+                    carAudioListener.enabled = true;
+                else
+                    carCamera.gameObject.AddComponent<AudioListener>();
+            }
+            else
+            {
+                carCamera.gameObject.SetActive(false);
+                AudioListener audioListener = carCamera.GetComponent<AudioListener>();
+                if (audioListener != null)
+                    audioListener.enabled = false;
+            }
         }
+        else
+        {
+            UnityEngine.Debug.LogWarning($"No camera found on player {PlayerId}!");
+        }
+    }
+    
+    public void SetIsLocal(bool isLocal)
+    {
+        var field = this.GetType().GetField("IsLocal", 
+                    System.Reflection.BindingFlags.Instance | 
+                    System.Reflection.BindingFlags.NonPublic);
         
-        // Implement wheel rotation based on car speed in a real implementation
+        if (field != null)
+            field.SetValue(this, isLocal);
+        else
+            Initialize(this.PlayerId, isLocal);
     }
     
     // Modify the ApplyRemoteState method to support teleporting
@@ -314,84 +500,6 @@ public class PlayerController : MonoBehaviour
         targetRotation = rotation;
         targetVelocity = Vector3.zero;
         targetAngularVelocity = Vector3.zero;
-    }
-
-    public void SetupCamera()
-    {
-        // Find the camera attached to this car
-        Camera carCamera = GetComponentInChildren<Camera>(true); // Include inactive cameras
-        
-        if (carCamera != null)
-        {
-            UnityEngine.Debug.Log($"Found camera on {PlayerId}, isLocal={IsLocal}");
-            
-            // If this is the local player, activate the camera
-            if (IsLocal)
-            {
-                carCamera.gameObject.SetActive(true);
-                carCamera.tag = "MainCamera";
-                UnityEngine.Debug.Log($"Activated camera for local player {PlayerId}");
-                
-                // Disable any audio listeners on other cameras
-                AudioListener[] listeners = FindObjectsOfType<AudioListener>();
-                foreach (AudioListener listener in listeners)
-                {
-                    if (listener.gameObject != carCamera.gameObject)
-                    {
-                        listener.enabled = false;
-                    }
-                }
-                
-                // Make sure this camera's audio listener is enabled
-                AudioListener carAudioListener = carCamera.GetComponent<AudioListener>();
-                if (carAudioListener != null)
-                {
-                    carAudioListener.enabled = true;
-                }
-                else
-                {
-                    // Add an audio listener if it doesn't exist
-                    carCamera.gameObject.AddComponent<AudioListener>();
-                    UnityEngine.Debug.Log("Added missing AudioListener to player camera");
-                }
-            }
-            else
-            {
-                // Disable camera on remote player cars
-                carCamera.gameObject.SetActive(false);
-                UnityEngine.Debug.Log($"Disabled camera for remote player {PlayerId}");
-                
-                // Disable any audio listener
-                AudioListener audioListener = carCamera.GetComponent<AudioListener>();
-                if (audioListener != null)
-                {
-                    audioListener.enabled = false;
-                }
-            }
-        }
-        else
-        {
-            UnityEngine.Debug.LogWarning($"No camera found on player {PlayerId}!");
-        }
-    }
-
-    public void SetIsLocal(bool isLocal)
-    {
-        // Use reflection to set the value since the property is read-only
-        var field = this.GetType().GetField("IsLocal", 
-                    System.Reflection.BindingFlags.Instance | 
-                    System.Reflection.BindingFlags.NonPublic);
-        
-        if (field != null)
-        {
-            field.SetValue(this, isLocal);
-        }
-        else
-        {
-            // Alternative approach if the field can't be found
-            // This uses the Initialize method which we know works
-            Initialize(this.PlayerId, isLocal);
-        }
     }
 
     void OnDrawGizmos()
@@ -454,5 +562,71 @@ public class PlayerController : MonoBehaviour
         
         GUI.Label(new Rect(15, Screen.height - 25, 290, 20),
             $"Position: {transform.position.ToString("F1")}", style);
+    }
+
+    // Add this method to your PlayerController to set up the wheels
+    private void SetupWheels()
+    {
+        CustomWheel[] wheels = new CustomWheel[] { 
+            frontLeftCustomWheel, frontRightCustomWheel, 
+            rearLeftCustomWheel, rearRightCustomWheel 
+        };
+        
+        foreach (var wheel in wheels)
+        {
+            if (wheel != null)
+            {
+                // Pass down settings from the PlayerController, 
+                // BUT respect manually set wheel radius
+                wheel.suspensionDistance = this.suspensionDistance;
+                wheel.springStrength = this.springStrength;
+                wheel.damperStrength = this.damperStrength;
+                
+                // MODIFIED: Don't override wheel radius if it already has a reasonable value
+                if (wheel.wheelRadius <= 0.01f || wheel.wheelRadius > 1.0f)
+                {
+                    UnityEngine.Debug.Log($"Setting wheel radius on {wheel.name} to {this.wheelRadius} (from PlayerController)");
+                    wheel.wheelRadius = this.wheelRadius;
+                }
+                else
+                {
+                    UnityEngine.Debug.Log($"Keeping manually set wheel radius on {wheel.name}: {wheel.wheelRadius}");
+                }
+                
+                // Setup visual wheel reference if not already set
+                if (wheel.visualWheel == null)
+                {
+                    // Try to assign the corresponding transform
+                    if (wheel == frontLeftCustomWheel && frontLeftWheel != null)
+                        wheel.visualWheel = frontLeftWheel;
+                    else if (wheel == frontRightCustomWheel && frontRightWheel != null)
+                        wheel.visualWheel = frontRightWheel;
+                    else if (wheel == rearLeftCustomWheel && rearLeftWheel != null)
+                        wheel.visualWheel = rearLeftWheel;
+                    else if (wheel == rearRightCustomWheel && rearRightWheel != null)
+                        wheel.visualWheel = rearRightWheel;
+                }
+                
+                // Make sure the ground mask is set
+                if (wheel.groundMask.value == 0)
+                    wheel.groundMask = 1 << 3; // Layer 3 is "Ground"
+            }
+        }
+    }
+
+    public void TuneSuspension(float springMultiplier, float damperMultiplier)
+    {
+        // Apply multipliers to current settings
+        float newSpring = springStrength * springMultiplier;
+        float newDamper = damperStrength * damperMultiplier;
+        
+        UnityEngine.Debug.Log($"Tuning suspension: Spring {springStrength} → {newSpring}, Damper {damperStrength} → {newDamper}");
+        
+        // Update local values
+        springStrength = newSpring;
+        damperStrength = newDamper;
+        
+        // Update all wheels
+        SetupWheels();
     }
 }

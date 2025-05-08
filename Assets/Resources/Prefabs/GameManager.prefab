@@ -44,15 +44,26 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bcd7eb72835df42eba25382088b8ba69, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  playerCarPrefab: {fileID: 2758779497387618871, guid: 6f6addce78ebb4fcc846a2861e9a061a, type: 3}
+  playerCarPrefabs:
+  - {fileID: 9184046475305397073, guid: bd9902e826502aa4ab4cdc485a3d5329, type: 3}
+  - {fileID: 7479397930834911822, guid: e806b6150f4817740b62d4720384754c, type: 3}
+  - {fileID: 1810700270293503490, guid: 47e8119b19eb0b54d868f7219c30ae43, type: 3}
   spawnPoints:
-  - {fileID: 2933840840411040245, guid: c28864312405c4249bf14013a34dd172, type: 3}
-  - {fileID: 4142835333519174129, guid: 7122647f593a043698de0139fadcc4f2, type: 3}
-  - {fileID: 8853177570783055822, guid: eb93fd70805fe4667a4a1c826ad855c8, type: 3}
-  - {fileID: 4292975531755479117, guid: f800ffb7084794bc9bf1d88092a17c3d, type: 3}
-  respawnHeight: 2
+  - {fileID: 2933840840411040245, guid: d591b82c21fd78f4c99c2d0c526a97e0, type: 3}
+  - {fileID: 4142835333519174129, guid: fcc09f8cb79faed72913cbb699507aba, type: 3}
+  - {fileID: 8853177570783055822, guid: f8c97537a7e7f0ef3bf504415324a45d, type: 3}
+  - {fileID: 4292975531755479117, guid: ed2f54729af5d9aa1bc2aadbcb7039a5, type: 3}
+  respawnHeight: 5
   maxPlayers: 4
   syncInterval: 0.1
   inputSyncInterval: 0.05
   useDebugSpawnPosition: 1
   debugSpawnPosition: {x: 50, y: 10, z: 50}
+  trackScenes:
+  - {fileID: 102900000, guid: ba5005c32db234fbbb578d2b99e66c37, type: 3}
+  - {fileID: 102900000, guid: 83760dd98fe89364daec0c8817772284, type: 3}
+  - {fileID: 102900000, guid: 8d68a8c139112ee4387ec230ac89a4a2, type: 3}
+  trackSceneNames:
+  - GameOn
+  - RaceTrack
+  - OpenWorld

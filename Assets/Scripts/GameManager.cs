@@ -6,19 +6,29 @@ using UltimateCarRacing.Networking;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+
 public class GameManager : MonoBehaviour
 {
     public static GameManager Instance { get; private set; }
     
     [Header("Player Setup")]
-    public GameObject playerCarPrefab;
+    public List<GameObject> playerCarPrefabs = new List<GameObject>();
+    // Static index to choose the local player's car (set via the dropdown)
+    public static int SelectedCarIndex = 0;
+
+    // New: Static index to choose the selected track (set via the dropdown)
+    public static int SelectedTrackIndex = 0;
+    
     public Transform[] spawnPoints;
     public float respawnHeight = 2f; // Height above spawn point
-    public int maxPlayers = 4;  // Add this for calculating spawn positions
+    public int maxPlayers = 4;  // For calculating spawn positions
     
     [Header("Network Settings")]
-    public float syncInterval = 0.1f; // How often to send full sync (seconds)
-    public float inputSyncInterval = 0.05f; // How often to send input (seconds)
+    public float syncInterval = 0.1f;
+    public float inputSyncInterval = 0.05f;
     
     [Header("Debug Options")]
     public bool useDebugSpawnPosition = false;
@@ -34,6 +44,38 @@ public class GameManager : MonoBehaviour
     private Vector3 assignedSpawnPosition;
     private int assignedSpawnIndex = -1;
     private bool hasAssignedPosition = false;
+
+    [Header("Map Setup")]
+    // References to the track scenes (only used in the Editor to pick scenes)
+    #if UNITY_EDITOR
+    public List<SceneAsset> trackScenes;
+    #else
+    // In runtime builds you can use an empty list as the actual names come from the Editor build
+    public List<string> trackSceneNames;
+    #endif
+
+    // This list will hold the names of the tracks for runtime (populated in the Editor)
+    [HideInInspector]
+    public List<string> trackSceneNames = new List<string>();
+
+    #if UNITY_EDITOR
+    private void OnValidate()
+    {
+        trackSceneNames.Clear();
+        if (trackScenes != null)
+        {
+            foreach (var scene in trackScenes)
+            {
+                if (scene != null)
+                {
+                    string path = AssetDatabase.GetAssetPath(scene);
+                    string sceneName = System.IO.Path.GetFileNameWithoutExtension(path);
+                    trackSceneNames.Add(sceneName);
+                }
+            }
+        }
+    }
+    #endif
     
     void Awake()
     {
@@ -41,6 +83,23 @@ public class GameManager : MonoBehaviour
         {
             Instance = this;
             DontDestroyOnLoad(gameObject);
+            // Load car prefabs from Resources if none set in Inspector.
+            if(playerCarPrefabs == null || playerCarPrefabs.Count == 0)
+            {
+                GameObject car1 = Resources.Load<GameObject>("Cars/Car1");
+                GameObject car2 = Resources.Load<GameObject>("Cars/Car2");
+                GameObject car3 = Resources.Load<GameObject>("Cars/Car3");
+                if(car1 != null && car2 != null && car3 != null)
+                {
+                    playerCarPrefabs.Add(car1);
+                    playerCarPrefabs.Add(car2);
+                    playerCarPrefabs.Add(car3);
+                }
+                else
+                {
+                    Debug.LogError("Could not load one or more car prefabs from Resources/Cars");
+                }
+            }
         }
         else
         {
@@ -305,9 +364,9 @@ public class GameManager : MonoBehaviour
     {
         Debug.Log($"SpawnPlayers called with {playerIds.Length} players: {string.Join(", ", playerIds)}");
         
-        if (playerCarPrefab == null)
+        if (playerCarPrefabs == null || playerCarPrefabs.Count == 0)
         {
-            Debug.LogError("Player car prefab is null! Cannot spawn players.");
+            Debug.LogError("Player car prefabs list is empty! Cannot spawn players.");
             return;
         }
         
@@ -383,15 +442,10 @@ public class GameManager : MonoBehaviour
     
     public GameObject SpawnPlayer(string playerId, int spawnIndex = 0)
     {
-        // Debug who is being spawned
-        Debug.Log($"Spawning player: {playerId}, local player is: {localPlayerId}, isLocal={playerId == localPlayerId}");
-        
-        // Use configurable spawn positions
+        // Determine spawn position (existing code)
         Vector3 spawnPosition;
-        
         if (playerId == localPlayerId && hasAssignedPosition)
         {
-            // Use the position assigned by the server
             spawnPosition = assignedSpawnPosition;
             Debug.Log($"Using server-assigned position for local player: {spawnPosition} (index: {assignedSpawnIndex})");
         }
@@ -401,14 +455,12 @@ public class GameManager : MonoBehaviour
         }
         else if (spawnPoints != null && spawnPoints.Length > 0)
         {
-            // Use actual spawn points if available
             int actualIndex = spawnIndex % spawnPoints.Length;
             spawnPosition = spawnPoints[actualIndex].position + Vector3.up * respawnHeight;
             Debug.Log($"Using spawn point {actualIndex} for player {playerId}");
         }
         else
         {
-            // Fallback to debug position with offset based on index
             float angle = spawnIndex * (360f / maxPlayers);
             float radius = 5f;
             spawnPosition = new Vector3(
@@ -419,22 +471,32 @@ public class GameManager : MonoBehaviour
             Debug.Log($"Using calculated spawn position for player {playerId}");
         }
         
-        // Create the player object
-        GameObject playerObject = Instantiate(playerCarPrefab, spawnPosition, Quaternion.identity);
-        playerObject.name = $"Car_{playerId}"; // Give unique name for debugging
+        // Choose the prefab based on whether this is the local player
+        GameObject prefabToUse;
+        bool isLocalPlayer = (playerId == localPlayerId);
+        if (isLocalPlayer)
+        {
+            if (SelectedCarIndex >= 0 && SelectedCarIndex < playerCarPrefabs.Count)
+                prefabToUse = playerCarPrefabs[SelectedCarIndex];
+            else
+                prefabToUse = playerCarPrefabs[0];
+        }
+        else
+        {
+            prefabToUse = playerCarPrefabs[0];
+        }
         
-        // Set up player controller
+        // Create and initialize the player object
+        GameObject playerObject = Instantiate(prefabToUse, spawnPosition, Quaternion.identity);
+        playerObject.name = $"Car_{playerId}";
+        
         PlayerController controller = playerObject.GetComponent<PlayerController>();
         if (controller != null)
         {
-            // Initialize with correct ownership
-            bool isLocalPlayer = (playerId == localPlayerId);
             controller.Initialize(playerId, isLocalPlayer);
             Debug.Log($"Initialized car for {playerId}, isLocalPlayer={isLocalPlayer}");
-            
             activePlayers[playerId] = controller;
             
-            // Setup camera only for local player
             if (isLocalPlayer)
             {
                 SetupLocalPlayerCamera(playerObject);
