@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UltimateCarRacing.Networking;
 using Newtonsoft.Json;
@@ -157,6 +158,12 @@ public class GameManager : MonoBehaviour
             // Force spawn after a short delay if we already have an ID
             StartCoroutine(DelayedTestSpawn());
         }
+
+        // Subscribe to the scene loaded event from SceneTransitionManager
+        if (SceneTransitionManager.Instance != null)
+        {
+            SceneTransitionManager.Instance.OnSceneLoaded += HandleSceneLoaded;
+        }
     }
 
     void OnEnable()
@@ -191,16 +198,21 @@ public class GameManager : MonoBehaviour
             spawnPoints = new Transform[positions.Length];
             
             // Create transforms for the predefined positions
-            GameObject spawnPointsParent = new GameObject("SpawnPoints");
+            GameObject customSpawnPointsParent = new GameObject("SpawnPoints");
             for (int i = 0; i < positions.Length; i++)
             {
                 GameObject spawnPoint = new GameObject($"SpawnPoint_{i}");
-                spawnPoint.transform.parent = spawnPointsParent.transform;
+                spawnPoint.transform.parent = customSpawnPointsParent.transform;
                 spawnPoint.transform.position = positions[i];
                 spawnPoints[i] = spawnPoint.transform;
+                
+                // Add a visual gizmo for debugging
+                var gizmo = spawnPoint.AddComponent<SpawnPointGizmo>();
+                gizmo.spawnIndex = i;
             }
             
-            Debug.Log($"Using {positions.Length} predefined spawn points for {currentSceneName}");
+            Debug.Log($"Created {positions.Length} predefined spawn points for {currentSceneName}: " + 
+                      string.Join(", ", positions.Select(p => p.ToString())));
             return;
         }
         
@@ -1105,6 +1117,11 @@ public class GameManager : MonoBehaviour
         }
         
         Debug.Log("GameManager destroyed, cleaned up event handlers");
+
+        if (SceneTransitionManager.Instance != null)
+        {
+            SceneTransitionManager.Instance.OnSceneLoaded -= HandleSceneLoaded;
+        }
     }
 
     void OnGUI()
@@ -1172,5 +1189,44 @@ public class GameManager : MonoBehaviour
     {
         // Find spawn points in the newly loaded scene
         FindSpawnPoints();
+    }
+
+    private void HandleSceneLoaded(string sceneName)
+    {
+        Debug.Log($"GameManager received scene loaded notification for {sceneName}");
+        
+        // Find spawn points first
+        FindSpawnPoints();
+        
+        // If we don't have players yet, check if we're already in a game
+        if (localPlayerId != null && !gameStarted && NetworkManager.Instance.gameStarted)
+        {
+            Debug.Log("Attempting to spawn players after scene load");
+            // Spawn the local player and any connected players
+            List<string> playerIds = new List<string>();
+            playerIds.Add(localPlayerId);
+            
+            // Add all connected players from NetworkManager
+            foreach (var player in NetworkManager.Instance.ConnectedPlayers)
+            {
+                if (player.clientId != localPlayerId)
+                    playerIds.Add(player.clientId);
+            }
+            
+            SpawnPlayers(playerIds.ToArray());
+        }
+    }
+}
+
+// Add this class for visualization
+public class SpawnPointGizmo : MonoBehaviour
+{
+    public int spawnIndex;
+    
+    void OnDrawGizmos()
+    {
+        Gizmos.color = Color.green;
+        Gizmos.DrawSphere(transform.position, 1f);
+        Gizmos.DrawLine(transform.position, transform.position + Vector3.up * 3f);
     }
 }

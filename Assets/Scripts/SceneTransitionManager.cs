@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -12,6 +13,8 @@ public class SceneTransitionManager : MonoBehaviour
     
     private string targetScene;
     
+    public event Action<string> OnSceneLoaded;
+
     void Awake()
     {
         if (Instance == null)
@@ -107,6 +110,10 @@ public class SceneTransitionManager : MonoBehaviour
         {
             EnsureGameManagerExists();
         }
+
+        // After scene is fully loaded, fire the event
+        OnSceneLoaded?.Invoke(sceneName);
+        Debug.Log($"Scene {sceneName} fully loaded, notifying listeners");
     }
     
     private void EnsureGameManagerExists()

@@ -135,6 +135,14 @@ public class NetworkManager : MonoBehaviour
     // Add this field declaration near the top of the NetworkManager class, in the field declarations area
     private Dictionary<string, GameObject> activePlayers = new Dictionary<string, GameObject>();
 
+    // In NetworkManager.cs
+    private bool _gameStarted = false;
+    public bool gameStarted 
+    { 
+        get { return _gameStarted; } 
+        private set { _gameStarted = value; }
+    }
+
     void Awake()
     {
         if (Instance == null)
@@ -479,12 +487,13 @@ public class NetworkManager : MonoBehaviour
                             SendMessageToRoom($"START_GAME|{playerIdsJson}");
                             gameStarted = true;
                         }
+                        
+                        gameStarted = true;
                         break;
                         
                     // Handle START_GAME relay message here
                     case "START_GAME":
                         // Process the START_GAME message that's relayed from another client
-                        // This happens after GAME_STARTED is received from the server
                         gameStarted = true;
                         break;
                 }
