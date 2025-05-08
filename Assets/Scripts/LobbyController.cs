@@ -219,17 +219,20 @@ public class LobbyController : MonoBehaviour
                 transitionManager = managerObj.AddComponent<SceneTransitionManager>();
                 
                 // Wait for it to initialize
-                StartCoroutine(LoadSceneAfterManagerInitialized("GameOn"));
+                StartCoroutine(LoadSceneAfterManagerInitialized(GetSelectedTrackName()));
                 return;
             }
             return;
         }
         
+        // Use selected track instead of hardcoded "GameOn"
+        string trackToLoad = GetSelectedTrackName();
+        
         // Tell all players to load the game scene
-        NetworkManager.Instance.SendMessageToRoom($"LOAD_SCENE|GameOn");
+        NetworkManager.Instance.SendMessageToRoom($"LOAD_SCENE|{trackToLoad}");
         
         // Load locally
-        SceneTransitionManager.Instance.LoadScene("GameOn");
+        SceneTransitionManager.Instance.LoadScene(trackToLoad);
     }
 
     private IEnumerator LoadSceneAfterManagerInitialized(string sceneName)
@@ -534,5 +537,29 @@ public class LobbyController : MonoBehaviour
         
         // Load game scene
         SceneManager.LoadScene(gameSceneName);
+    }
+
+    // Add this helper method
+    private string GetSelectedTrackName()
+    {
+        // Default to "GameOn" if nothing is selected
+        string trackName = "GameOn";
+        
+        if (GameManager.SelectedTrackIndex > 0)
+        {
+            // Use SceneUtility to get the actual scene name by build index
+            string scenePath = UnityEngine.SceneManagement.SceneUtility.GetScenePathByBuildIndex(GameManager.SelectedTrackIndex);
+            if (!string.IsNullOrEmpty(scenePath))
+            {
+                trackName = System.IO.Path.GetFileNameWithoutExtension(scenePath);
+                Debug.Log($"Using selected track: {trackName} (index: {GameManager.SelectedTrackIndex})");
+            }
+            else
+            {
+                Debug.LogWarning($"Invalid track index: {GameManager.SelectedTrackIndex}, using default");
+            }
+        }
+        
+        return trackName;
     }
 }

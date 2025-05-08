@@ -76,6 +76,31 @@ public class GameManager : MonoBehaviour
         }
     }
     #endif
+
+    [Header("Track-Specific Spawn Points")]
+    // Dictionary to store spawn positions for each track
+    private Dictionary<string, Vector3[]> trackSpawnPositions = new Dictionary<string, Vector3[]>()
+    {
+        {
+            "RaceTrack", new Vector3[]
+            {
+                new Vector3(66, -2, -2),
+                new Vector3(60, -2, -2),
+                new Vector3(54, -2, -2),
+                new Vector3(47, -2, -2)
+            }
+        },
+        // You can add more tracks here
+        {
+            "GameOn", new Vector3[]
+            {
+                new Vector3(50, 10, 50),
+                new Vector3(55, 10, 50),
+                new Vector3(60, 10, 50),
+                new Vector3(65, 10, 50)
+            }
+        }
+    };
     
     void Awake()
     {
@@ -112,8 +137,11 @@ public class GameManager : MonoBehaviour
         // Register network callbacks
         NetworkManager.Instance.OnMessageReceived += HandleNetworkMessage;
         NetworkManager.Instance.OnGameDataReceived += HandleGameData;
-        NetworkManager.Instance.OnPositionReset += HandlePositionReset; // Ensure reset is registered here too
+        NetworkManager.Instance.OnPositionReset += HandlePositionReset;
         NetworkManager.Instance.OnSpawnPositionAssigned += HandleSpawnPositionAssigned;
+
+        // Find spawn points in the current scene
+        FindSpawnPoints();
 
         // Get the local player ID immediately and log it
         localPlayerId = NetworkManager.Instance.ClientId;
@@ -135,17 +163,49 @@ public class GameManager : MonoBehaviour
     {
         // Listen for position reset commands
         NetworkManager.Instance.OnPositionReset += HandlePositionReset;
+        
+        // Add scene load event listener
+        UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
     }
 
     void OnDisable()
     {
-        // Remove listener when disabled
+        // Remove listeners when disabled
         if (NetworkManager.Instance != null)
             NetworkManager.Instance.OnPositionReset -= HandlePositionReset;
+        
+        // Remove scene load event listener
+        UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoaded;
     }
     
     private void FindSpawnPoints()
     {
+        // Get the current scene name
+        string currentSceneName = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
+        Debug.Log($"Finding spawn points for scene: {currentSceneName}");
+        
+        // Check if we have predefined spawn positions for this track
+        if (trackSpawnPositions.ContainsKey(currentSceneName))
+        {
+            Vector3[] positions = trackSpawnPositions[currentSceneName];
+            spawnPoints = new Transform[positions.Length];
+            
+            // Create transforms for the predefined positions
+            GameObject spawnPointsParent = new GameObject("SpawnPoints");
+            for (int i = 0; i < positions.Length; i++)
+            {
+                GameObject spawnPoint = new GameObject($"SpawnPoint_{i}");
+                spawnPoint.transform.parent = spawnPointsParent.transform;
+                spawnPoint.transform.position = positions[i];
+                spawnPoints[i] = spawnPoint.transform;
+            }
+            
+            Debug.Log($"Using {positions.Length} predefined spawn points for {currentSceneName}");
+            return;
+        }
+        
+        // If no predefined positions, continue with the original spawn point lookup
+        
         // Look for a parent object containing spawn points
         GameObject spawnPointsParent = GameObject.Find("SpawnPoints");
         
@@ -1105,5 +1165,12 @@ public class GameManager : MonoBehaviour
         assignedSpawnPosition = position;
         assignedSpawnIndex = index;
         hasAssignedPosition = true;
+    }
+
+    // Add this method to your GameManager class
+    private void OnSceneLoaded(UnityEngine.SceneManagement.Scene scene, UnityEngine.SceneManagement.LoadSceneMode mode)
+    {
+        // Find spawn points in the newly loaded scene
+        FindSpawnPoints();
     }
 }
