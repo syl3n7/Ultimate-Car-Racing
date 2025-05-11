@@ -4,13 +4,22 @@ using System.Collections.Generic;
 using UltimateCarRacing.Networking;
 
 [RequireComponent(typeof(Rigidbody))]
-public class CarController : MonoBehaviour
+public class WheelColliderCarController : MonoBehaviour
 {
-    [Header("Wheels")]
-    public Wheel[] wheels;
+    [Header("Wheel Colliders")]
+    public WheelCollider frontLeftWheelCollider;
+    public WheelCollider frontRightWheelCollider;
+    public WheelCollider rearLeftWheelCollider;
+    public WheelCollider rearRightWheelCollider;
+
+    [Header("Wheel Transforms")]
+    public Transform frontLeftWheelTransform;
+    public Transform frontRightWheelTransform;
+    public Transform rearLeftWheelTransform;
+    public Transform rearRightWheelTransform;
 
     [Header("Vehicle Settings")]
-    public float motorForce = 1500f;
+    public float motorForce = 1000f;
     public float brakeForce = 3000f;
     public float maxSteerAngle = 30f;
     public float wheelbase = 2.5f;
@@ -65,12 +74,6 @@ public class CarController : MonoBehaviour
         
         // Set a lower center of mass for stability
         Rigidbody.centerOfMass = centerOfMassOffset;
-        
-        // Verify wheel setup
-        if (wheels == null || wheels.Length == 0)
-        {
-            Debug.LogError("No wheels assigned to car controller!");
-        }
     }
     
     public void Initialize(string playerId, bool isLocal)
@@ -168,92 +171,65 @@ public class CarController : MonoBehaviour
     
     private void ApplyDriving()
     {
-        if (wheels == null || wheels.Length == 0) return;
+        float motor = CurrentThrottle * motorForce;
+        float steer = CurrentSteering * maxSteerAngle;
+        float brake = CurrentBrake * brakeForce;
         
-        float throttleInput = CurrentThrottle;
-        float steeringInput = CurrentSteering;
-        float brakeInput = CurrentBrake;
+        // Apply motor torque to rear wheels
+        rearLeftWheelCollider.motorTorque = motor;
+        rearRightWheelCollider.motorTorque = motor;
         
-        // Apply motor torque to drive wheels (assuming rear wheel drive)
-        float motorTorque = throttleInput * motorForce;
-        
-        // Apply steering to steerable wheels (assuming front wheel steering)
-        float steerAngle = steeringInput * maxSteerAngle;
-        
-        // Find front wheels for Ackermann steering calculation
-        Wheel frontLeftWheel = null;
-        Wheel frontRightWheel = null;
-        
-        // Apply driving forces to each wheel based on its type
-        foreach (Wheel wheel in wheels)
+        // Apply steering to front wheels (with Ackermann steering)
+        if (CurrentSteering > 0)
         {
-            // Skip null wheel colliders
-            if (wheel.collider == null) continue;
-            
-            // Apply braking to all wheels
-            wheel.collider.brakeTorque = brakeInput * brakeForce;
-            
-            // Set motor torque for rear wheels
-            if (wheel.wheelType == WheelType.RearLeft || wheel.wheelType == WheelType.RearRight)
-            {
-                wheel.collider.motorTorque = motorTorque;
-            }
-            
-            // Store front wheels for steering
-            if (wheel.wheelType == WheelType.FrontLeft)
-                frontLeftWheel = wheel;
-            else if (wheel.wheelType == WheelType.FrontRight)
-                frontRightWheel = wheel;
+            frontLeftWheelCollider.steerAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / (trackwidth / 2 + Mathf.Tan(Mathf.Deg2Rad * steer) * wheelbase));
+            frontRightWheelCollider.steerAngle = steer;
+        }
+        else if (CurrentSteering < 0)
+        {
+            frontLeftWheelCollider.steerAngle = steer;
+            frontRightWheelCollider.steerAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / (-trackwidth / 2 + Mathf.Tan(Mathf.Deg2Rad * steer) * wheelbase));
+        }
+        else
+        {
+            frontLeftWheelCollider.steerAngle = frontRightWheelCollider.steerAngle = 0;
         }
         
-        // Apply Ackermann steering to front wheels if we found them
-        if (frontLeftWheel != null && frontRightWheel != null)
+        // Apply brakes to all wheels
+        if (brake > 0)
         {
-            if (steeringInput > 0)
-            {
-                // Turning right - inner wheel (left) turns more
-                frontLeftWheel.collider.steerAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / (trackwidth / 2 + Mathf.Tan(Mathf.Deg2Rad * steerAngle) * wheelbase));
-                frontRightWheel.collider.steerAngle = steerAngle;
-            }
-            else if (steeringInput < 0)
-            {
-                // Turning left - inner wheel (right) turns more
-                frontLeftWheel.collider.steerAngle = steerAngle;
-                frontRightWheel.collider.steerAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / (-trackwidth / 2 + Mathf.Tan(Mathf.Deg2Rad * steerAngle) * wheelbase));
-            }
-            else
-            {
-                // Going straight
-                frontLeftWheel.collider.steerAngle = frontRightWheel.collider.steerAngle = 0;
-            }
+            frontLeftWheelCollider.brakeTorque = brake;
+            frontRightWheelCollider.brakeTorque = brake;
+            rearLeftWheelCollider.brakeTorque = brake;
+            rearRightWheelCollider.brakeTorque = brake;
         }
-        
-        // Reset brake torque when not braking to let the car roll
-        if (brakeInput <= 0)
+        else
         {
-            foreach (Wheel wheel in wheels)
-            {
-                if (wheel.collider != null)
-                    wheel.collider.brakeTorque = 0;
-            }
+            frontLeftWheelCollider.brakeTorque = 0;
+            frontRightWheelCollider.brakeTorque = 0;
+            rearLeftWheelCollider.brakeTorque = 0;
+            rearRightWheelCollider.brakeTorque = 0;
         }
     }
     
     private void UpdateWheelVisuals()
     {
-        if (wheels == null) return;
+        UpdateWheelPose(frontLeftWheelCollider, frontLeftWheelTransform);
+        UpdateWheelPose(frontRightWheelCollider, frontRightWheelTransform);
+        UpdateWheelPose(rearLeftWheelCollider, rearLeftWheelTransform);
+        UpdateWheelPose(rearRightWheelCollider, rearRightWheelTransform);
+    }
+    
+    private void UpdateWheelPose(WheelCollider collider, Transform wheelTransform)
+    {
+        if (collider == null || wheelTransform == null) return;
         
-        foreach (Wheel wheel in wheels)
-        {
-            if (wheel.collider == null || wheel.wheelMesh == null) continue;
-            
-            Vector3 position;
-            Quaternion rotation;
-            wheel.collider.GetWorldPose(out position, out rotation);
-            
-            wheel.wheelMesh.position = position;
-            wheel.wheelMesh.rotation = rotation;
-        }
+        Vector3 position;
+        Quaternion rotation;
+        collider.GetWorldPose(out position, out rotation);
+        
+        wheelTransform.position = position;
+        wheelTransform.rotation = rotation;
     }
     
     private void SmoothRemoteTransform()
