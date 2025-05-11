@@ -7,6 +7,9 @@ using UltimateCarRacing.Networking;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Serialization;
 
+// Remove or comment out this line since the namespace doesn't exist
+// using UltimateCarRacing.Player;
+
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -35,7 +38,8 @@ public class GameManager : MonoBehaviour
     public bool useDebugSpawnPosition = false;
     public Vector3 debugSpawnPosition = new Vector3(50f, 10f, 50f);
     
-    private Dictionary<string, PlayerController> activePlayers = new Dictionary<string, PlayerController>();
+    // Change PlayerController to CarController
+    private Dictionary<string, CarController> activePlayers = new Dictionary<string, CarController>();
     private string localPlayerId;
     private float lastSyncTime;
     private float lastInputSyncTime;
