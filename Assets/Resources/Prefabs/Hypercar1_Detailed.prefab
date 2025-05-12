@@ -97,7 +97,6 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1723158132849053563}
-  - component: {fileID: 5858073401999891573}
   m_Layer: 0
   m_Name: CW_WHEEL_RR
   m_TagString: Untagged
@@ -121,26 +120,6 @@ Transform:
   - {fileID: 515911520136032276}
   m_Father: {fileID: 8376582266254651883}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &5858073401999891573
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1122461983435669185}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 990d3dcfbf371d795a4ec20d6e646b65, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  suspensionDistance: 0.3
-  springStrength: 100000
-  damperStrength: 10000
-  groundMask:
-    serializedVersion: 2
-    m_Bits: 8
-  visualWheel: {fileID: 515911520136032276}
-  wheelRadius: 0.37
 --- !u!1 &1207923682050692446
 GameObject:
   m_ObjectHideFlags: 0
@@ -238,7 +217,6 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 3254507153319444396}
-  - component: {fileID: 8160821738536079775}
   m_Layer: 0
   m_Name: CW_WHEEL_FL
   m_TagString: Untagged
@@ -262,26 +240,6 @@ Transform:
   - {fileID: 4119955183164804130}
   m_Father: {fileID: 8376582266254651883}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &8160821738536079775
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2248203125147785146}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 990d3dcfbf371d795a4ec20d6e646b65, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  suspensionDistance: 0.3
-  springStrength: 100000
-  damperStrength: 10000
-  groundMask:
-    serializedVersion: 2
-    m_Bits: 8
-  visualWheel: {fileID: 4119955183164804130}
-  wheelRadius: 0.37
 --- !u!1 &2265317661862032833
 GameObject:
   m_ObjectHideFlags: 0
@@ -726,7 +684,6 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 2852077946281888732}
-  - component: {fileID: 1853140875945046286}
   m_Layer: 0
   m_Name: CW_WHEEL_RL
   m_TagString: Untagged
@@ -750,26 +707,6 @@ Transform:
   - {fileID: 6750290903627558902}
   m_Father: {fileID: 8376582266254651883}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1853140875945046286
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5527888701414168295}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 990d3dcfbf371d795a4ec20d6e646b65, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  suspensionDistance: 0.3
-  springStrength: 100000
-  damperStrength: 10000
-  groundMask:
-    serializedVersion: 2
-    m_Bits: 8
-  visualWheel: {fileID: 6750290903627558902}
-  wheelRadius: 0.37
 --- !u!1 &5684066039922205459
 GameObject:
   m_ObjectHideFlags: 0
@@ -779,7 +716,6 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 6526130307343832017}
-  - component: {fileID: 7852624081962557933}
   m_Layer: 0
   m_Name: CW_WHEEL_FR
   m_TagString: Untagged
@@ -803,26 +739,6 @@ Transform:
   - {fileID: 386373141863012542}
   m_Father: {fileID: 8376582266254651883}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &7852624081962557933
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 5684066039922205459}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 990d3dcfbf371d795a4ec20d6e646b65, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  suspensionDistance: 0.3
-  springStrength: 100000
-  damperStrength: 10000
-  groundMask:
-    serializedVersion: 2
-    m_Bits: 8
-  visualWheel: {fileID: 386373141863012542}
-  wheelRadius: 0.37
 --- !u!1 &6958836208775697149
 GameObject:
   m_ObjectHideFlags: 0
@@ -1056,8 +972,8 @@ GameObject:
   m_Component:
   - component: {fileID: 8376582266254651883}
   - component: {fileID: 4929959565915255499}
-  - component: {fileID: 5973363937431473088}
   - component: {fileID: 407772556299341552}
+  - component: {fileID: 3262904120996049501}
   m_Layer: 0
   m_Name: Hypercar1_Detailed
   m_TagString: Player
@@ -1116,41 +1032,6 @@ Rigidbody:
   m_Interpolate: 1
   m_Constraints: 0
   m_CollisionDetection: 2
---- !u!114 &5973363937431473088
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 9184046475305397073}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 950597bc9b6bc4ca1bae0d90f42819da, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  maxSpeed: 30
-  acceleration: 10
-  brakeForce: 15
-  steeringAngle: 35
-  frontLeftCustomWheel: {fileID: 8160821738536079775}
-  frontRightCustomWheel: {fileID: 7852624081962557933}
-  rearLeftCustomWheel: {fileID: 1853140875945046286}
-  rearRightCustomWheel: {fileID: 5858073401999891573}
-  frontLeftWheel: {fileID: 4119955183164804130}
-  frontRightWheel: {fileID: 386373141863012542}
-  rearLeftWheel: {fileID: 6750290903627558902}
-  rearRightWheel: {fileID: 515911520136032276}
-  suspensionDistance: 0.3
-  springStrength: 25000
-  damperStrength: 3500
-  wheelRadius: 0.37
-  driverModel: {fileID: 0}
-  playerNameText: {fileID: 0}
-  positionLerpSpeed: 10
-  rotationLerpSpeed: 10
-  velocityLerpSpeed: 5
-  inputSmoothing: 0.2
-  desyncThreshold: 5
 --- !u!65 &407772556299341552
 BoxCollider:
   m_ObjectHideFlags: 0
@@ -1172,3 +1053,75 @@ BoxCollider:
   serializedVersion: 3
   m_Size: {x: 0.9476317, y: 0.99266064, z: 4.548072}
   m_Center: {x: -0.011190578, y: 0.63258404, z: 0.017373562}
+--- !u!114 &3262904120996049501
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9184046475305397073}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d219e4322dfdb63deabccd7b5a9e4300, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  wheels:
+  - collider: {fileID: 0}
+    wheelMesh: {fileID: 4119955183164804130}
+    wheelType: 0
+    powered: 1
+    steerable: 1
+    hasBrakes: 1
+  - collider: {fileID: 0}
+    wheelMesh: {fileID: 6526130307343832017}
+    wheelType: 1
+    powered: 1
+    steerable: 1
+    hasBrakes: 1
+  - collider: {fileID: 0}
+    wheelMesh: {fileID: 2852077946281888732}
+    wheelType: 2
+    powered: 1
+    steerable: 0
+    hasBrakes: 1
+  - collider: {fileID: 0}
+    wheelMesh: {fileID: 515911520136032276}
+    wheelType: 3
+    powered: 1
+    steerable: 0
+    hasBrakes: 1
+  motorPower: 1000
+  brakePower: 3000
+  powerCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 1
+      value: 1
+      inSlope: 2
+      outSlope: 2
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  maxSteerAngle: 30
+  steerSpeed: 5
+  wheelbase: 2.5
+  trackWidth: 1.5
+  useAckermannSteering: 1
+  centerOfMass: {fileID: 0}
+  downforceCoefficient: 1
+  antiRollForce: 5000
+  moveInput: {x: 0, y: 0}

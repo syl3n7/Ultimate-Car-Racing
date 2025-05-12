@@ -400,50 +400,6 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 29518975}
   m_CullTransparentMesh: 1
---- !u!1 &143252049
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 143252050}
-  - component: {fileID: 143252051}
-  m_Layer: 0
-  m_Name: MainThreadDispatcher
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &143252050
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 143252049}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -1.3499962, y: 1.8846347, z: 0.03075265}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &143252051
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 143252049}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 26c24eb9079f9412b83129070e0546e3, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
 --- !u!1 &172168488
 GameObject:
   m_ObjectHideFlags: 0
@@ -592,11 +548,10 @@ MonoBehaviour:
   m_GameObject: {fileID: 237811529}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: fca3d0ab6bf7c4fe486a99364f831916, type: 3}
+  m_Script: {fileID: 11500000, guid: 84856832f902682efb4828fff8f6a89d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  networkManagerPrefab: {fileID: 1487841392419112571, guid: 56c6a35bb38028a978920b78ae1013b0, type: 3}
-  sceneTransitionManagerPrefab: {fileID: 7966714900424533523, guid: d6a54224aa557504ba7efbdbfc604aae, type: 3}
+  gameManagerPrefab: {fileID: 0}
 --- !u!1 &256743689
 GameObject:
   m_ObjectHideFlags: 0
@@ -3389,7 +3344,7 @@ MonoBehaviour:
   m_HandleRect: {fileID: 1053947349}
   m_Direction: 0
   m_Value: 0
-  m_Size: 0.9989021
+  m_Size: 1
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
@@ -4293,66 +4248,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   trackDropdown: {fileID: 1189231587}
---- !u!1 &1234190385
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 1234190386}
-  - component: {fileID: 1234190387}
-  m_Layer: 0
-  m_Name: LobbyController
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &1234190386
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1234190385}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -1.3499962, y: 1.8846347, z: 0.03075265}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children: []
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1234190387
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1234190385}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 6085d672bccaa43f2bc79e6ae681effe, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  lobbyPanel: {fileID: 825215802}
-  roomPanel: {fileID: 1269708871}
-  hostButton: {fileID: 328584070}
-  refreshButton: {fileID: 441756374}
-  startButton: {fileID: 802991746}
-  leaveButton: {fileID: 923426091}
-  playerNameInput: {fileID: 671220331}
-  serverListContent: {fileID: 1978023405}
-  serverEntryPrefab: {fileID: 2868715983393051342, guid: 92d812dbed76a47c1be28caf5984e54e, type: 3}
-  roomInfoText: {fileID: 1766493035}
-  connectionStatusText: {fileID: 1504320159}
-  publicIdText: {fileID: 411891017}
-  debugText: {fileID: 277423761}
-  serverRefreshInterval: 5
-  gameSceneName: RaceTrack
-  defaultRoomName: Race Room
 --- !u!1 &1255056751
 GameObject:
   m_ObjectHideFlags: 0
@@ -4786,7 +4681,7 @@ MonoBehaviour:
   m_HandleRect: {fileID: 687984537}
   m_Direction: 2
   m_Value: 0
-  m_Size: 0.99830073
+  m_Size: 1
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
@@ -5831,7 +5726,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 0.000030517578, y: 0.000030517578}
+  m_AnchoredPosition: {x: 0.000030517578, y: 0}
   m_SizeDelta: {x: 294, y: 300}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1978023406
@@ -6688,8 +6583,6 @@ SceneRoots:
   - {fileID: 330585546}
   - {fileID: 410087041}
   - {fileID: 832575519}
-  - {fileID: 1234190386}
-  - {fileID: 143252050}
   - {fileID: 172168492}
   - {fileID: 1793092457}
   - {fileID: 237811530}
