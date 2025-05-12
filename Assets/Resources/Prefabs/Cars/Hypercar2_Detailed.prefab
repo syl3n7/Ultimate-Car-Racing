@@ -974,8 +974,9 @@ GameObject:
   m_Component:
   - component: {fileID: 7820492399142287604}
   - component: {fileID: 2839193478577746320}
-  - component: {fileID: 3537529950600517351}
   - component: {fileID: -8542231074967539984}
+  - component: {fileID: -2128995053291344273}
+  - component: {fileID: 7168896880489643822}
   m_Layer: 0
   m_Name: Hypercar2_Detailed
   m_TagString: Player
@@ -1015,7 +1016,7 @@ Rigidbody:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 7479397930834911822}
   serializedVersion: 4
-  m_Mass: 4000
+  m_Mass: 2500
   m_Drag: 0
   m_AngularDrag: 0.05
   m_CenterOfMass: {x: 0, y: 0, z: 0}
@@ -1034,27 +1035,6 @@ Rigidbody:
   m_Interpolate: 1
   m_Constraints: 0
   m_CollisionDetection: 2
---- !u!65 &3537529950600517351
-BoxCollider:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7479397930834911822}
-  m_Material: {fileID: 0}
-  m_IncludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_ExcludeLayers:
-    serializedVersion: 2
-    m_Bits: 0
-  m_LayerOverridePriority: 0
-  m_IsTrigger: 0
-  m_ProvidesContacts: 0
-  m_Enabled: 1
-  serializedVersion: 3
-  m_Size: {x: 0.9476317, y: 0.9284644, z: 4.548072}
-  m_Center: {x: -0.011190593, y: 0.6004859, z: 0.017373562}
 --- !u!114 &-8542231074967539984
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1068,8 +1048,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   wheels: []
-  motorPower: 1000
-  brakePower: 3000
+  motorPower: 5000
+  brakePower: 8000
   powerCurve:
     serializedVersion: 2
     m_Curve:
@@ -1083,13 +1063,22 @@ MonoBehaviour:
       inWeight: 0
       outWeight: 0
     - serializedVersion: 3
-      time: 1
-      value: 1
-      inSlope: 2
-      outSlope: 2
+      time: 0.6044997
+      value: 0.7446628
+      inSlope: 0.7028238
+      outSlope: 0.7028238
       tangentMode: 0
       weightedMode: 0
-      inWeight: 0
+      inWeight: 0.33333334
+      outWeight: 0.088551804
+    - serializedVersion: 3
+      time: 1.0012647
+      value: -0.0040605664
+      inSlope: -4.3266144
+      outSlope: -4.3266144
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.042468358
       outWeight: 0
     m_PreInfinity: 2
     m_PostInfinity: 2
@@ -1103,6 +1092,48 @@ MonoBehaviour:
   downforceCoefficient: 1
   antiRollForce: 5000
   moveInput: {x: 0, y: 0}
+--- !u!114 &-2128995053291344273
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7479397930834911822}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7b0f0f77da40b1f75b3b2f2c28f99399, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+--- !u!114 &7168896880489643822
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7479397930834911822}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 62899f850307741f2a39c98a8b639597, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  m_Actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
+  m_NotificationBehavior: 0
+  m_UIInputModule: {fileID: 0}
+  m_DeviceLostEvent:
+    m_PersistentCalls:
+      m_Calls: []
+  m_DeviceRegainedEvent:
+    m_PersistentCalls:
+      m_Calls: []
+  m_ControlsChangedEvent:
+    m_PersistentCalls:
+      m_Calls: []
+  m_ActionEvents: []
+  m_NeverAutoSwitchControlSchemes: 0
+  m_DefaultControlScheme: 
+  m_DefaultActionMap: 
+  m_SplitScreenIndex: -1
+  m_Camera: {fileID: 0}
 --- !u!1 &7688519988366812745
 GameObject:
   m_ObjectHideFlags: 0

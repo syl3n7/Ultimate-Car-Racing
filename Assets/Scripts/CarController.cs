@@ -47,15 +47,6 @@ public class CarController : MonoBehaviour
             carRigidbody.centerOfMass = centerOfMass.localPosition;
     }
     
-    public void OnMove(InputValue value)
-    {
-        if (IsLocal)
-        {
-            moveInput = value.Get<Vector2>();
-            HasInputChanges = true;
-        }
-    }
-    
     public void Initialize(string playerId, bool isLocal)
     {
         PlayerId = playerId;
@@ -66,8 +57,14 @@ public class CarController : MonoBehaviour
     void FixedUpdate()
     {
         if (wheels == null || wheels.Length == 0)
+        {
+            Debug.LogWarning("No wheels assigned to car controller");
             return;
-            
+        }
+        
+        // Add debugging output
+        Debug.Log($"Input: {moveInput}, Speed: {carRigidbody.velocity.magnitude} m/s");
+        
         ApplyMotorTorque();
         ApplySteering();
         UpdateWheelVisuals();
@@ -194,7 +191,7 @@ public class CarController : MonoBehaviour
     void ApplyDownforce()
     {
         // Simple downforce based on velocity
-        float downforce = carRigidbody.linearVelocity.sqrMagnitude * downforceCoefficient;
+        float downforce = carRigidbody.velocity.sqrMagnitude * downforceCoefficient;
         carRigidbody.AddForce(-transform.up * downforce);
     }
     
@@ -256,9 +253,66 @@ public class CarController : MonoBehaviour
     
     public void Respawn(Vector3 position, Quaternion rotation)
     {
-        carRigidbody.linearVelocity = Vector3.zero;
+        carRigidbody.velocity = Vector3.zero;
         carRigidbody.angularVelocity = Vector3.zero;
         transform.position = position;
         transform.rotation = rotation;
+    }
+
+    // Updated OnDrawGizmos with more diagnostic info
+    void OnDrawGizmos()
+    {
+        if (!Application.isPlaying)
+            return;
+            
+        if (carRigidbody != null)
+        {
+            // Draw center of mass
+            Gizmos.color = Color.red;
+            Gizmos.DrawSphere(carRigidbody.worldCenterOfMass, 0.1f);
+            
+            // Draw velocity vector
+            Gizmos.color = Color.blue;
+            Gizmos.DrawLine(
+                carRigidbody.worldCenterOfMass, 
+                carRigidbody.worldCenterOfMass + carRigidbody.velocity * 0.2f
+            );
+        }
+        
+        // Draw wheel forces
+        if (wheels != null)
+        {
+            foreach (var wheel in wheels)
+            {
+                if (wheel.collider != null && Application.isPlaying)
+                {
+                    // Get wheel position
+                    Vector3 position;
+                    Quaternion rotation;
+                    wheel.collider.GetWorldPose(out position, out rotation);
+                    
+                    // Draw motor torque
+                    Gizmos.color = Color.green;
+                    float torqueVisualization = wheel.collider.motorTorque / 1000f; // Scale for visualization
+                    Vector3 motorDirection = wheel.collider.transform.right * Mathf.Sign(wheel.collider.rpm);
+                    Gizmos.DrawRay(position, motorDirection * torqueVisualization);
+                    
+                    // Draw wheel load (weight on the wheel)
+                    WheelHit hit;
+                    if (wheel.collider.GetGroundHit(out hit))
+                    {
+                        Gizmos.color = Color.yellow;
+                        float normalForce = hit.force / 5000f; // Scale for visualization
+                        Gizmos.DrawRay(position, Vector3.up * normalForce);
+                        
+                        // Draw friction
+                        Gizmos.color = Color.red;
+                        Gizmos.DrawRay(hit.point, hit.forwardDir * hit.forwardSlip * 0.5f);
+                        Gizmos.color = Color.magenta;
+                        Gizmos.DrawRay(hit.point, hit.sidewaysDir * hit.sidewaysSlip * 0.5f);
+                    }
+                }
+            }
+        }
     }
 }
