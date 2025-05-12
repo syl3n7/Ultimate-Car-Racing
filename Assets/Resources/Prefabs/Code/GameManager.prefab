@@ -45,9 +45,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   playerCarPrefabs:
-  - {fileID: 9184046475305397073, guid: bd9902e826502aa4ab4cdc485a3d5329, type: 3}
-  - {fileID: 7479397930834911822, guid: e806b6150f4817740b62d4720384754c, type: 3}
-  - {fileID: 1810700270293503490, guid: 47e8119b19eb0b54d868f7219c30ae43, type: 3}
+  - {fileID: 2511016263285469459, guid: 102fee037e35aafc0a13666fe87352ca, type: 3}
   spawnPoints:
   - {fileID: 0}
   respawnHeight: 2
