@@ -39,6 +39,7 @@ public class UIManager : MonoBehaviour
     public Transform playerListContent;
     public GameObject playerListItemPrefab;
     public Button startGameButton;
+    public Button leaveGameButton;
     public TextMeshProUGUI playerCountText;
     
     [Header("Connection UI")]

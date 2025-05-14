@@ -12,8 +12,20 @@ public class GameManager : MonoBehaviour
     public List<GameObject> playerCarPrefabs = new List<GameObject>();
     public static int SelectedCarIndex = 0;
     public static int SelectedTrackIndex = 0;
+
+    [System.Serializable]
+    public class SpawnPointData
+    {
+        public Vector3 position;
+        public Vector3 rotation; // Euler angles for inspector
+        
+        public Quaternion GetRotation()
+        {
+            return Quaternion.Euler(rotation);
+        }
+    }
     
-    public Transform[] spawnPoints;
+    public List<SpawnPointData> spawnPoints = new List<SpawnPointData>();
     public float respawnHeight = 2f; // Height above spawn point
     
     [Header("Multiplayer Settings")]
@@ -148,11 +160,11 @@ public class GameManager : MonoBehaviour
             Vector3 spawnPosition = Vector3.zero;
             Quaternion spawnRotation = Quaternion.identity;
             
-            if (spawnPoints != null && spawnPoints.Length > 0)
+            if (spawnPoints != null && spawnPoints.Count > 0)
             {
-                Transform spawnPoint = spawnPoints[0];
+                SpawnPointData spawnPoint = spawnPoints[0];
                 spawnPosition = spawnPoint.position + Vector3.up * respawnHeight;
-                spawnRotation = spawnPoint.rotation;
+                spawnRotation = spawnPoint.GetRotation();
             }
             
             // Instantiate car prefab
@@ -241,12 +253,12 @@ public class GameManager : MonoBehaviour
                 // Use the multiplayer spawn position
                 spawnPosition = multiplayerSpawnPosition;
             }
-            else if (spawnPoints != null && spawnPoints.Length > 0)
+            else if (spawnPoints != null && spawnPoints.Count > 0)
             {
                 // Use a regular spawn point for single player
-                Transform spawnPoint = spawnPoints[0];
+                SpawnPointData spawnPoint = spawnPoints[0];
                 spawnPosition = spawnPoint.position + Vector3.up * respawnHeight;
-                spawnRotation = spawnPoint.rotation;
+                spawnRotation = spawnPoint.GetRotation();
             }
             else
             {

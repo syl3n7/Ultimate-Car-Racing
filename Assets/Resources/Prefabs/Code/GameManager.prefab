@@ -47,5 +47,8 @@ MonoBehaviour:
   playerCarPrefabs:
   - {fileID: 2511016263285469459, guid: 102fee037e35aafc0a13666fe87352ca, type: 3}
   spawnPoints:
-  - {fileID: 0}
+  - position: {x: 66, y: 3, z: 0.8}
+    rotation: {x: 0, y: 0, z: 0}
   respawnHeight: 2
+  syncInterval: 0.1
+  inputSyncInterval: 0.05
