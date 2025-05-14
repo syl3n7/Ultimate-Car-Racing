@@ -157,9 +157,10 @@ public class NetworkClient : MonoBehaviour
                     udpClient.Close();
                     udpClient = null;
                 }
-                
-                yield return new WaitForSeconds(reconnectDelay);
             }
+            
+            // Moved the yield outside of the catch block
+            yield return new WaitForSeconds(reconnectDelay);
         }
         
         if (OnConnectionFailed != null)

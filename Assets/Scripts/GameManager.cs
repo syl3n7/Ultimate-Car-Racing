@@ -265,7 +265,7 @@ public class GameManager : MonoBehaviour
         Rigidbody rb = controller.GetComponent<Rigidbody>();
         if (rb != null)
         {
-            rb.velocity = Vector3.zero;
+            rb.linearVelocity = Vector3.zero;
             rb.angularVelocity = Vector3.zero;
         }
         controller.transform.position = position;
@@ -285,7 +285,7 @@ public class GameManager : MonoBehaviour
                     playerId = playerId,
                     position = controller.transform.position,
                     rotation = controller.transform.rotation,
-                    velocity = rb.velocity,
+                    velocity = rb.linearVelocity,
                     angularVelocity = rb.angularVelocity,
                     timestamp = Time.time
                 };
@@ -314,7 +314,7 @@ public class GameManager : MonoBehaviour
                 {
                     controller.transform.position = stateData.position;
                     controller.transform.rotation = stateData.rotation;
-                    rb.velocity = stateData.velocity;
+                    rb.linearVelocity = stateData.velocity;
                     rb.angularVelocity = stateData.angularVelocity;
                 }
                 else
@@ -322,7 +322,7 @@ public class GameManager : MonoBehaviour
                     // Smoothly interpolate position and rotation
                     controller.transform.position = Vector3.Lerp(controller.transform.position, stateData.position, 0.25f);
                     controller.transform.rotation = Quaternion.Slerp(controller.transform.rotation, stateData.rotation, 0.25f);
-                    rb.velocity = Vector3.Lerp(rb.velocity, stateData.velocity, 0.25f);
+                    rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, stateData.velocity, 0.25f);
                     rb.angularVelocity = Vector3.Lerp(rb.angularVelocity, stateData.angularVelocity, 0.25f);
                 }
             }

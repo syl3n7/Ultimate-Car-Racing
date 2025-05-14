@@ -1,9 +1,11 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
 using UnityEngine.SceneManagement;
+using System.IO;
 
 public class UIManager : MonoBehaviour
 {
@@ -11,26 +13,33 @@ public class UIManager : MonoBehaviour
     
     [Header("Main Menu Panels")]
     public GameObject mainMenuPanel;
-    public GameObject multiplayerMenuPanel;
-    public GameObject hostGamePanel;
-    public GameObject joinGamePanel;
+    public GameObject instructionsPanel;
+    public GameObject creditsPanel;
+    public GameObject profilePanel;
+    public GameObject multiplayerPanel;
+    public GameObject roomListPanel;
     public GameObject roomLobbyPanel;
     
-    [Header("Host Game UI")]
-    public TMP_InputField roomNameInput;
-    public Slider maxPlayersSlider;
-    public TextMeshProUGUI maxPlayersText;
+    [Header("Profile UI")]
+    public TMP_InputField playerNameInput;
+    public Transform profileListContent;
+    public GameObject profileListItemPrefab;
+    public TextMeshProUGUI currentProfileText;
     
-    [Header("Join Game UI")]
+    [Header("Room List UI")]
     public Transform roomListContent;
     public GameObject roomListItemPrefab;
     public Button refreshRoomsButton;
+    public TMP_InputField createRoomNameInput;
+    public Slider maxPlayersSlider;
+    public TextMeshProUGUI maxPlayersText;
     
     [Header("Room Lobby UI")]
     public TextMeshProUGUI roomInfoText;
     public Transform playerListContent;
     public GameObject playerListItemPrefab;
     public Button startGameButton;
+    public TextMeshProUGUI playerCountText;
     
     [Header("Connection UI")]
     public GameObject connectionPanel;
@@ -40,11 +49,38 @@ public class UIManager : MonoBehaviour
     public GameObject notificationPanel;
     public TextMeshProUGUI notificationText;
     
+    // Player profile data
+    private string playerName = "Player";
+    private string playerId;
+    private List<ProfileData> savedProfiles = new List<ProfileData>();
+    
+    // Room management
     private List<Dictionary<string, object>> roomList = new List<Dictionary<string, object>>();
     private List<string> playersInRoom = new List<string>();
     private string currentRoomId;
     private string currentRoomName;
     private bool isHost = false;
+    
+    [Serializable]
+    public class ProfileData
+    {
+        public string name;
+        public string id;
+        public string lastPlayed;
+        
+        public ProfileData(string name, string id)
+        {
+            this.name = name;
+            this.id = id;
+            this.lastPlayed = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        }
+    }
+    
+    [Serializable]
+    public class ProfileList
+    {
+        public List<ProfileData> profiles = new List<ProfileData>();
+    }
     
     void Awake()
     {
@@ -64,6 +100,9 @@ public class UIManager : MonoBehaviour
         // Initialize UI
         HideAllPanels();
         ShowMainMenu();
+        
+        // Load saved profiles
+        LoadProfiles();
         
         // Register for network events
         NetworkClient networkClient = NetworkClient.Instance;
@@ -108,17 +147,47 @@ public class UIManager : MonoBehaviour
         }
     }
     
-    // UI Navigation
+    #region UI Navigation
+    
     public void ShowMainMenu()
     {
         HideAllPanels();
         mainMenuPanel.SetActive(true);
     }
     
-    public void ShowMultiplayerMenu()
+    public void ShowInstructions()
     {
         HideAllPanels();
-        multiplayerMenuPanel.SetActive(true);
+        instructionsPanel.SetActive(true);
+    }
+    
+    public void ShowCredits()
+    {
+        HideAllPanels();
+        creditsPanel.SetActive(true);
+    }
+    
+    public void ShowProfilePanel()
+    {
+        HideAllPanels();
+        profilePanel.SetActive(true);
+        
+        // Refresh profile list
+        RefreshProfileList();
+    }
+    
+    public void ShowMultiplayerPanel()
+    {
+        // Must have a profile to play
+        if (string.IsNullOrEmpty(playerId))
+        {
+            ShowProfilePanel();
+            ShowNotification("Please create or select a profile first");
+            return;
+        }
+        
+        HideAllPanels();
+        multiplayerPanel.SetActive(true);
         
         // Connect to server if not already connected
         if (NetworkClient.Instance != null && !NetworkClient.Instance.IsConnected())
@@ -128,20 +197,13 @@ public class UIManager : MonoBehaviour
         }
     }
     
-    public void ShowHostGamePanel()
+    public void ShowRoomListPanel()
     {
         HideAllPanels();
-        hostGamePanel.SetActive(true);
+        roomListPanel.SetActive(true);
         
-        // Set default values
-        roomNameInput.text = "Race Room";
-        maxPlayersSlider.value = 8;
-    }
-    
-    public void ShowJoinGamePanel()
-    {
-        HideAllPanels();
-        joinGamePanel.SetActive(true);
+        // Set default room name
+        createRoomNameInput.text = $"{playerName}'s Room";
         
         // Clear previous room list
         ClearRoomList();
@@ -157,9 +219,6 @@ public class UIManager : MonoBehaviour
         
         // Update room info
         UpdateRoomInfo();
-        
-        // Show/hide start game button based on host status
-        startGameButton.gameObject.SetActive(isHost);
     }
     
     public void ShowConnectionPanel(string status)
@@ -190,22 +249,141 @@ public class UIManager : MonoBehaviour
     private void HideAllPanels()
     {
         mainMenuPanel.SetActive(false);
-        multiplayerMenuPanel.SetActive(false);
-        hostGamePanel.SetActive(false);
-        joinGamePanel.SetActive(false);
+        instructionsPanel.SetActive(false);
+        creditsPanel.SetActive(false);
+        profilePanel.SetActive(false);
+        multiplayerPanel.SetActive(false);
+        roomListPanel.SetActive(false);
         roomLobbyPanel.SetActive(false);
         connectionPanel.SetActive(false);
         notificationPanel.SetActive(false);
     }
     
-    // Actions
-    public void HostGame()
+    #endregion
+    
+    #region Profile Management
+    
+    public void CreateNewProfile()
+    {
+        string name = playerNameInput.text;
+        if (string.IsNullOrEmpty(name))
+        {
+            ShowNotification("Please enter a name");
+            return;
+        }
+        
+        // Generate a player ID - ideally this would include some hardware-specific information
+        string id = GenerateUniquePlayerId(name);
+        
+        // Create new profile
+        ProfileData profile = new ProfileData(name, id);
+        savedProfiles.Add(profile);
+        
+        // Save to disk
+        SaveProfiles();
+        
+        // Set as current profile
+        SelectProfile(profile);
+        
+        // Show multiplayer panel
+        ShowMultiplayerPanel();
+    }
+    
+    private string GenerateUniquePlayerId(string name)
+    {
+        // Create a unique ID combining name, timestamp, and some system info
+        string systemInfo = SystemInfo.deviceUniqueIdentifier;
+        string timestamp = DateTime.Now.Ticks.ToString();
+        string rawId = name + systemInfo + timestamp;
+        
+        // Use simple hash for a shorter ID
+        return Math.Abs(rawId.GetHashCode()).ToString();
+    }
+    
+    private void SelectProfile(ProfileData profile)
+    {
+        playerName = profile.name;
+        playerId = profile.id;
+        
+        // Update UI
+        currentProfileText.text = $"Profile: {playerName}";
+        
+        // Update profile's last played time
+        profile.lastPlayed = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        SaveProfiles();
+        
+        ShowNotification($"Welcome, {playerName}!");
+    }
+    
+    private void RefreshProfileList()
+    {
+        // Clear existing items
+        foreach (Transform child in profileListContent)
+        {
+            Destroy(child.gameObject);
+        }
+        
+        // Add profiles
+        foreach (ProfileData profile in savedProfiles)
+        {
+            GameObject profileItem = Instantiate(profileListItemPrefab, profileListContent);
+            
+            // Set profile name and ID text
+            TextMeshProUGUI nameText = profileItem.transform.Find("NameText").GetComponent<TextMeshProUGUI>();
+            nameText.text = profile.name;
+            
+            TextMeshProUGUI infoText = profileItem.transform.Find("InfoText").GetComponent<TextMeshProUGUI>();
+            infoText.text = $"Last played: {profile.lastPlayed}";
+            
+            // Set button callback
+            Button selectButton = profileItem.GetComponent<Button>();
+            if (selectButton != null)
+            {
+                ProfileData profileCopy = profile; // Create a copy for the closure
+                selectButton.onClick.AddListener(() => {
+                    SelectProfile(profileCopy);
+                    ShowMultiplayerPanel();
+                });
+            }
+        }
+    }
+    
+    private void SaveProfiles()
+    {
+        ProfileList profileList = new ProfileList { profiles = savedProfiles };
+        string json = JsonUtility.ToJson(profileList);
+        
+        string path = Path.Combine(Application.persistentDataPath, "profiles.json");
+        File.WriteAllText(path, json);
+    }
+    
+    private void LoadProfiles()
+    {
+        string path = Path.Combine(Application.persistentDataPath, "profiles.json");
+        
+        if (File.Exists(path))
+        {
+            string json = File.ReadAllText(path);
+            ProfileList profileList = JsonUtility.FromJson<ProfileList>(json);
+            
+            if (profileList != null && profileList.profiles != null)
+            {
+                savedProfiles = profileList.profiles;
+            }
+        }
+    }
+    
+    #endregion
+    
+    #region Room Management
+    
+    public void CreateRoom()
     {
         if (NetworkClient.Instance != null && NetworkClient.Instance.IsConnected())
         {
-            string roomName = roomNameInput.text;
+            string roomName = createRoomNameInput.text;
             if (string.IsNullOrEmpty(roomName))
-                roomName = "Race Room";
+                roomName = $"{playerName}'s Room";
                 
             int maxPlayers = (int)maxPlayersSlider.value;
             
@@ -241,7 +419,7 @@ public class UIManager : MonoBehaviour
         if (NetworkClient.Instance != null && NetworkClient.Instance.IsConnected())
         {
             NetworkClient.Instance.LeaveGame();
-            ShowMultiplayerMenu();
+            ShowRoomListPanel();
             
             // Reset room state
             currentRoomId = null;
@@ -251,14 +429,13 @@ public class UIManager : MonoBehaviour
         }
     }
     
-    public void DisconnectFromServer()
+    public void ExitGame()
     {
-        if (NetworkClient.Instance != null)
-        {
-            NetworkClient.Instance.Disconnect();
-        }
-        
-        ShowMainMenu();
+        #if UNITY_EDITOR
+        UnityEditor.EditorApplication.isPlaying = false;
+        #else
+        Application.Quit();
+        #endif
     }
     
     public void RefreshRoomList()
@@ -283,10 +460,54 @@ public class UIManager : MonoBehaviour
         maxPlayersText.text = $"Max Players: {(int)value}";
     }
     
-    // Network event handlers
+    private void UpdateRoomInfo()
+    {
+        roomInfoText.text = $"Room: {currentRoomName}";
+        playerCountText.text = $"Players: {playersInRoom.Count}";
+        
+        // Show/hide start game button based on host status
+        startGameButton.gameObject.SetActive(isHost);
+        
+        // Clear player list
+        foreach (Transform child in playerListContent)
+        {
+            Destroy(child.gameObject);
+        }
+        
+        // Populate player list
+        foreach (string playerId in playersInRoom)
+        {
+            GameObject playerItem = Instantiate(playerListItemPrefab, playerListContent);
+            TextMeshProUGUI playerText = playerItem.GetComponentInChildren<TextMeshProUGUI>();
+            
+            string playerDisplayName = playerId;
+            if (playerId == NetworkClient.Instance.GetClientId())
+                playerDisplayName += " (You)";
+                
+            playerText.text = playerDisplayName;
+        }
+    }
+    
+    #endregion
+    
+    #region Network Event Handlers
+    
     private void OnConnected()
     {
         HideConnectionPanel();
+        
+        // Send player name to server
+        if (NetworkClient.Instance != null)
+        {
+            Dictionary<string, object> playerInfo = new Dictionary<string, object>
+            {
+                { "type", "PLAYER_INFO" },
+                { "name", playerName },
+                { "id", playerId }
+            };
+            
+            NetworkClient.Instance.SendTcpMessage(playerInfo);
+        }
     }
     
     private void OnDisconnected()
@@ -349,7 +570,7 @@ public class UIManager : MonoBehaviour
         if (message.ContainsKey("room_id"))
         {
             currentRoomId = message["room_id"].ToString();
-            currentRoomName = roomNameInput.text;
+            currentRoomName = createRoomNameInput.text;
             isHost = true;
             
             // Add self to players list
@@ -453,27 +674,5 @@ public class UIManager : MonoBehaviour
         }
     }
     
-    private void UpdateRoomInfo()
-    {
-        roomInfoText.text = $"Room: {currentRoomName} ({playersInRoom.Count} players)";
-        
-        // Clear player list
-        foreach (Transform child in playerListContent)
-        {
-            Destroy(child.gameObject);
-        }
-        
-        // Populate player list
-        foreach (string playerId in playersInRoom)
-        {
-            GameObject playerItem = Instantiate(playerListItemPrefab, playerListContent);
-            TextMeshProUGUI playerText = playerItem.GetComponentInChildren<TextMeshProUGUI>();
-            
-            string playerName = playerId;
-            if (playerId == NetworkClient.Instance.GetClientId())
-                playerName += " (You)";
-                
-            playerText.text = playerName;
-        }
-    }
+    #endregion
 }
