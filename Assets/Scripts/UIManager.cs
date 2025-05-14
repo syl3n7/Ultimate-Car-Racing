@@ -197,7 +197,22 @@ public class UIManager : MonoBehaviour
             NetworkClient.Instance.Connect();
         }
     }
-    
+    public void OnPlayButtonClicked()
+{
+    // Check if player has a profile
+    if (string.IsNullOrEmpty(playerId))
+    {
+        // No profile exists, direct to profile panel
+        ShowProfilePanel();
+        ShowNotification("Please create or select a profile to play");
+    }
+    else
+    {
+        // Profile exists, go directly to game mode selection or single player
+        // You can modify this to go to a game mode selection screen instead
+        ShowMultiplayerPanel();
+    }
+}
     public void ShowRoomListPanel()
     {
         HideAllPanels();
@@ -266,14 +281,18 @@ public class UIManager : MonoBehaviour
     
     public void CreateNewProfile()
     {
+        Debug.Log("CreateNewProfile called");
         string name = playerNameInput.text;
         if (string.IsNullOrEmpty(name))
         {
             ShowNotification("Please enter a name");
+            Debug.Log("Name was empty");
             return;
         }
         
-        // Generate a player ID - ideally this would include some hardware-specific information
+        Debug.Log($"Creating profile for: {name}");
+        
+        // Generate a player ID
         string id = GenerateUniquePlayerId(name);
         
         // Create new profile
@@ -285,6 +304,8 @@ public class UIManager : MonoBehaviour
         
         // Set as current profile
         SelectProfile(profile);
+        
+        Debug.Log("Profile created, showing multiplayer panel");
         
         // Show multiplayer panel
         ShowMultiplayerPanel();
