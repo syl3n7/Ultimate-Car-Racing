@@ -706,29 +706,58 @@ class RelayServer:
         if room_id not in self.room_spawn_positions:
             self.room_spawn_positions[room_id] = {}
         
-        # Base position coordinates
-        base_x, base_y, base_z = 50.0, 10.0, 50.0
+        # Track-aligned garage positions
+        track_positions = [
+            (66, -2, 0.8),   # Position 0
+            (60, -2, 0.8),   # Position 1
+            (54, -2, 0.8),   # Position 2
+            (47, -2, 0.8),   # Position 3
+            (41, -2, 0.8),   # Position 4
+            (35, -2, 0.8),   # Position 5
+            (28, -2, 0.8),   # Position 6
+            (22, -2, 0.8),   # Position 7
+            (16, -2, 0.8),   # Position 8
+            (9, -2, 0.8),    # Position 9
+            (3, -2, 0.8),    # Position 10
+            (-3, -2, 0.8),   # Position 11
+            (-9, -2, 0.8),   # Position 12
+            (-15, -2, 0.8),  # Position 13
+            (-22, -2, 0.8),  # Position 14
+            (-28, -2, 0.8),  # Position 15
+            (-34, -2, 0.8),  # Position 16
+            (-41, -2, 0.8),  # Position 17
+            (-47, -2, 0.8),  # Position 18
+            (-54, -2, 0.8)   # Position 19
+        ]
         
         # Find first unoccupied position index
         position_index = 0
         occupied_positions = self.room_spawn_positions[room_id]
         
         # Find the first available spot
-        while position_index in occupied_positions:
+        while position_index in occupied_positions and position_index < len(track_positions):
             position_index += 1
+        
+        # If all positions are taken, cycle back to the first one (but this shouldn't happen with max 20 players)
+        if position_index >= len(track_positions):
+            position_index = 0
+            print(f"Warning: All spawn positions are occupied, reusing position 0 for client {client_id}")
         
         # Mark this position as occupied by this client
         occupied_positions[position_index] = client_id
         
+        # Get the actual position coordinates from our track positions
+        pos = track_positions[position_index]
+        
         # Calculate the actual position coordinates
         spawn_position = {
-            'x': base_x + (position_index * 5.0),
-            'y': base_y,
-            'z': base_z,
+            'x': pos[0],
+            'y': pos[1],
+            'z': pos[2],
             'index': position_index  # Include the index for reference
         }
         
-        print(f"Assigned spawn position {position_index} to client {client_id} in room {room_id}")
+        print(f"Assigned spawn position {position_index} (garage {position_index+1}) to client {client_id} in room {room_id}")
         return spawn_position
 
     def release_spawn_position(self, room_id, client_id):
@@ -889,28 +918,78 @@ class AdminConsole(cmd.Cmd):
                 print(f"Player {client_id} not found")
                 return
         
+        # Track-aligned garage positions
+        track_positions = [
+            (66, -2, 0.8),   # Position 0
+            (60, -2, 0.8),   # Position 1
+            (54, -2, 0.8),   # Position 2
+            (47, -2, 0.8),   # Position 3
+            (41, -2, 0.8),   # Position 4
+            (35, -2, 0.8),   # Position 5
+            (28, -2, 0.8),   # Position 6
+            (22, -2, 0.8),   # Position 7
+            (16, -2, 0.8),   # Position 8
+            (9, -2, 0.8),    # Position 9
+            (3, -2, 0.8),    # Position 10
+            (-3, -2, 0.8),   # Position 11
+            (-9, -2, 0.8),   # Position 12
+            (-15, -2, 0.8),  # Position 13
+            (-22, -2, 0.8),  # Position 14
+            (-28, -2, 0.8),  # Position 15
+            (-34, -2, 0.8),  # Position 16
+            (-41, -2, 0.8),  # Position 17
+            (-47, -2, 0.8),  # Position 18
+            (-54, -2, 0.8)   # Position 19
+        ]
+        
+        # Find which room the player is in
+        player_room = None
+        position_index = 0
+        
+        with self.server.rooms_lock:
+            for room_id, room_data in self.server.game_rooms.items():
+                if client_id in room_data['players']:
+                    player_room = room_id
+                    break
+        
+        # Default is first position if we can't find the player's assigned position
+        position = {'x': track_positions[0][0], 'y': track_positions[0][1], 'z': track_positions[0][2]}
+        
+        # If in a room, look for their assigned spawn position
+        if player_room and player_room in self.server.room_spawn_positions:
+            spawn_positions = self.server.room_spawn_positions[player_room]
+            for pos_idx, pos_client_id in spawn_positions.items():
+                if pos_client_id == client_id:
+                    if pos_idx < len(track_positions):
+                        # Get the corresponding track position
+                        pos = track_positions[pos_idx]
+                        position = {
+                            'x': pos[0],
+                            'y': pos[1],
+                            'z': pos[2]
+                        }
+                        position_index = pos_idx
+                        print(f"Using assigned spawn position {pos_idx} (garage {pos_idx+1}) for player {client_id}")
+                    break
+        
         # Send position reset message to the client
         try:
             with self.server.clients_lock:
                 if client_id in self.server.clients:
                     self.server.send_tcp_message(self.server.clients[client_id]['tcp_socket'], {
                         'type': 'RESET_POSITION',
-                        'position': {
-                            'x': 50.0,
-                            'y': 10.0,
-                            'z': 50.0
-                        }
+                        'position': position
                     })
             
             # Update position in server's tracking
             self.server.player_positions[client_id] = {
-                'x': 50.0,
-                'y': 10.0,
-                'z': 50.0,
+                'x': position['x'],
+                'y': position['y'],
+                'z': position['z'],
                 'timestamp': time.time()
             }
             
-            print(f"Reset position for player {client_id} to (50, 10, 50)")
+            print(f"Reset position for player {client_id} to garage {position_index+1} ({position['x']}, {position['y']}, {position['z']})")
         except Exception as e:
             print(f"Error resetting position: {e}")
 

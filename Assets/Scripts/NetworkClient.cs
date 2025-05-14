@@ -64,7 +64,7 @@ public class NetworkClient : MonoBehaviour
     {
         if (Instance == null)
         {
-            Instance = NetworkClient.Instance;
+            Instance = this;  // Set the instance to the current object
             DontDestroyOnLoad(gameObject);
         }
         else

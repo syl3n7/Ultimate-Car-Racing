@@ -12,6 +12,7 @@ public class GameManager : MonoBehaviour
     public List<GameObject> playerCarPrefabs = new List<GameObject>();
     public static int SelectedCarIndex = 0;
     public static int SelectedTrackIndex = 0;
+    public List<SpawnPointData> spawnPoints = new List<SpawnPointData>(); 
 
     [System.Serializable]
     public class SpawnPointData
@@ -25,7 +26,33 @@ public class GameManager : MonoBehaviour
         }
     }
     
-    public List<SpawnPointData> spawnPoints = new List<SpawnPointData>();
+    private readonly Vector3[] trackGaragePositions = new Vector3[]
+    {
+        new Vector3(66, -2, 0.8f),   // Position 0
+        new Vector3(60, -2, 0.8f),   // Position 1
+        new Vector3(54, -2, 0.8f),   // Position 2
+        new Vector3(47, -2, 0.8f),   // Position 3
+        new Vector3(41, -2, 0.8f),   // Position 4
+        new Vector3(35, -2, 0.8f),   // Position 5
+        new Vector3(28, -2, 0.8f),   // Position 6
+        new Vector3(22, -2, 0.8f),   // Position 7
+        new Vector3(16, -2, 0.8f),   // Position 8
+        new Vector3(9, -2, 0.8f),    // Position 9
+        new Vector3(3, -2, 0.8f),    // Position 10
+        new Vector3(-3, -2, 0.8f),   // Position 11
+        new Vector3(-9, -2, 0.8f),   // Position 12
+        new Vector3(-15, -2, 0.8f),  // Position 13
+        new Vector3(-22, -2, 0.8f),  // Position 14
+        new Vector3(-28, -2, 0.8f),  // Position 15
+        new Vector3(-34, -2, 0.8f),  // Position 16
+        new Vector3(-41, -2, 0.8f),  // Position 17
+        new Vector3(-47, -2, 0.8f),  // Position 18
+        new Vector3(-54, -2, 0.8f)   // Position 19
+    };
+
+    // Add a dictionary to map players to their garage index
+    private Dictionary<string, int> playerGarageIndices = new Dictionary<string, int>();
+    private int multiplayerSpawnIndex = 0;
     public float respawnHeight = 2f; // Height above spawn point
     
     [Header("Multiplayer Settings")]
@@ -95,6 +122,17 @@ public class GameManager : MonoBehaviour
         }
     }
     
+
+    // Update SetMultiplayerSpawnPosition to accept both position and index
+    public void SetMultiplayerSpawnPosition(Vector3 position, int spawnIndex = 0)
+    {
+        isMultiplayerGame = true;
+        multiplayerSpawnPosition = position;
+        multiplayerSpawnIndex = spawnIndex;
+        
+        // Log the assigned garage for debugging
+        Debug.Log($"Local player assigned to garage {spawnIndex + 1} at position {position}");
+    }
     private void SyncPlayerState()
     {
         if (localPlayerId != null && activePlayers.ContainsKey(localPlayerId))
@@ -136,6 +174,12 @@ public class GameManager : MonoBehaviour
             Vector3 spawnPosition = multiplayerSpawnPosition;
             Quaternion spawnRotation = Quaternion.identity;
             
+            // Store the player's garage index
+            if (!playerGarageIndices.ContainsKey(localPlayerId))
+            {
+                playerGarageIndices[localPlayerId] = multiplayerSpawnIndex;
+            }
+            
             // Instantiate car prefab
             if (playerCarPrefabs.Count > 0)
             {
@@ -156,16 +200,11 @@ public class GameManager : MonoBehaviour
             // Single player spawn logic
             localPlayerId = System.Guid.NewGuid().ToString();
             
-            // Choose spawn point
-            Vector3 spawnPosition = Vector3.zero;
+            // Choose spawn point for single player (use first garage position)
+            Vector3 spawnPosition = trackGaragePositions.Length > 0 ? 
+                                trackGaragePositions[0] + Vector3.up * respawnHeight : 
+                                new Vector3(0, 5, 0);
             Quaternion spawnRotation = Quaternion.identity;
-            
-            if (spawnPoints != null && spawnPoints.Count > 0)
-            {
-                SpawnPointData spawnPoint = spawnPoints[0];
-                spawnPosition = spawnPoint.position + Vector3.up * respawnHeight;
-                spawnRotation = spawnPoint.GetRotation();
-            }
             
             // Instantiate car prefab
             if (playerCarPrefabs.Count > 0)
@@ -250,19 +289,36 @@ public class GameManager : MonoBehaviour
             
             if (isMultiplayerGame && playerId == localPlayerId)
             {
-                // Use the multiplayer spawn position
+                // Use the multiplayer spawn position from the assigned garage
                 spawnPosition = multiplayerSpawnPosition;
+                
+                // Save this player's garage index
+                if (!playerGarageIndices.ContainsKey(playerId))
+                {
+                    playerGarageIndices[playerId] = multiplayerSpawnIndex;
+                }
             }
-            else if (spawnPoints != null && spawnPoints.Count > 0)
+            else if (playerGarageIndices.TryGetValue(playerId, out int garageIndex))
             {
-                // Use a regular spawn point for single player
-                SpawnPointData spawnPoint = spawnPoints[0];
-                spawnPosition = spawnPoint.position + Vector3.up * respawnHeight;
-                spawnRotation = spawnPoint.GetRotation();
+                // Use the player's assigned garage if we know it
+                if (garageIndex >= 0 && garageIndex < trackGaragePositions.Length)
+                {
+                    spawnPosition = trackGaragePositions[garageIndex];
+                }
+                else
+                {
+                    // Fallback to default
+                    spawnPosition = new Vector3(0, 5, 0);
+                }
+            }
+            else if (trackGaragePositions.Length > 0)
+            {
+                // Use the first garage position as default
+                spawnPosition = trackGaragePositions[0] + Vector3.up * respawnHeight;
             }
             else
             {
-                // Default position if no spawn points available
+                // Last resort default position
                 spawnPosition = new Vector3(0, 5, 0);
             }
             

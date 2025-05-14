@@ -124,6 +124,17 @@ public class UIManager : MonoBehaviour
             networkClient.OnServerMessage += OnServerMessage;
         }
         
+        // Verify required references
+        if (profileListContent == null)
+        {
+            Debug.LogError("Profile list content is not assigned in the Inspector!");
+        }
+        
+        if (profileListItemPrefab == null)
+        {
+            Debug.LogError("Profile list item prefab is not assigned in the Inspector!");
+        }
+
         // Initialize max players text
         OnMaxPlayersSliderChanged(maxPlayersSlider.value);
     }
@@ -164,8 +175,15 @@ public class UIManager : MonoBehaviour
         {
             if (slider.name == "MaxPlayersSlider")
             {
+                Debug.Log("Found MaxPlayersSlider, connecting onValueChanged event");
                 slider.onValueChanged.RemoveAllListeners();
                 slider.onValueChanged.AddListener(OnMaxPlayersSliderChanged);
+                
+                // Set max value to 20
+                slider.maxValue = 20;
+                
+                // Make sure the text is updated with the initial value
+                OnMaxPlayersSliderChanged(slider.value);
             }
         }
     }
@@ -398,38 +416,80 @@ public class UIManager : MonoBehaviour
         ShowNotification($"Welcome, {playerName}!");
     }
     
-    private void RefreshProfileList()
+private void RefreshProfileList()
+{
+    // Check if profileListContent is assigned
+    if (profileListContent == null)
     {
-        // Clear existing items
-        foreach (Transform child in profileListContent)
+        Debug.LogError("Profile list content transform is not assigned in the Inspector!");
+        return;
+    }
+    
+    // Check if profileListItemPrefab is assigned
+    if (profileListItemPrefab == null)
+    {
+        Debug.LogError("Profile list item prefab is not assigned in the Inspector!");
+        return;
+    }
+    
+    // Clear existing items
+    foreach (Transform child in profileListContent)
+    {
+        Destroy(child.gameObject);
+    }
+    
+    // Add profiles
+    foreach (ProfileData profile in savedProfiles)
+    {
+        GameObject profileItem = Instantiate(profileListItemPrefab, profileListContent);
+        
+        // Check for required child objects
+        Transform nameTextTransform = profileItem.transform.Find("NameText");
+        if (nameTextTransform == null)
         {
-            Destroy(child.gameObject);
+            Debug.LogError("NameText child object not found in profile item prefab!");
+            continue;
         }
         
-        // Add profiles
-        foreach (ProfileData profile in savedProfiles)
+        TextMeshProUGUI nameText = nameTextTransform.GetComponent<TextMeshProUGUI>();
+        if (nameText == null)
         {
-            GameObject profileItem = Instantiate(profileListItemPrefab, profileListContent);
-            
-            // Set profile name and ID text
-            TextMeshProUGUI nameText = profileItem.transform.Find("NameText").GetComponent<TextMeshProUGUI>();
-            nameText.text = profile.name;
-            
-            TextMeshProUGUI infoText = profileItem.transform.Find("InfoText").GetComponent<TextMeshProUGUI>();
-            infoText.text = $"Last played: {profile.lastPlayed}";
-            
-            // Set button callback
-            Button selectButton = profileItem.GetComponent<Button>();
-            if (selectButton != null)
-            {
-                ProfileData profileCopy = profile; // Create a copy for the closure
-                selectButton.onClick.AddListener(() => {
-                    SelectProfile(profileCopy);
-                    ShowMultiplayerPanel();
-                });
-            }
+            Debug.LogError("TextMeshProUGUI component not found on NameText child!");
+            continue;
+        }
+        nameText.text = profile.name;
+        
+        Transform infoTextTransform = profileItem.transform.Find("InfoText");
+        if (infoTextTransform == null)
+        {
+            Debug.LogError("InfoText child object not found in profile item prefab!");
+            continue;
+        }
+        
+        TextMeshProUGUI infoText = infoTextTransform.GetComponent<TextMeshProUGUI>();
+        if (infoText == null)
+        {
+            Debug.LogError("TextMeshProUGUI component not found on InfoText child!");
+            continue;
+        }
+        infoText.text = $"Last played: {profile.lastPlayed}";
+        
+        // Set button callback
+        Button selectButton = profileItem.GetComponent<Button>();
+        if (selectButton != null)
+        {
+            ProfileData profileCopy = profile; // Create a copy for the closure
+            selectButton.onClick.AddListener(() => {
+                SelectProfile(profileCopy);
+                ShowMultiplayerPanel();
+            });
+        }
+        else
+        {
+            Debug.LogError("Button component not found on profile item prefab!");
         }
     }
+}
     
     private void SaveProfiles()
     {
@@ -749,18 +809,25 @@ public void CreateRoom()
                 Convert.ToSingle(spawnPosObj["z"])
             );
             
+            // Extract spawn index if available
+            int spawnIndex = 0;
+            if (spawnPosObj.ContainsKey("index"))
+            {
+                spawnIndex = Convert.ToInt32(spawnPosObj["index"]);
+            }
+            
             // Hide UI and load game scene
             HideAllPanels();
             
             // Set spawn position in GameManager
             if (GameManager.Instance != null)
             {
-                // Set the spawn position before loading the scene
-                GameManager.Instance.SetMultiplayerSpawnPosition(spawnPosition);
+                // Set the spawn position and index before loading the scene
+                GameManager.Instance.SetMultiplayerSpawnPosition(spawnPosition, spawnIndex);
                 
                 // Load the selected track scene
                 int trackIndex = GameManager.SelectedTrackIndex;
-                string sceneName = $"Track_{trackIndex + 1}";
+                string sceneName = $"RaceTrack";
                 SceneManager.LoadScene(sceneName);
             }
         }
