@@ -105,6 +105,9 @@ public class UIManager : MonoBehaviour
         // Load saved profiles
         LoadProfiles();
         
+        // Auto-connect all UI buttons
+        ConnectAllUIButtons();
+        
         // Register for network events
         NetworkClient networkClient = NetworkClient.Instance;
         if (networkClient != null)
@@ -121,12 +124,70 @@ public class UIManager : MonoBehaviour
             networkClient.OnServerMessage += OnServerMessage;
         }
         
-        // Set up UI callbacks
-        maxPlayersSlider.onValueChanged.AddListener(OnMaxPlayersSliderChanged);
-        refreshRoomsButton.onClick.AddListener(RefreshRoomList);
-        
         // Initialize max players text
         OnMaxPlayersSliderChanged(maxPlayersSlider.value);
+    }
+    
+    private void ConnectAllUIButtons()
+    {
+        Debug.Log("Connecting all UI buttons automatically");
+        
+        // Main Menu buttons
+        ConnectButton("PlayButton", OnPlayButtonClicked);
+        ConnectButton("InstructionsButton", ShowInstructions);
+        ConnectButton("CreditsButton", ShowCredits);
+        ConnectButton("ProfileButton", ShowProfilePanel);
+        ConnectButton("ExitButton", ExitGame);
+        
+        // Profile panel buttons
+        ConnectButton("CreateProfileButton", CreateNewProfile);
+        ConnectButton("BackToMainButton", ShowMainMenu);
+        
+        // Multiplayer panel buttons
+        ConnectButton("CreateGameButton", ShowRoomListPanel);
+        ConnectButton("JoinGameButton", ShowRoomListPanel);
+        ConnectButton("BackFromMultiplayerButton", ShowMainMenu);
+        
+        // Room list panel buttons
+        ConnectButton("CreateRoomButton", CreateRoom);
+        ConnectButton("JoinRoomButton", JoinSelectedRoom);
+        ConnectButton("RefreshRoomsButton", RefreshRoomList);
+        ConnectButton("BackFromRoomListButton", ShowMultiplayerPanel);
+        
+        // Room lobby panel buttons
+        ConnectButton("StartGameButton", StartGame);
+        ConnectButton("LeaveRoomButton", LeaveRoom);
+        
+        // Find and connect sliders
+        Slider[] allSliders = FindObjectsOfType<Slider>(true);
+        foreach (var slider in allSliders)
+        {
+            if (slider.name == "MaxPlayersSlider")
+            {
+                slider.onValueChanged.RemoveAllListeners();
+                slider.onValueChanged.AddListener(OnMaxPlayersSliderChanged);
+            }
+        }
+    }
+
+    private void ConnectButton(string buttonName, UnityEngine.Events.UnityAction action)
+    {
+        // Find all buttons in the scene (including inactive ones)
+        Button[] allButtons = FindObjectsOfType<Button>(true);
+        
+        foreach (var button in allButtons)
+        {
+            if (button.name == buttonName)
+            {
+                Debug.Log($"Connected button: {buttonName}");
+                button.onClick.RemoveAllListeners();
+                button.onClick.AddListener(action);
+                return;
+            }
+        }
+        
+        // If we get here, the button wasn't found
+        Debug.LogWarning($"Button not found: {buttonName}");
     }
     
     void OnDestroy()
@@ -399,20 +460,38 @@ public class UIManager : MonoBehaviour
     
     #region Room Management
     
-    public void CreateRoom()
+public void CreateRoom()
+{
+    Debug.Log("CreateRoom function called");
+    
+    if (NetworkClient.Instance == null)
     {
-        if (NetworkClient.Instance != null && NetworkClient.Instance.IsConnected())
-        {
-            string roomName = createRoomNameInput.text;
-            if (string.IsNullOrEmpty(roomName))
-                roomName = $"{playerName}'s Room";
-                
-            int maxPlayers = (int)maxPlayersSlider.value;
-            
-            ShowConnectionPanel("Creating room...");
-            NetworkClient.Instance.HostGame(roomName, maxPlayers);
-        }
+        Debug.LogError("NetworkClient.Instance is null");
+        ShowNotification("Network client not available");
+        return;
     }
+    
+    if (!NetworkClient.Instance.IsConnected())
+    {
+        Debug.LogWarning("Not connected to server");
+        ShowNotification("Not connected to server. Please try again.");
+        
+        // Try reconnecting
+        ShowConnectionPanel("Connecting to server...");
+        NetworkClient.Instance.Connect();
+        return;
+    }
+    
+    string roomName = createRoomNameInput.text;
+    if (string.IsNullOrEmpty(roomName))
+        roomName = $"{playerName}'s Room";
+        
+    int maxPlayers = (int)maxPlayersSlider.value;
+    
+    Debug.Log($"Creating room: {roomName}, Max players: {maxPlayers}");
+    ShowConnectionPanel("Creating room...");
+    NetworkClient.Instance.HostGame(roomName, maxPlayers);
+}
     
     public void JoinSelectedRoom()
     {
