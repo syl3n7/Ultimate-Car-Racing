@@ -64,11 +64,13 @@ public class NetworkClient : MonoBehaviour
     {
         if (Instance == null)
         {
-            Instance = this;  // Set the instance to the current object
+            Instance = this;  // Correctly set to this, not Instance
             DontDestroyOnLoad(gameObject);
+            Debug.Log("NetworkClient initialized as singleton");
         }
         else
         {
+            Debug.Log("Duplicate NetworkClient destroyed");
             Destroy(gameObject);
         }
     }

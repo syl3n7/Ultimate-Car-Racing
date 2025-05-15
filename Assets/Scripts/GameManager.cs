@@ -95,10 +95,63 @@ public class GameManager : MonoBehaviour
         {
             Instance = this;
             DontDestroyOnLoad(gameObject);
+            Debug.Log("GameManager initialized as singleton");
         }
-        else
+        else if (Instance != this)
         {
+            Debug.Log("Duplicate GameManager destroyed");
             Destroy(gameObject);
+            return;
+        }
+        
+        // Register for scene loading events to properly handle scene transitions
+        UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
+    }
+
+    void OnDestroy()
+    {
+        // Unregister from scene events when destroyed
+        UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoaded;
+    }
+
+    public void LoadRaceScene(int trackIndex)
+    {
+        SelectedTrackIndex = trackIndex;
+        string sceneName = $"RaceTrack{trackIndex}";
+        Debug.Log($"Loading race scene: {sceneName}");
+        UnityEngine.SceneManagement.SceneManager.LoadScene(sceneName);
+    }
+
+    public void LoadMainMenu()
+    {
+        Debug.Log("Loading main menu scene");
+        UnityEngine.SceneManagement.SceneManager.LoadScene("MainMenu");
+    }
+    private void OnSceneLoaded(UnityEngine.SceneManagement.Scene scene, UnityEngine.SceneManagement.LoadSceneMode mode)
+    {
+        string sceneName = scene.name;
+        Debug.Log($"GameManager: Scene loaded: {sceneName}");
+        
+        // Reset multiplayer flag when returning to menu scenes
+        if (sceneName.Contains("Menu") || sceneName == "MainMenu")
+        {
+            // Reset state for menu scenes
+            if (activePlayers.Count > 0)
+            {
+                foreach (var player in activePlayers.Values)
+                {
+                    if (player != null && player.gameObject != null)
+                    {
+                        Destroy(player.gameObject);
+                    }
+                }
+                activePlayers.Clear();
+            }
+        }
+        else if (sceneName.Contains("Track") || sceneName.Contains("Race"))
+        {
+            // Only spawn player in race scenes (this is now handled by scene loading)
+            Debug.Log("Race scene detected - player will be spawned if needed");
         }
     }
     
@@ -165,6 +218,13 @@ public class GameManager : MonoBehaviour
     
     public void SpawnLocalPlayer()
     {
+        // Check if we're in a menu scene
+        string currentSceneName = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name;
+        if (currentSceneName.Contains("Menu") || currentSceneName.Contains("Lobby"))
+        {
+            Debug.Log("Not spawning player in menu/lobby scene");
+            return;
+        }
         // Check if we're in a multiplayer game
         if (isMultiplayerGame && NetworkClient.Instance != null)
         {

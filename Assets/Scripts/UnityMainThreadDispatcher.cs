@@ -25,8 +25,21 @@ public class UnityMainThreadDispatcher : MonoBehaviour
         if (_instance == null)
         {
             _instance = this;
-            DontDestroyOnLoad(this.gameObject);
+            DontDestroyOnLoad(gameObject);
+            Debug.Log("UnityMainThreadDispatcher initialized");
         }
+        else if (_instance != this)
+        {
+            Debug.Log("Duplicate UnityMainThreadDispatcher destroyed");
+            Destroy(gameObject);
+        }
+    }
+
+    // Separate method for race-specific initialization
+    private void InitializeRaceSystems()
+    {
+        Debug.Log("Initializing race systems");
+        // Any race-specific setup that should only happen in race scenes
     }
 
     void Update()

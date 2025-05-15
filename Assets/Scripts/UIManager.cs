@@ -523,6 +523,12 @@ private void RefreshProfileList()
 public void CreateRoom()
 {
     Debug.Log("CreateRoom function called");
+
+    // Make sure we have a valid track selected
+    if (GameManager.SelectedTrackIndex < 0)
+    {
+        GameManager.SelectedTrackIndex = 0; // Set to default track
+    }
     
     if (NetworkClient.Instance == null)
     {
@@ -827,9 +833,31 @@ public void CreateRoom()
                 
                 // Load the selected track scene
                 int trackIndex = GameManager.SelectedTrackIndex;
-                string sceneName = $"RaceTrack";
-                SceneManager.LoadScene(sceneName);
+                
+                // Debug the selected track
+                Debug.Log($"Starting game with track index: {trackIndex}");
+                
+                // Use proper track naming - FIXED: Add track index to name
+                string sceneName = $"RaceTrack{trackIndex}";
+                
+                // Safety check - use default track if index is invalid
+                if (trackIndex < 0 || !Application.CanStreamedLevelBeLoaded(sceneName))
+                {
+                    Debug.LogWarning($"Selected track {sceneName} not found, using default track");
+                    sceneName = "RaceTrack0"; // Try default track
+                }
+                
+                Debug.Log($"Loading race scene: {sceneName}");
+                UnityEngine.SceneManagement.SceneManager.LoadScene(sceneName);
             }
+            else
+            {
+                Debug.LogError("GameManager.Instance is null when trying to start game!");
+            }
+        }
+        else
+        {
+            Debug.LogError("Spawn position data missing in game start message!");
         }
     }
     
