@@ -831,21 +831,8 @@ public void CreateRoom()
                 // Set the spawn position and index before loading the scene
                 GameManager.Instance.SetMultiplayerSpawnPosition(spawnPosition, spawnIndex);
                 
-                // Load the selected track scene
-                int trackIndex = GameManager.SelectedTrackIndex;
-                
-                // Debug the selected track
-                Debug.Log($"Starting game with track index: {trackIndex}");
-                
-                // Use proper track naming - FIXED: Add track index to name
-                string sceneName = $"RaceTrack{trackIndex}";
-                
-                // Safety check - use default track if index is invalid
-                if (trackIndex < 0 || !Application.CanStreamedLevelBeLoaded(sceneName))
-                {
-                    Debug.LogWarning($"Selected track {sceneName} not found, using default track");
-                    sceneName = "RaceTrack0"; // Try default track
-                }
+                // Load the selected track scene - FIXED: Use just "RaceTrack" instead of "RaceTrack{trackIndex}"
+                string sceneName = "RaceTrack";
                 
                 Debug.Log($"Loading race scene: {sceneName}");
                 UnityEngine.SceneManagement.SceneManager.LoadScene(sceneName);
@@ -859,8 +846,7 @@ public void CreateRoom()
         {
             Debug.LogError("Spawn position data missing in game start message!");
         }
-    }
-    
+    }    
     private void OnServerMessage(Dictionary<string, object> message)
     {
         if (message.ContainsKey("message"))

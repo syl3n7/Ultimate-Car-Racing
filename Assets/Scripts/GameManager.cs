@@ -150,8 +150,9 @@ public class GameManager : MonoBehaviour
         }
         else if (sceneName.Contains("Track") || sceneName.Contains("Race"))
         {
-            // Only spawn player in race scenes (this is now handled by scene loading)
-            Debug.Log("Race scene detected - player will be spawned if needed");
+            // Automatically spawn player in race scenes
+            Debug.Log("Race scene detected - spawning player");
+            SpawnLocalPlayer();
         }
     }
     
@@ -230,8 +231,14 @@ public class GameManager : MonoBehaviour
         {
             localPlayerId = NetworkClient.Instance.GetClientId();
             
-            // Use multiplayer spawn position
-            Vector3 spawnPosition = multiplayerSpawnPosition;
+            // Use multiplayer spawn position - ADD RESPAWN HEIGHT to Y value
+            Vector3 spawnPosition = new Vector3(
+                multiplayerSpawnPosition.x,
+                multiplayerSpawnPosition.y + respawnHeight, // Add the respawn height
+                multiplayerSpawnPosition.z
+            );
+            Debug.Log($"Spawning car at position: {spawnPosition}, original position was {multiplayerSpawnPosition}");
+            
             Quaternion spawnRotation = Quaternion.identity;
             
             // Store the player's garage index
@@ -346,11 +353,16 @@ public class GameManager : MonoBehaviour
         {
             Vector3 spawnPosition;
             Quaternion spawnRotation = Quaternion.identity;
-            
+        
             if (isMultiplayerGame && playerId == localPlayerId)
             {
                 // Use the multiplayer spawn position from the assigned garage
-                spawnPosition = multiplayerSpawnPosition;
+                // Add respawnHeight to Y
+                spawnPosition = new Vector3(
+                    multiplayerSpawnPosition.x,
+                    multiplayerSpawnPosition.y + respawnHeight,
+                    multiplayerSpawnPosition.z
+                );
                 
                 // Save this player's garage index
                 if (!playerGarageIndices.ContainsKey(playerId))
