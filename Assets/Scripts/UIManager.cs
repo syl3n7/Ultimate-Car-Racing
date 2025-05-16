@@ -6,6 +6,7 @@ using UnityEngine.UI;
 using TMPro;
 using UnityEngine.SceneManagement;
 using System.IO;
+using Newtonsoft.Json;
 
 public class UIManager : MonoBehaviour
 {
@@ -149,6 +150,8 @@ public class UIManager : MonoBehaviour
             createRoomButton.onClick.AddListener(CreateRoom);
             Debug.Log("Explicitly connected CreateRoomButton");
         }
+
+        CheckPanelReferences();
     }
     
     private void ConnectAllUIButtons()
@@ -323,8 +326,27 @@ public class UIManager : MonoBehaviour
     
     public void ShowRoomLobbyPanel()
     {
+        Debug.Log("ShowRoomLobbyPanel called - transitioning to lobby view");
+    
+        // Check if the panel exists
+        if (roomLobbyPanel == null)
+        {
+            Debug.LogError("roomLobbyPanel is null! Cannot show room lobby panel.");
+            return;
+        }
+        
         HideAllPanels();
         roomLobbyPanel.SetActive(true);
+        
+        // Verify activation
+        if (!roomLobbyPanel.activeSelf)
+        {
+            Debug.LogError("Failed to activate roomLobbyPanel!");
+        }
+        else
+        {
+            Debug.Log("Room lobby panel is now active");
+        }
         
         // Update room info
         UpdateRoomInfo();
@@ -662,30 +684,72 @@ public async void CreateRoom()
     
     private void UpdateRoomInfo()
     {
+        Debug.Log($"UpdateRoomInfo called - Room: {currentRoomName}, Players: {playersInRoom.Count}, isHost: {isHost}");
+    
+        // Check references
+        if (roomInfoText == null)
+        {
+            Debug.LogError("roomInfoText is null! Cannot update room info text.");
+            return;
+        }
+    
+        if (playerCountText == null)
+        {
+            Debug.LogError("playerCountText is null! Cannot update player count text.");
+            return;
+        }
+    
+        if (startGameButton == null)
+        {
+            Debug.LogError("startGameButton is null! Cannot update start game button visibility.");
+            return;
+        }
+    
+        if (playerListContent == null)
+        {
+            Debug.LogError("playerListContent is null! Cannot update player list.");
+            return;
+        }
+    
+        if (playerListItemPrefab == null)
+        {
+            Debug.LogError("playerListItemPrefab is null! Cannot create player list items.");
+            return;
+        }
+    
+        // Update UI elements
         roomInfoText.text = $"Room: {currentRoomName}";
         playerCountText.text = $"Players: {playersInRoom.Count}";
-        
+    
         // Show/hide start game button based on host status
         startGameButton.gameObject.SetActive(isHost);
-        
+    
         // Clear player list
         foreach (Transform child in playerListContent)
         {
             Destroy(child.gameObject);
         }
-        
+    
         // Populate player list
         foreach (string playerId in playersInRoom)
         {
             GameObject playerItem = Instantiate(playerListItemPrefab, playerListContent);
             TextMeshProUGUI playerText = playerItem.GetComponentInChildren<TextMeshProUGUI>();
-            
+    
+            if (playerText == null)
+            {
+                Debug.LogError("TextMeshProUGUI component not found on player list item!");
+                continue;
+            }
+    
             string playerDisplayName = playerId;
-            if (playerId == NetworkManager.Instance.GetClientId())
+            if (NetworkManager.Instance != null && playerId == NetworkManager.Instance.GetClientId())
                 playerDisplayName += " (You)";
-                
+    
             playerText.text = playerDisplayName;
         }
+    
+        Debug.Log("Room info updated successfully");
     }
     
     #endregion
@@ -765,6 +829,8 @@ public async void CreateRoom()
     
     private void OnGameHosted(Dictionary<string, object> message)
     {
+        Debug.Log($"OnGameHosted called with message: {JsonConvert.SerializeObject(message)}");
+        
         HideConnectionPanel();
         
         if (message.ContainsKey("room_id"))
@@ -778,8 +844,16 @@ public async void CreateRoom()
             playersInRoom.Clear();
             playersInRoom.Add(clientId);
             
+            Debug.Log($"Room created: ID={currentRoomId}, Name={currentRoomName}, ClientID={clientId}, isHost={isHost}");
+            
+            // IMPORTANT: Add explicit UI update
             ShowRoomLobbyPanel();
+            UpdateRoomInfo();
             ShowNotification("Room created successfully");
+        }
+        else
+        {
+            Debug.LogError("OnGameHosted message missing room_id!");
         }
     }
     
@@ -938,4 +1012,17 @@ public async void CreateRoom()
     }
     
     #endregion
+
+    // Add explicit check for panel references
+    private void CheckPanelReferences()
+    {
+        Debug.Log("Checking UI panel references...");
+        
+        if (mainMenuPanel == null) Debug.LogError("mainMenuPanel is null!");
+        if (multiplayerPanel == null) Debug.LogError("multiplayerPanel is null!");
+        if (roomListPanel == null) Debug.LogError("roomListPanel is null!");
+        if (roomLobbyPanel == null) Debug.LogError("roomLobbyPanel is null!");
+        if (connectionPanel == null) Debug.LogError("connectionPanel is null!");
+        if (notificationPanel == null) Debug.LogError("notificationPanel is null!");
+    }
 }

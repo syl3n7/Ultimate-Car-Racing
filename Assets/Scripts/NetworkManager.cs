@@ -254,14 +254,22 @@ public class NetworkManager : MonoBehaviour
         }
     }
     
+    // Update ProcessServerMessage method to add more debugging
     private void ProcessServerMessage(string jsonMessage)
     {
         try
         {
+            Debug.Log($"Received message from server: {jsonMessage}");
+            
             var message = JsonConvert.DeserializeObject<Dictionary<string, object>>(jsonMessage);
-            if (message == null || !message.ContainsKey("type")) return;
+            if (message == null || !message.ContainsKey("type")) 
+            {
+                Debug.LogError("Message missing type property or invalid JSON");
+                return;
+            }
             
             string messageType = message["type"].ToString();
+            Debug.Log($"Processing message of type: {messageType}");
             
             switch (messageType)
             {
@@ -289,10 +297,22 @@ public class NetworkManager : MonoBehaviour
                     break;
                 
                 case "GAME_HOSTED":
-                    _currentRoomId = message["room_id"].ToString();
-                    _isHost = true;
-                    UnityMainThreadDispatcher.Instance().Enqueue(() => 
-                        OnGameHosted?.Invoke(message));
+                    Debug.Log($"GAME_HOSTED message received: {jsonMessage}");
+                    if (message.ContainsKey("room_id"))
+                    {
+                        _currentRoomId = message["room_id"].ToString();
+                        _isHost = true;
+                        Debug.Log($"Game hosted successfully with room ID: {_currentRoomId}");
+                        UnityMainThreadDispatcher.Instance().Enqueue(() => 
+                        {
+                            Debug.Log("Invoking OnGameHosted event");
+                            OnGameHosted?.Invoke(message);
+                        });
+                    }
+                    else
+                    {
+                        Debug.LogError("GAME_HOSTED message missing room_id!");
+                    }
                     break;
                 
                 case "JOINED_GAME":
@@ -344,7 +364,7 @@ public class NetworkManager : MonoBehaviour
         }
         catch (Exception e)
         {
-            LogDebug($"Message processing error: {e.Message}");
+            Debug.LogError($"Error processing server message: {e.Message}\nMessage: {jsonMessage}");
         }
     }
     
@@ -475,10 +495,15 @@ public class NetworkManager : MonoBehaviour
         return Quaternion.identity;
     }
     
+    // Modify SendTcpMessage to add better logging
     public async Task SendTcpMessage(object message)
     {
-        if (!_isConnected || _tcpClient == null || !_tcpClient.Connected) return;
-        
+        if (!_isConnected || _tcpClient == null || !_tcpClient.Connected) 
+        {
+            Debug.LogError("Cannot send TCP message: Not connected to server");
+            return;
+        }
+            
         try
         {
             // Ensure client_id is included if we have one
@@ -488,12 +513,14 @@ public class NetworkManager : MonoBehaviour
             }
             
             string json = JsonConvert.SerializeObject(message);
+            Debug.Log($"Sending TCP message: {json}");
             byte[] data = Encoding.UTF8.GetBytes(json + "\n");
             await _tcpStream.WriteAsync(data, 0, data.Length, _cts.Token);
+            Debug.Log("TCP message sent successfully");
         }
         catch (Exception e)
         {
-            LogDebug($"Send TCP error: {e.Message}");
+            Debug.LogError($"Error sending TCP message: {e.Message}");
             
             // If serious error, disconnect
             if (!_tcpClient.Connected)
@@ -744,5 +771,11 @@ public class NetworkManager : MonoBehaviour
     {
         if (showDebugMessages)
             Debug.Log($"[NetworkManager] {message}");
+    }
+
+    // Add this method to check event subscriptions
+    public bool HasGameHostedSubscribers()
+    {
+        return OnGameHosted != null;
     }
 }
