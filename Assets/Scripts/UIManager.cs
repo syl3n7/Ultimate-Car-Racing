@@ -112,6 +112,7 @@ public class UIManager : MonoBehaviour
         NetworkClient networkClient = NetworkClient.Instance;
         if (networkClient != null)
         {
+            networkClient.OnRoomPlayersReceived += OnRoomPlayersReceived;
             networkClient.OnConnected += OnConnected;
             networkClient.OnDisconnected += OnDisconnected;
             networkClient.OnConnectionFailed += OnConnectionFailed;
@@ -216,6 +217,7 @@ public class UIManager : MonoBehaviour
         {
             networkClient.OnConnected -= OnConnected;
             networkClient.OnDisconnected -= OnDisconnected;
+            networkClient.OnRoomPlayersReceived -= OnRoomPlayersReceived;
             networkClient.OnConnectionFailed -= OnConnectionFailed;
             networkClient.OnRoomListReceived -= OnRoomListReceived;
             networkClient.OnGameHosted -= OnGameHosted;
@@ -750,23 +752,58 @@ public void CreateRoom()
         }
     }
     
+    private void OnRoomPlayersReceived(Dictionary<string, object> message)
+    {
+        if (message.ContainsKey("players"))
+        {
+            var players = message["players"] as Newtonsoft.Json.Linq.JArray;
+            if (players != null)
+            {
+                // Don't clear, just add any missing players
+                foreach (var player in players)
+                {
+                    string playerId = player.ToString();
+                    if (!playersInRoom.Contains(playerId))
+                    {
+                        playersInRoom.Add(playerId);
+                    }
+                }
+                
+                // Update the lobby UI
+                UpdateRoomInfo();
+            }
+        }
+    }
+
     private void OnJoinedGame(Dictionary<string, object> message)
     {
         HideConnectionPanel();
-        
+
         if (message.ContainsKey("room_id") && message.ContainsKey("host_id"))
         {
             currentRoomId = message["room_id"].ToString();
-            
+
             // Determine if we're the host
             string hostId = message["host_id"].ToString();
             string clientId = NetworkClient.Instance.GetClientId();
             isHost = (hostId == clientId);
-            
-            // Add self to players list
+
+            // CHANGE: Don't clear the player list, and request player list from server
             playersInRoom.Clear();
-            playersInRoom.Add(clientId);
-            
+            playersInRoom.Add(clientId); // Add self
+
+            // Request the complete player list from the server
+            if (NetworkClient.Instance != null)
+            {
+                Dictionary<string, object> playerListRequest = new Dictionary<string, object>
+                {
+                    { "type", "GET_ROOM_PLAYERS" },
+                    { "room_id", currentRoomId }
+                };
+
+                NetworkClient.Instance.SendTcpMessage(playerListRequest);
+            }
+
             ShowRoomLobbyPanel();
             ShowNotification("Joined room successfully");
         }

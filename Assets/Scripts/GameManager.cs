@@ -292,22 +292,98 @@ public class GameManager : MonoBehaviour
     
     public void SpawnRemotePlayer(string playerId, Vector3 position, Quaternion rotation)
     {
-        if (playerId == localPlayerId || activePlayers.ContainsKey(playerId))
-            return;
+        Debug.Log($"SpawnRemotePlayer called for {playerId} at positi {position}");
         
-        if (playerCarPrefabs.Count > 0)
+        // Add a persistent visual marker at the spawn position
+        GameObject marker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        marker.name = $"Marker_{playerId}";
+        marker.transform.position = position + Vector3.up * 3;
+        marker.transform.localScale = new Vector3(2f, 2f, 2f);
+        marker.GetComponent<Renderer>().material.color = Color.red;
+        
+        if (playerId == localPlayerId)
         {
-            // For simplicity, use the same car prefab for all remote players
-            int carIndex = Mathf.Clamp(SelectedCarIndex, 0, playerCarPrefabs.Count - 1);
-            GameObject playerObj = Instantiate(playerCarPrefabs[carIndex], position, rotation);
-            
-            // Initialize car controller
-            CarController carController = playerObj.GetComponent<CarController>();
-            if (carController != null)
+            Debug.LogWarning($"Not spawning remote player because it's the local player: {playerId}");
+            return;
+        }
+        
+        if (activePlayers.ContainsKey(playerId))
+        {
+            Debug.LogWarning($"Not spawning player {playerId} because they're already in activePlayers list");
+            // Yet we can't see their car - let's respawn them
+            if (activePlayers[playerId] == null || activePlayers[playerId].gameObject == null)
             {
-                InitializeCarController(carController, playerId, false);
-                activePlayers.Add(playerId, carController);
+                Debug.LogWarning($"Player exists in activePlayers but their GameObject is null! Removing entry to allow respawn.");
+                activePlayers.Remove(playerId);
             }
+            else
+            {
+                Debug.Log($"Player's car exists at {activePlayers[playerId].transform.position}");
+                return;
+            }
+        }
+        
+        // Check available car prefabs
+        if (playerCarPrefabs.Count == 0)
+        {
+            Debug.LogError("Cannot spawn remote player: No car prefabs available!");
+            return;
+        }
+        
+        Debug.Log($"SpawnRemotePlayer: Car prefabs count: {playerCarPrefabs.Count}");
+        foreach (var prefab in playerCarPrefabs)
+        {
+            Debug.Log($"Available prefab: {prefab.name}, Active? {prefab.activeSelf}");
+        }
+        
+        // For remote players, use a different car index to make them visually distinct
+        int carIndex = Mathf.Min(1, playerCarPrefabs.Count - 1); // Use second car if available
+        
+        // Adjust the spawn height to prevent being inside terrain
+        Vector3 adjustedPosition = new Vector3(
+            position.x,
+            position.y + respawnHeight,
+            position.z
+        );
+        
+        Debug.Log($"Instantiating remote player car at adjusted position: {adjustedPosition}");
+        GameObject playerObj = Instantiate(playerCarPrefabs[carIndex], adjustedPosition, rotation);
+        if (playerObj == null)
+        {
+            Debug.LogError("Failed to instantiate remote player car prefab!");
+            return;
+        }
+        
+        playerObj.name = $"RemotePlayer_{playerId}";
+        Debug.Log($"Remote player GameObject created: {playerObj.name}");
+        
+        // Make sure the car is visible
+        Renderer[] renderers = playerObj.GetComponentsInChildren<Renderer>();
+        Debug.Log($"Remote car has {renderers.Length} renderers");
+        foreach (var renderer in renderers)
+        {
+            // Make remote cars red to distinguish them
+            foreach (var material in renderer.materials)
+            {
+                if (material.HasProperty("_Color"))
+                {
+                    material.color = Color.red;
+                }
+            }
+        }
+        
+        // Initialize car controller
+        CarController carController = playerObj.GetComponent<CarController>();
+        if (carController != null)
+        {
+            Debug.Log($"Remote player CarController found, initializing it");
+            InitializeCarController(carController, playerId, false);
+            activePlayers.Add(playerId, carController);
+            Debug.Log($"Remote player {playerId} successfully added to activePlayers dictionary");
+        }
+        else
+        {
+            Debug.LogError($"CarController component not found on prefab for player {playerId}!");
         }
     }
     
@@ -347,13 +423,19 @@ public class GameManager : MonoBehaviour
         }
     }
     
+    // Helper method to check if a player is already active
+    public bool IsPlayerActive(string playerId)
+    {
+        return activePlayers.ContainsKey(playerId);
+    }
+    
     public void RespawnPlayer(string playerId)
     {
         if (activePlayers.TryGetValue(playerId, out CarController controller))
         {
             Vector3 spawnPosition;
             Quaternion spawnRotation = Quaternion.identity;
-        
+
             if (isMultiplayerGame && playerId == localPlayerId)
             {
                 // Use the multiplayer spawn position from the assigned garage
@@ -363,7 +445,7 @@ public class GameManager : MonoBehaviour
                     multiplayerSpawnPosition.y + respawnHeight,
                     multiplayerSpawnPosition.z
                 );
-                
+
                 // Save this player's garage index
                 if (!playerGarageIndices.ContainsKey(playerId))
                 {
@@ -393,7 +475,7 @@ public class GameManager : MonoBehaviour
                 // Last resort default position
                 spawnPosition = new Vector3(0, 5, 0);
             }
-            
+
             RespawnCarController(controller, spawnPosition, spawnRotation);
         }
     }
@@ -442,16 +524,27 @@ public class GameManager : MonoBehaviour
         // If we don't have this player yet, spawn them
         if (!activePlayers.ContainsKey(playerId))
         {
+            Debug.Log($"Player {playerId} not in activePlayers list - spawning them");
             SpawnRemotePlayer(playerId, stateData.position, stateData.rotation);
         }
         
         if (activePlayers.TryGetValue(playerId, out CarController controller))
         {
+            // Check if the controller and its GameObject are still valid
+            if (controller == null || controller.gameObject == null)
+            {
+                Debug.LogWarning($"Controller for player {playerId} was destroyed - respawning");
+                activePlayers.Remove(playerId);
+                SpawnRemotePlayer(playerId, stateData.position, stateData.rotation);
+                return;
+            }
+            
             Rigidbody rb = controller.GetComponent<Rigidbody>();
             if (rb != null)
             {
                 if (teleport)
                 {
+                    Debug.Log($"Teleporting player {playerId} to {stateData.position}");
                     controller.transform.position = stateData.position;
                     controller.transform.rotation = stateData.rotation;
                     rb.linearVelocity = stateData.velocity;

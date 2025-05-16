@@ -514,6 +514,20 @@ class RelayServer:
                         del self.player_positions[bot_id]
             
             print(f"Cleaned up bots for stress test requested by {client_id}")
+
+        elif msg_type == 'GET_ROOM_PLAYERS':
+            room_id = data.get('room_id')
+            if room_id in self.game_rooms:
+                room = self.game_rooms[room_id]
+                players_list = room['players']
+                
+                # Send the player list to the requesting client
+                with self.clients_lock:
+                    if client_id in self.clients:
+                        self.send_tcp_message(self.clients[client_id]['tcp_socket'], {
+                            'type': 'ROOM_PLAYERS',
+                            'players': players_list
+                        })
     
     def udp_listen(self):
         """Handle incoming UDP datagrams"""
