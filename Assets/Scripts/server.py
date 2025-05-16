@@ -338,6 +338,7 @@ class RelayServer:
                             for player_id in room['players']:
                                 if player_id != client_id and player_id in self.clients:
                                     try:
+                                        # FIX: ADD THIS LINE - SEND THE MESSAGE!
                                         self.send_tcp_message(self.clients[player_id]['tcp_socket'], {
                                             'type': 'RELAY',
                                             'from': client_id,
@@ -748,6 +749,7 @@ class RelayServer:
                         for player_id in room['players']:
                             if player_id in self.clients:
                                 try:
+                                    # FIX: ADD THIS LINE - SEND THE MESSAGE!
                                     self.send_tcp_message(self.clients[player_id]['tcp_socket'], message)
                                 except Exception as e:
                                     print(f"Error sending disconnect notification to {player_id}: {e}")
