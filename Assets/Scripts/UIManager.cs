@@ -859,6 +859,18 @@ public void CreateRoom()
                 spawnIndex = Convert.ToInt32(spawnPosObj["index"]);
             }
             
+            // Request the player list before loading the scene
+            if (NetworkClient.Instance != null && !string.IsNullOrEmpty(currentRoomId))
+            {
+                Dictionary<string, object> playerListRequest = new Dictionary<string, object>
+                {
+                    { "type", "GET_ROOM_PLAYERS" },
+                    { "room_id", currentRoomId }
+                };
+                
+                NetworkClient.Instance.SendTcpMessage(playerListRequest);
+            }
+
             // Hide UI and load game scene
             HideAllPanels();
             
