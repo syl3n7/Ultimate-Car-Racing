@@ -414,7 +414,18 @@ public class NetworkClient : MonoBehaviour
                     break;
 
                 case "JOINED_GAME":
-                    OnJoinedGame(message);
+                    if (message.ContainsKey("room_id") && message.ContainsKey("host_id"))
+                    {
+                        currentRoomId = message["room_id"].ToString();
+                        hostId = message["host_id"].ToString(); // Store the host ID
+                        
+                        // Check if we are the host
+                        isHost = (hostId == clientId);
+                        
+                        // Call the event handler on the main thread
+                        if (OnJoinedGame != null)
+                            UnityMainThreadDispatcher.Instance().Enqueue(() => OnJoinedGame.Invoke(message));
+                    }
                     break;
 
                 case "PLAYER_JOINED":
@@ -856,21 +867,5 @@ public class NetworkClient : MonoBehaviour
     {
         if (showDebugMessages)
             Debug.Log($"[NetworkClient] {message}");
-    }
-
-    private void OnJoinedGame(Dictionary<string, object> message)
-    {
-        HideConnectionPanel();
-
-        if (message.ContainsKey("room_id") && message.ContainsKey("host_id"))
-        {
-            currentRoomId = message["room_id"].ToString();
-            hostId = message["host_id"].ToString(); // Store the host ID
-            
-            // Check if we are the host
-            isHost = (hostId == clientId);
-            
-            // ... rest of your existing code...
-        }
     }
 }
