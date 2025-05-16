@@ -138,6 +138,17 @@ public class UIManager : MonoBehaviour
 
         // Initialize max players text
         OnMaxPlayersSliderChanged(maxPlayersSlider.value);
+
+        // After your existing ConnectAllUIButtons call
+    
+        // Explicitly connect the Create Room button for certainty
+        Button createRoomButton = FindObjectOfType<Button>(true);
+        if (createRoomButton != null && createRoomButton.name == "CreateRoomButton")
+        {
+            createRoomButton.onClick.RemoveAllListeners();
+            createRoomButton.onClick.AddListener(CreateRoom);
+            Debug.Log("Explicitly connected CreateRoomButton");
+        }
     }
     
     private void ConnectAllUIButtons()
@@ -523,7 +534,7 @@ private void RefreshProfileList()
     
     #region Room Management
     
-public void CreateRoom()
+public async void CreateRoom()
 {
     Debug.Log("CreateRoom function called");
 
@@ -540,15 +551,32 @@ public void CreateRoom()
         return;
     }
     
+    // Show connection panel immediately to provide feedback
+    ShowConnectionPanel("Creating room...");
+    
+    // Make sure we're connected before attempting to create a room
     if (!NetworkManager.Instance.IsConnected())
     {
-        Debug.LogWarning("Not connected to server");
-        ShowNotification("Not connected to server. Please try again.");
-        
-        // Try reconnecting
+        Debug.Log("Not connected, connecting first...");
         ShowConnectionPanel("Connecting to server...");
-        _ = NetworkManager.Instance.Connect();
-        return;
+        
+        try {
+            // Actually await the connection this time
+            await NetworkManager.Instance.Connect();
+            
+            // Check if we're connected after the await
+            if (!NetworkManager.Instance.IsConnected()) {
+                ShowNotification("Could not connect to server");
+                HideConnectionPanel();
+                return;
+            }
+        }
+        catch (Exception e) {
+            Debug.LogError($"Connection error: {e.Message}");
+            ShowNotification("Connection error: " + e.Message);
+            HideConnectionPanel();
+            return;
+        }
     }
     
     string roomName = createRoomNameInput.text;
@@ -558,7 +586,6 @@ public void CreateRoom()
     int maxPlayers = (int)maxPlayersSlider.value;
     
     Debug.Log($"Creating room: {roomName}, Max players: {maxPlayers}");
-    ShowConnectionPanel("Creating room...");
     NetworkManager.Instance.HostGame(roomName, maxPlayers);
 }
     

@@ -588,7 +588,13 @@ public class NetworkManager : MonoBehaviour
     // Game-specific methods
     public void HostGame(string roomName, int maxPlayers = 20)
     {
-        if (!_isConnected) return;
+        if (!_isConnected) 
+        {
+            Debug.LogError("Cannot host game: Not connected to server");
+            return;
+        }
+        
+        Debug.Log($"Sending HOST_GAME request for room: {roomName}, maxPlayers: {maxPlayers}");
         
         var message = new Dictionary<string, object>
         {
