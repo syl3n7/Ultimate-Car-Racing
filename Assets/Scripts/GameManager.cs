@@ -168,6 +168,7 @@ public class GameManager : MonoBehaviour
         }
     }
     
+    // In BroadcastSceneReady method - update to use NetworkManager
     private IEnumerator BroadcastSceneReady()
     {
         // Wait for grace period to ensure scene is fully loaded
@@ -177,26 +178,27 @@ public class GameManager : MonoBehaviour
         sceneFullyLoaded = true;
         
         // Broadcast "scene ready" message to all players
-        if (NetworkClient.Instance != null && isMultiplayerGame)
+        if (NetworkManager.Instance != null && isMultiplayerGame)
         {
             Dictionary<string, object> readyMessage = new Dictionary<string, object>
             {
                 { "type", "RELAY_MESSAGE" },
-                { "room_id", NetworkClient.Instance.GetCurrentRoomId() },
+                { "room_id", NetworkManager.Instance.GetCurrentRoomId() },
                 { "message", new Dictionary<string, object> {
                     { "type", "SCENE_READY" },
                     { "player_id", localPlayerId }
                 }}
             };
             
-            NetworkClient.Instance.SendTcpMessage(readyMessage);
+            _ = NetworkManager.Instance.SendTcpMessage(readyMessage);
             Debug.Log("Sent SCENE_READY message to all players");
         }
     }
 
+    // In Update method - update to use NetworkManager
     void Update()
     {
-        if (isMultiplayerGame && NetworkClient.Instance != null && NetworkClient.Instance.IsConnected() && sceneFullyLoaded)
+        if (isMultiplayerGame && NetworkManager.Instance != null && NetworkManager.Instance.IsConnected() && sceneFullyLoaded)
         {
             // Only sync state when scene is fully loaded
             if (Time.time - lastStateSyncTime > syncInterval)
@@ -244,6 +246,7 @@ public class GameManager : MonoBehaviour
             activePlayers[localPlayerId] != null;
     }
 
+    // In HandlePlayerReady method - update to use NetworkManager
     public void HandlePlayerReady(string playerId)
     {
         Debug.Log($"Player {playerId} is ready - forcing state sync");
@@ -252,9 +255,9 @@ public class GameManager : MonoBehaviour
         {
             // Send our state to the newly ready player
             var stateData = GetPlayerState(localPlayerId);
-            if (stateData != null && NetworkClient.Instance != null)
+            if (stateData != null && NetworkManager.Instance != null)
             {
-                NetworkClient.Instance.SendPlayerState(stateData);
+                NetworkManager.Instance.SendPlayerState(stateData);
                 Debug.Log($"Sent state update to newly ready player {playerId}");
             }
         }

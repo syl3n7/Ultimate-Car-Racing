@@ -209,23 +209,24 @@ public class UIManager : MonoBehaviour
         Debug.LogWarning($"Button not found: {buttonName}");
     }
     
+    // In OnDestroy method - replace NetworkClient references with NetworkManager
     void OnDestroy()
     {
         // Unregister network events
-        NetworkClient networkClient = NetworkClient.Instance;
-        if (networkClient != null)
+        NetworkManager networkManager = NetworkManager.Instance;
+        if (networkManager != null)
         {
-            networkClient.OnConnected -= OnConnected;
-            networkClient.OnDisconnected -= OnDisconnected;
-            networkClient.OnRoomPlayersReceived -= OnRoomPlayersReceived;
-            networkClient.OnConnectionFailed -= OnConnectionFailed;
-            networkClient.OnRoomListReceived -= OnRoomListReceived;
-            networkClient.OnGameHosted -= OnGameHosted;
-            networkClient.OnJoinedGame -= OnJoinedGame;
-            networkClient.OnPlayerJoined -= OnPlayerJoined;
-            networkClient.OnPlayerDisconnected -= OnPlayerDisconnected;
-            networkClient.OnGameStarted -= OnGameStarted;
-            networkClient.OnServerMessage -= OnServerMessage;
+            networkManager.OnConnected -= (msg) => OnConnected();
+            networkManager.OnDisconnected -= (msg) => OnDisconnected();
+            networkManager.OnConnectionFailed -= (msg) => OnConnectionFailed();
+            networkManager.OnRoomListReceived -= OnRoomListReceived;
+            networkManager.OnGameHosted -= OnGameHosted;
+            networkManager.OnRoomJoined -= OnJoinedGame;
+            networkManager.OnPlayerJoined -= OnPlayerJoined;
+            networkManager.OnPlayerDisconnected -= OnPlayerDisconnected;
+            networkManager.OnGameStarted -= OnGameStarted;
+            networkManager.OnServerMessage -= OnServerMessage;
+            networkManager.OnRoomPlayersReceived -= OnRoomPlayersReceived;
         }
     }
     
@@ -561,12 +562,13 @@ public void CreateRoom()
     NetworkManager.Instance.HostGame(roomName, maxPlayers);
 }
     
+    // In JoinSelectedRoom method - update to use NetworkManager
     public void JoinSelectedRoom()
     {
-        if (currentRoomId != null && NetworkClient.Instance != null && NetworkClient.Instance.IsConnected())
+        if (currentRoomId != null && NetworkManager.Instance != null && NetworkManager.Instance.IsConnected())
         {
             ShowConnectionPanel("Joining room...");
-            NetworkClient.Instance.JoinGame(currentRoomId);
+            NetworkManager.Instance.JoinGame(currentRoomId);
         }
         else
         {
@@ -574,20 +576,21 @@ public void CreateRoom()
         }
     }
     
+    // In StartGame method - update to use NetworkManager
     public void StartGame()
     {
-        if (isHost && NetworkClient.Instance != null && NetworkClient.Instance.IsConnected())
+        if (isHost && NetworkManager.Instance != null && NetworkManager.Instance.IsConnected())
         {
             ShowConnectionPanel("Starting game...");
-            NetworkClient.Instance.StartGame();
+            NetworkManager.Instance.StartGame();
         }
     }
     
     public void LeaveRoom()
     {
-        if (NetworkClient.Instance != null && NetworkClient.Instance.IsConnected())
+        if (NetworkManager.Instance != null && NetworkManager.Instance.IsConnected())
         {
-            NetworkClient.Instance.LeaveGame();
+            NetworkManager.Instance.LeaveGame();
             ShowRoomListPanel();
             
             // Reset room state
@@ -607,12 +610,13 @@ public void CreateRoom()
         #endif
     }
     
+    // In RefreshRoomList method - update to use NetworkManager
     public void RefreshRoomList()
     {
-        if (NetworkClient.Instance != null && NetworkClient.Instance.IsConnected())
+        if (NetworkManager.Instance != null && NetworkManager.Instance.IsConnected())
         {
             ClearRoomList();
-            NetworkClient.Instance.RequestRoomList();
+            NetworkManager.Instance.RequestRoomList();
         }
     }
     
@@ -650,7 +654,7 @@ public void CreateRoom()
             TextMeshProUGUI playerText = playerItem.GetComponentInChildren<TextMeshProUGUI>();
             
             string playerDisplayName = playerId;
-            if (playerId == NetworkClient.Instance.GetClientId())
+            if (playerId == NetworkManager.Instance.GetClientId())
                 playerDisplayName += " (You)";
                 
             playerText.text = playerDisplayName;
@@ -666,7 +670,7 @@ public void CreateRoom()
         HideConnectionPanel();
         
         // Send player name to server
-        if (NetworkClient.Instance != null)
+        if (NetworkManager.Instance != null)
         {
             Dictionary<string, object> playerInfo = new Dictionary<string, object>
             {
@@ -675,7 +679,7 @@ public void CreateRoom()
                 { "id", playerId }
             };
             
-            NetworkClient.Instance.SendTcpMessage(playerInfo);
+            _ = NetworkManager.Instance.SendTcpMessage(playerInfo);
         }
     }
     
@@ -743,7 +747,7 @@ public void CreateRoom()
             isHost = true;
             
             // Add self to players list
-            string clientId = NetworkClient.Instance.GetClientId();
+            string clientId = NetworkManager.Instance.GetClientId();
             playersInRoom.Clear();
             playersInRoom.Add(clientId);
             
@@ -775,6 +779,7 @@ public void CreateRoom()
         }
     }
 
+    // In OnJoinedGame method - update to use NetworkManager
     private void OnJoinedGame(Dictionary<string, object> message)
     {
         HideConnectionPanel();
@@ -785,7 +790,7 @@ public void CreateRoom()
 
             // Determine if we're the host
             string hostId = message["host_id"].ToString();
-            string clientId = NetworkClient.Instance.GetClientId();
+            string clientId = NetworkManager.Instance.GetClientId();
             isHost = (hostId == clientId);
 
             // CHANGE: Don't clear the player list, and request player list from server
@@ -793,7 +798,7 @@ public void CreateRoom()
             playersInRoom.Add(clientId); // Add self
 
             // Request the complete player list from the server
-            if (NetworkClient.Instance != null)
+            if (NetworkManager.Instance != null)
             {
                 Dictionary<string, object> playerListRequest = new Dictionary<string, object>
                 {
@@ -801,7 +806,7 @@ public void CreateRoom()
                     { "room_id", currentRoomId }
                 };
 
-                NetworkClient.Instance.SendTcpMessage(playerListRequest);
+                _ = NetworkManager.Instance.SendTcpMessage(playerListRequest);
             }
 
             ShowRoomLobbyPanel();
@@ -860,7 +865,7 @@ public void CreateRoom()
             }
             
             // Request the player list before loading the scene
-            if (NetworkClient.Instance != null && !string.IsNullOrEmpty(currentRoomId))
+            if (NetworkManager.Instance != null && !string.IsNullOrEmpty(currentRoomId))
             {
                 Dictionary<string, object> playerListRequest = new Dictionary<string, object>
                 {
@@ -868,7 +873,7 @@ public void CreateRoom()
                     { "room_id", currentRoomId }
                 };
                 
-                NetworkClient.Instance.SendTcpMessage(playerListRequest);
+                _ = NetworkManager.Instance.SendTcpMessage(playerListRequest);
             }
 
             // Hide UI and load game scene

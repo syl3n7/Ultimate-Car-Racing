@@ -9,9 +9,9 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 8901063129558861309}
-  - component: {fileID: 719347544748194510}
+  - component: {fileID: 625864769487328849}
   m_Layer: 0
-  m_Name: NetworkClient
+  m_Name: NetworkManager
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -32,7 +32,7 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &719347544748194510
+--- !u!114 &625864769487328849
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -41,12 +41,11 @@ MonoBehaviour:
   m_GameObject: {fileID: 794126849708622356}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 2cd4ea785db6c4472b579a2251feb9f1, type: 3}
+  m_Script: {fileID: 11500000, guid: 16eeac70443a24dfeb85ca15e57e13eb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  serverIP: 89.114.116.19
+  serverIP: 127.0.0.1
   tcpPort: 7777
   udpPort: 7778
-  heartbeatInterval: 1
-  reconnectDelay: 3
+  heartbeatInterval: 5
   showDebugMessages: 1
