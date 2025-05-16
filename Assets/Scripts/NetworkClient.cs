@@ -68,6 +68,8 @@ public class NetworkClient : MonoBehaviour
             Instance = this;  // Correctly set to this, not Instance
             DontDestroyOnLoad(gameObject);
             Debug.Log("NetworkClient initialized as singleton");
+            // Register for scene load events
+           UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
         }
         else
         {
@@ -114,6 +116,70 @@ public class NetworkClient : MonoBehaviour
         StartCoroutine(ConnectToServer());
     }
     
+    private void OnSceneLoaded(UnityEngine.SceneManagement.Scene scene, UnityEngine.SceneManagement.LoadSceneMode mode)
+    {
+        string sceneName = scene.name;
+        Debug.Log($"NetworkClient: Scene loaded: {sceneName}");
+        
+        // If we're in a race scene and connected to server, 
+        // ensure the UDP listener is active
+        if (isConnected && (sceneName.Contains("Track") || sceneName.Contains("Race")))
+        {
+            // If we need to reconnect or re-establish UDP after scene change
+            if (udpClient == null || !udpThreadRunning)
+            {
+                try {
+                    if (udpClient == null)
+                    {
+                        udpClient = new UdpClient();
+                        udpClient.Connect(udpServerEndPoint);
+                        Debug.Log("Recreated UDP client after scene change");
+                    }
+                    
+                    if (!udpThreadRunning && udpListenThread == null)
+                    {
+                        udpThreadRunning = true;
+                        udpListenThread = new Thread(new ThreadStart(UdpListenForMessages));
+                        udpListenThread.IsBackground = true;
+                        udpListenThread.Start();
+                        Debug.Log("Restarted UDP listener thread after scene change");
+                    }
+                }
+                catch (Exception e) {
+                    Debug.LogError($"Error reconnecting UDP after scene change: {e.Message}");
+                }
+            }
+            
+            // Send scene ready notification after delay to give scene time to load
+            StartCoroutine(SendSceneReadyAfterDelay(2.0f));
+        }
+    }
+
+    private IEnumerator SendSceneReadyAfterDelay(float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        
+        if (isConnected && !string.IsNullOrEmpty(currentRoomId))
+        {
+            Dictionary<string, object> readyMessage = new Dictionary<string, object>
+            {
+                { "type", "RELAY_MESSAGE" },
+                { "room_id", currentRoomId },
+                { "message", new Dictionary<string, object> {
+                    { "type", "SCENE_READY" },
+                    { "player_id", clientId }
+                }}
+            };
+            
+            SendTcpMessage(readyMessage);
+            Debug.Log("Sent scene ready notification after scene change");
+        }
+    }
+    
+    void OnDestroy()
+    {
+        UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoaded;
+    }
     private IEnumerator ConnectToServer()
     {
         while (isConnecting)
@@ -124,48 +190,48 @@ public class NetworkClient : MonoBehaviour
                 tcpClient = new TcpClient();
                 tcpClient.Connect(serverEndPoint);
                 tcpStream = tcpClient.GetStream();
-                
+
                 // Create UDP client
                 udpClient = new UdpClient();
                 udpClient.Connect(udpServerEndPoint);
-                
+
                 isConnected = true;
                 isConnecting = false;
-                
+
                 // Start listening threads
                 StartListeningThreads();
-                
+
                 // Start heartbeat
                 InvokeRepeating("SendHeartbeat", 0f, heartbeatInterval);
-                
+
                 if (OnConnected != null)
                     OnConnected.Invoke();
-                
+
                 LogDebug("Connected to server successfully");
                 yield break;
             }
             catch (Exception e)
             {
                 LogDebug($"Connection failed: {e.Message}. Retrying in {reconnectDelay} seconds...");
-                
+
                 // Clean up any partial connections
                 if (tcpClient != null)
                 {
                     tcpClient.Close();
                     tcpClient = null;
                 }
-                
+
                 if (udpClient != null)
                 {
                     udpClient.Close();
                     udpClient = null;
                 }
             }
-            
+
             // Moved the yield outside of the catch block
             yield return new WaitForSeconds(reconnectDelay);
         }
-        
+
         if (OnConnectionFailed != null)
             OnConnectionFailed.Invoke();
     }
@@ -271,9 +337,41 @@ public class NetworkClient : MonoBehaviour
         {
             Dictionary<string, object> message = JsonConvert.DeserializeObject<Dictionary<string, object>>(jsonMessage);
             string messageType = message["type"].ToString();
-            
+
             switch (messageType)
             {
+                case "RELAY":
+                if (OnRelayReceived != null)
+                {
+                    // Check if this is a SCENE_READY message
+                    Dictionary<string, object> relayData = message["message"] as Dictionary<string, object>;
+                    if (relayData != null && relayData.ContainsKey("type") && relayData["type"].ToString() == "SCENE_READY")
+                    {
+                        string readyPlayerId = relayData["player_id"].ToString();
+                        Debug.Log($"Received SCENE_READY from player {readyPlayerId}");
+                        
+                        // Force request the player's state to ensure we have it
+                        if (GameManager.Instance != null && readyPlayerId != clientId)
+                        {
+                            Dictionary<string, object> stateRequest = new Dictionary<string, object>
+                            {
+                                { "type", "RELAY_MESSAGE" },
+                                { "target_id", readyPlayerId },
+                                { "message", new Dictionary<string, object> {
+                                    { "type", "REQUEST_STATE" },
+                                    { "player_id", clientId }
+                                }}
+                            };
+                            
+                            SendTcpMessage(stateRequest);
+                            Debug.Log($"Requesting initial state from player {readyPlayerId}");
+                        }
+                    }
+                    
+                    UnityMainThreadDispatcher.Instance().Enqueue(() => OnRelayReceived.Invoke(message));
+                }
+                break;
+
                 case "ROOM_PLAYERS":
                     if (OnRoomPlayersReceived != null)
                         UnityMainThreadDispatcher.Instance().Enqueue(() => OnRoomPlayersReceived.Invoke(message));
@@ -283,11 +381,11 @@ public class NetworkClient : MonoBehaviour
                     clientId = message["client_id"].ToString();
                     LogDebug($"Registered with server, client ID: {clientId}");
                     break;
-                
+
                 case "HEARTBEAT_ACK":
                     // Just acknowledge, no action needed
                     break;
-                
+
                 case "PING_RESPONSE":
                     if (message.ContainsKey("timestamp"))
                     {
@@ -296,55 +394,50 @@ public class NetworkClient : MonoBehaviour
                         latency = (now - sentTime);
                     }
                     break;
-                
+
                 case "GAME_LIST":
                     if (OnRoomListReceived != null)
                         UnityMainThreadDispatcher.Instance().Enqueue(() => OnRoomListReceived.Invoke(message));
                     break;
-                
+
                 case "GAME_HOSTED":
                     currentRoomId = message["room_id"].ToString();
                     if (OnGameHosted != null)
                         UnityMainThreadDispatcher.Instance().Enqueue(() => OnGameHosted.Invoke(message));
                     break;
-                
+
                 case "GAME_STARTED":
                     if (OnGameStarted != null)
                         UnityMainThreadDispatcher.Instance().Enqueue(() => OnGameStarted.Invoke(message));
                     break;
-                
+
                 case "JOINED_GAME":
                     currentRoomId = message["room_id"].ToString();
                     if (OnJoinedGame != null)
                         UnityMainThreadDispatcher.Instance().Enqueue(() => OnJoinedGame.Invoke(message));
                     break;
-                
+
                 case "PLAYER_JOINED":
                     if (OnPlayerJoined != null)
                         UnityMainThreadDispatcher.Instance().Enqueue(() => OnPlayerJoined.Invoke(message));
                     break;
-                
+
                 case "PLAYER_DISCONNECTED":
                     if (OnPlayerDisconnected != null)
                         UnityMainThreadDispatcher.Instance().Enqueue(() => OnPlayerDisconnected.Invoke(message));
                     break;
-                
-                case "RELAY":
-                    if (OnRelayReceived != null)
-                        UnityMainThreadDispatcher.Instance().Enqueue(() => OnRelayReceived.Invoke(message));
-                    break;
-                
+
                 case "KICKED":
                     if (OnKicked != null)
                         UnityMainThreadDispatcher.Instance().Enqueue(() => OnKicked.Invoke(message));
                     HandleDisconnect();
                     break;
-                
+
                 case "SERVER_MESSAGE":
                     if (OnServerMessage != null)
                         UnityMainThreadDispatcher.Instance().Enqueue(() => OnServerMessage.Invoke(message));
                     break;
-                
+
                 case "RESET_POSITION":
                     var position = message["position"] as Newtonsoft.Json.Linq.JObject;
                     Vector3 resetPos = new Vector3(
@@ -352,13 +445,14 @@ public class NetworkClient : MonoBehaviour
                         Convert.ToSingle(position["y"]),
                         Convert.ToSingle(position["z"])
                     );
-                    
-                    UnityMainThreadDispatcher.Instance().Enqueue(() => {
+
+                    UnityMainThreadDispatcher.Instance().Enqueue(() =>
+                    {
                         if (GameManager.Instance != null)
                             GameManager.Instance.RespawnPlayer(clientId);
                     });
                     break;
-                
+
                 default:
                     LogDebug($"Unknown message type: {messageType}");
                     break;
@@ -374,123 +468,72 @@ public class NetworkClient : MonoBehaviour
     {
         try
         {
-            // Add full message logging for debugging purposes
-            Debug.Log($"Raw UDP message received: {jsonMessage}");
-            
+            // Log the full message for debugging
+            Debug.Log($"RAW UDP: {jsonMessage}");
+
             Dictionary<string, object> message = JsonConvert.DeserializeObject<Dictionary<string, object>>(jsonMessage);
-            
-            // Check for message type and structure
-            if (!message.ContainsKey("type"))
-            {
-                Debug.LogWarning("UDP message missing 'type' field");
-                return;
-            }
-            
+
             string messageType = message["type"].ToString();
-            
-            string fromField = message.ContainsKey("from") ? "from" : 
-                               message.ContainsKey("client_id") ? "client_id" : null;
-            
-            // Early return if we can't identify the sender
-            if (fromField == null || !message.ContainsKey(fromField) || !message.ContainsKey("data"))
+
+            // Get client ID from either "from" or "client_id" field
+            string fromField = message.ContainsKey("from") ? "from" :
+                            message.ContainsKey("client_id") ? "client_id" : null;
+
+            if (fromField == null || !message.ContainsKey(fromField))
             {
-                Debug.LogWarning($"UDP message missing sender identification or data: {jsonMessage}");
+                Debug.LogWarning($"UDP message missing sender ID: {jsonMessage}");
                 return;
             }
-            
+
             string fromClientId = message[fromField].ToString();
-            Dictionary<string, object> gameData = message["data"] as Dictionary<string, object>;
-            
-            // Debug message receipt 
-            Debug.Log($"UDP Message Received: Type={messageType}, From={fromClientId}, My ID={clientId}, JSON Length={jsonMessage.Length}");
-            
-            // Skip processing our own messages
+
+            // Skip our own messages
             if (fromClientId == clientId)
             {
-                Debug.Log("Skipping own UDP message");
                 return;
             }
-            
-            if (gameData != null && gameData.ContainsKey("type"))
+
+            // Process GAME_DATA messages
+            if (messageType == "GAME_DATA" && message.ContainsKey("data"))
             {
-                string dataType = gameData["type"].ToString();
-                Debug.Log($"Game Data Type: {dataType}");
-                
-                if (dataType == "PLAYER_STATE" && gameData.ContainsKey("state"))
+                var gameData = message["data"] as Dictionary<string, object>;
+                if (gameData != null && gameData.ContainsKey("type"))
                 {
-                    var stateData = gameData["state"] as Dictionary<string, object>;
-                    Debug.Log($"Received PLAYER_STATE from {fromClientId}, My ID={clientId}");
-                    
-                    UnityMainThreadDispatcher.Instance().Enqueue(() => {
-                        if (GameManager.Instance != null)
+                    string dataType = gameData["type"].ToString();
+
+                    // For PLAYER_STATE, extract state and pass to GameManager
+                    if (dataType == "PLAYER_STATE" && gameData.ContainsKey("state"))
+                    {
+                        Debug.Log($"*** RECEIVED PLAYER_STATE FROM {fromClientId} ***");
+
+                        var stateData = gameData["state"] as Dictionary<string, object>;
+                        UnityMainThreadDispatcher.Instance().Enqueue(() =>
                         {
-                            Debug.Log($"Processing state data from: {fromClientId}");
-                            
-                            // Create a visual indicator at the reported position (for debugging)
-                            try {
-                                var posData = stateData["position"] as Dictionary<string, object>;
-                                Vector3 reportedPos = new Vector3(
-                                    Convert.ToSingle(posData["x"]),
-                                    Convert.ToSingle(posData["y"]),
-                                    Convert.ToSingle(posData["z"])
-                                );
-                                
-                                Debug.DrawLine(reportedPos, reportedPos + Vector3.up * 5, Color.red, 2.0f);
-                                Debug.Log($"Remote player position: {reportedPos}");
-                            } catch (Exception) { /* Ignore visualization errors */ }
-                            
-                            var playerState = new GameManager.PlayerStateData
+                            if (GameManager.Instance != null)
                             {
-                                playerId = fromClientId,
-                                position = ParseVector3(stateData["position"]),
-                                rotation = ParseQuaternion(stateData["rotation"]),
-                                velocity = ParseVector3(stateData["velocity"]),
-                                angularVelocity = ParseVector3(stateData["angularVelocity"]),
-                                timestamp = Convert.ToSingle(stateData["timestamp"])
-                            };
-                            
-                            // Force teleport for the first state update to ensure spawning
-                            bool firstUpdate = !GameManager.Instance.IsPlayerActive(fromClientId);
-                            if (firstUpdate) {
-                                Debug.Log($"**** SPAWNING NEW REMOTE PLAYER: {fromClientId} at {playerState.position} ****");
+                                // Create a PlayerStateData object to pass to GameManager
+                                var playerState = new GameManager.PlayerStateData
+                                {
+                                    playerId = fromClientId,
+                                    position = ParseVector3(stateData["position"]),
+                                    rotation = ParseQuaternion(stateData["rotation"]),
+                                    velocity = ParseVector3(stateData["velocity"]),
+                                    angularVelocity = ParseVector3(stateData["angularVelocity"]),
+                                    timestamp = Convert.ToSingle(stateData["timestamp"])
+                                };
+
+                                // Force teleport on first state update
+                                bool firstUpdate = true; // Always force teleport to ensure cars are created
+                                GameManager.Instance.ApplyPlayerState(playerState, firstUpdate);
                             }
-                            
-                            // This is the critical line that spawns the remote player
-                            GameManager.Instance.ApplyPlayerState(playerState, firstUpdate);
-                        }
-                        else
-                        {
-                            Debug.LogError("GameManager.Instance is null when processing player state");
-                        }
-                    });
-                }
-                else if (dataType == "PLAYER_INPUT" && gameData.ContainsKey("input"))
-                {
-                    var inputData = gameData["input"] as Dictionary<string, object>;
-                    
-                    UnityMainThreadDispatcher.Instance().Enqueue(() => {
-                        if (GameManager.Instance != null && fromClientId != clientId)
-                        {
-                            var playerInput = new GameManager.PlayerInputData
-                            {
-                                playerId = fromClientId,
-                                steering = Convert.ToSingle(inputData["steering"]),
-                                throttle = Convert.ToSingle(inputData["throttle"]),
-                                brake = Convert.ToSingle(inputData["brake"]),
-                                timestamp = Convert.ToSingle(inputData["timestamp"])
-                            };
-                            
-                            GameManager.Instance.ApplyPlayerInput(playerInput);
-                        }
-                    });
+                        });
+                    }
                 }
             }
         }
         catch (Exception e)
         {
-            Debug.LogError($"Error processing UDP message: {e.Message}");
-            Debug.LogError($"Stack trace: {e.StackTrace}");
-            Debug.LogError($"Raw message: {jsonMessage}");
+            Debug.LogError($"Error processing UDP message: {e.Message}\n{e.StackTrace}");
         }
     }
     

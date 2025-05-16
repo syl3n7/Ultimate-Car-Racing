@@ -13,6 +13,9 @@ public class GameManager : MonoBehaviour
     public static int SelectedCarIndex = 0;
     public static int SelectedTrackIndex = 0;
     public List<SpawnPointData> spawnPoints = new List<SpawnPointData>(); 
+    private bool sceneFullyLoaded = false;
+    private float sceneLoadTime = 3f;
+    private const float SCENE_LOAD_GRACE_PERIOD = 7f; // Wait 7 seconds after scene loads
 
     [System.Serializable]
     public class SpawnPointData
@@ -110,8 +113,10 @@ public class GameManager : MonoBehaviour
 
     void OnDestroy()
     {
-        // Unregister from scene events when destroyed
-        UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoaded;
+        if (Instance == this)
+        {
+            UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoaded;
+        }
     }
 
     public void LoadRaceScene(int trackIndex)
@@ -131,6 +136,10 @@ public class GameManager : MonoBehaviour
     {
         string sceneName = scene.name;
         Debug.Log($"GameManager: Scene loaded: {sceneName}");
+        
+        // Reset scene loaded flag
+        sceneFullyLoaded = false;
+        sceneLoadTime = Time.time;
         
         // Reset multiplayer flag when returning to menu scenes
         if (sceneName.Contains("Menu") || sceneName == "MainMenu")
@@ -153,21 +162,50 @@ public class GameManager : MonoBehaviour
             // Automatically spawn player in race scenes
             Debug.Log("Race scene detected - spawning player");
             SpawnLocalPlayer();
+            
+            // Broadcast scene ready message after grace period
+            StartCoroutine(BroadcastSceneReady());
         }
     }
     
+    private IEnumerator BroadcastSceneReady()
+    {
+        // Wait for grace period to ensure scene is fully loaded
+        yield return new WaitForSeconds(SCENE_LOAD_GRACE_PERIOD);
+        
+        // Mark scene as fully loaded
+        sceneFullyLoaded = true;
+        
+        // Broadcast "scene ready" message to all players
+        if (NetworkClient.Instance != null && isMultiplayerGame)
+        {
+            Dictionary<string, object> readyMessage = new Dictionary<string, object>
+            {
+                { "type", "RELAY_MESSAGE" },
+                { "room_id", NetworkClient.Instance.GetCurrentRoomId() },
+                { "message", new Dictionary<string, object> {
+                    { "type", "SCENE_READY" },
+                    { "player_id", localPlayerId }
+                }}
+            };
+            
+            NetworkClient.Instance.SendTcpMessage(readyMessage);
+            Debug.Log("Sent SCENE_READY message to all players");
+        }
+    }
+
     void Update()
     {
-        if (isMultiplayerGame && NetworkClient.Instance != null && NetworkClient.Instance.IsConnected())
+        if (isMultiplayerGame && NetworkClient.Instance != null && NetworkClient.Instance.IsConnected() && sceneFullyLoaded)
         {
-            // Sync state at regular intervals
+            // Only sync state when scene is fully loaded
             if (Time.time - lastStateSyncTime > syncInterval)
             {
                 SyncPlayerState();
                 lastStateSyncTime = Time.time;
             }
             
-            // Sync input at regular intervals or when input changes
+            // Only sync input when scene is fully loaded
             if (Time.time - lastInputSyncTime > inputSyncInterval)
             {
                 SyncPlayerInput();
@@ -199,6 +237,28 @@ public class GameManager : MonoBehaviour
         }
     }
     
+    private bool IsLocalPlayerActive()
+    {
+        return !string.IsNullOrEmpty(localPlayerId) && 
+            activePlayers.ContainsKey(localPlayerId) && 
+            activePlayers[localPlayerId] != null;
+    }
+
+    public void HandlePlayerReady(string playerId)
+    {
+        Debug.Log($"Player {playerId} is ready - forcing state sync");
+
+        if (playerId != localPlayerId && IsLocalPlayerActive())
+        {
+            // Send our state to the newly ready player
+            var stateData = GetPlayerState(localPlayerId);
+            if (stateData != null && NetworkClient.Instance != null)
+            {
+                NetworkClient.Instance.SendPlayerState(stateData);
+                Debug.Log($"Sent state update to newly ready player {playerId}");
+            }
+        }
+    }
     private void SyncPlayerInput()
     {
         if (localPlayerId != null && activePlayers.ContainsKey(localPlayerId))
@@ -292,15 +352,7 @@ public class GameManager : MonoBehaviour
     
     public void SpawnRemotePlayer(string playerId, Vector3 position, Quaternion rotation)
     {
-        Debug.Log($"*** ATTEMPTING TO SPAWN REMOTE PLAYER: {playerId} at {position} ***");
-        
-        // Make debug marker persistent across scenes
-        GameObject marker = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        marker.name = $"Marker_{playerId}";
-        marker.transform.position = position + Vector3.up * 3;
-        marker.transform.localScale = new Vector3(2f, 2f, 2f);
-        marker.GetComponent<Renderer>().material.color = Color.red;
-        DontDestroyOnLoad(marker);
+        Debug.Log($"*** SPAWNING REMOTE PLAYER: {playerId} at {position} ***");
         
         if (playerId == localPlayerId)
         {
@@ -308,115 +360,112 @@ public class GameManager : MonoBehaviour
             return;
         }
         
-        // Check the prefab list before continuing
-        if (playerCarPrefabs == null || playerCarPrefabs.Count == 0)
+        // Remove any existing player with this ID first
+        if (activePlayers.ContainsKey(playerId))
         {
-            Debug.LogError("Cannot spawn remote player: playerCarPrefabs list is null or empty!");
-            return;
+            var existingController = activePlayers[playerId];
+            if (existingController != null && existingController.gameObject != null)
+            {
+                Debug.Log($"Destroying existing player object for {playerId}");
+                Destroy(existingController.gameObject);
+            }
+            activePlayers.Remove(playerId);
         }
         
+        // Force-create a new player (always refresh)
         try 
         {
-            // Always use index 0 for remote players until we have selection system
-            int carIndex = 0;
-            if (carIndex >= playerCarPrefabs.Count || playerCarPrefabs[carIndex] == null)
+            // Make sure we have prefabs
+            if (playerCarPrefabs == null || playerCarPrefabs.Count == 0)
             {
-                Debug.LogError($"Invalid car prefab index {carIndex} - prefab count: {playerCarPrefabs.Count}");
+                Debug.LogError("Cannot spawn remote player: No car prefabs available!");
                 return;
             }
             
-            // Adjust position to be above ground
+            // Use the second car model if available
+            int carIndex = Mathf.Min(1, playerCarPrefabs.Count - 1);
+            
+            // Adjust position to prevent being stuck in ground
             Vector3 spawnPosition = new Vector3(
-                position.x, 
+                position.x,
                 position.y + respawnHeight,
                 position.z
             );
             
-            Debug.Log($"Instantiating remote car prefab {playerCarPrefabs[carIndex].name} at {spawnPosition}");
+            // Instantiate the car
+            GameObject carObject = Instantiate(playerCarPrefabs[carIndex], spawnPosition, rotation);
+            carObject.name = $"RemotePlayer_{playerId}";
             
-            // Force-instantiate the car in the active scene
-            GameObject playerObj = Instantiate(playerCarPrefabs[carIndex], spawnPosition, rotation);
-            
-            if (playerObj == null)
+            // Make it red to distinguish from local car
+            Renderer[] renderers = carObject.GetComponentsInChildren<Renderer>();
+            foreach (Renderer r in renderers)
             {
-                Debug.LogError("Failed to instantiate player car - returned null GameObject");
-                return;
-            }
-            
-            // Set a distinctive name for the remote player
-            playerObj.name = $"RemotePlayer_{playerId}";
-            
-            // Visually distinguish remote cars by making them red
-            foreach (Renderer renderer in playerObj.GetComponentsInChildren<Renderer>())
-            {
-                foreach (Material mat in renderer.materials)
+                foreach (Material mat in r.materials)
                 {
-                    if (mat != null && mat.HasProperty("_Color"))
+                    if (mat.HasProperty("_Color"))
                     {
                         mat.color = Color.red;
                     }
                 }
             }
             
-            // Set up the car controller for remote control
-            CarController controller = playerObj.GetComponent<CarController>();
-            if (controller != null)
+            // Set up the car controller
+            CarController carController = carObject.GetComponent<CarController>();
+            if (carController != null)
             {
-                InitializeCarController(controller, playerId, false);
-                activePlayers[playerId] = controller;
+                InitializeCarController(carController, playerId, false);
+                activePlayers[playerId] = carController;
                 Debug.Log($"SUCCESS - Remote player {playerId} added to active players dictionary");
             }
             else
             {
-                Debug.LogError($"CarController component not found on instantiated car for {playerId}");
-                Destroy(playerObj);
+                Debug.LogError($"Car controller not found on car prefab for player {playerId}!");
+                Destroy(carObject);
             }
         }
         catch (Exception e)
         {
-            Debug.LogError($"Exception spawning remote player: {e.Message}\n{e.StackTrace}");
+            Debug.LogError($"Error spawning remote player: {e.Message}\n{e.StackTrace}");
         }
     }
     
     // Initialize the car controller
     private void InitializeCarController(CarController controller, string playerId, bool isLocal)
     {
+        // Tag the car with the player ID
+        controller.playerId = playerId;
+        
         if (isLocal)
         {
-            // Local player setup with input
-            PlayerInput playerInput = controller.gameObject.GetComponent<PlayerInput>();
-            if (playerInput == null)
+            // Setup for local car
+            controller.isLocalPlayer = true;
+            
+            // Setup camera follow
+            CameraFollow cameraFollow = FindObjectOfType<CameraFollow>();
+            if (cameraFollow != null)
             {
-                playerInput = controller.gameObject.AddComponent<PlayerInput>();
-                // Rest of your local player input setup...
+                cameraFollow.target = controller.transform;
             }
+            
+            // Make sure controls are enabled
+            controller.EnableControls(true);
         }
         else
         {
-            // For remote players, completely remove the PlayerInput component
-            PlayerInput playerInput = controller.gameObject.GetComponent<PlayerInput>();
-            if (playerInput != null)
-            {
-                Destroy(playerInput);
-            }
+            // Setup for remote car - important differences
+            controller.isLocalPlayer = false;
             
-            // Also ensure the car is not using physics sleeping
+            // Disable local controls
+            controller.EnableControls(false);
+            
+            // Make sure physics simulation is active
             Rigidbody rb = controller.GetComponent<Rigidbody>();
             if (rb != null)
             {
-                rb.sleepThreshold = 0.0f;  // Never sleep
                 rb.isKinematic = false;
+                rb.sleepThreshold = 0.0f; // Never sleep
             }
-            
-            // Force the car to be active and visible
-            controller.gameObject.SetActive(true);
         }
-    }
-    
-    // Helper method to check if a player is already active
-    public bool IsPlayerActive(string playerId)
-    {
-        return activePlayers.ContainsKey(playerId);
     }
     
     public void RespawnPlayer(string playerId)
@@ -506,21 +555,31 @@ public class GameManager : MonoBehaviour
         return null;
     }
     
+    // Helper method to check if a player is already active
+    public bool IsPlayerActive(string playerId)
+    {
+        // Check if the player exists in the active players dictionary
+        if (string.IsNullOrEmpty(playerId))
+        return false;
+        
+        return activePlayers.ContainsKey(playerId) && 
+        activePlayers[playerId] != null && 
+        activePlayers[playerId].gameObject != null;
+    }
+
     // Apply remote player state
     public void ApplyPlayerState(PlayerStateData stateData, bool teleport = false)
     {
         string playerId = stateData.playerId;
         Debug.Log($"ApplyPlayerState called for player {playerId} at position {stateData.position}");
 
-        string playerId = stateData.playerId;
-        
         // If we don't have this player yet, spawn them
         if (!activePlayers.ContainsKey(playerId))
         {
             Debug.Log($"Player {playerId} not in activePlayers list - spawning them");
             SpawnRemotePlayer(playerId, stateData.position, stateData.rotation);
         }
-        
+
         if (activePlayers.TryGetValue(playerId, out CarController controller))
         {
             // Check if the controller and its GameObject are still valid
@@ -531,7 +590,7 @@ public class GameManager : MonoBehaviour
                 SpawnRemotePlayer(playerId, stateData.position, stateData.rotation);
                 return;
             }
-            
+
             Rigidbody rb = controller.GetComponent<Rigidbody>();
             if (rb != null)
             {

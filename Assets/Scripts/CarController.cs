@@ -9,9 +9,27 @@ public class CarController : MonoBehaviour {
     public Vector2 moveInput;
     public float powerMultiplier = 1;
     public float maxSteer = 30, wheelbase = 2.5f, trackwidth = 1.5f;
-
-    public void OnMove(InputValue value) {
+    public string playerId { get; set; }
+    public bool isLocalPlayer { get; set; }
+    public void OnMove(InputValue value)
+    {
         moveInput = value.Get<Vector2>();
+    }
+
+    public void EnableControls(bool enabled)
+    {
+        // If disabling controls, reset input
+        if (!enabled)
+        {
+            moveInput = Vector2.zero;
+        }
+        
+        // Enable/disable the player input component if it exists
+        PlayerInput playerInput = GetComponent<PlayerInput>();
+        if (playerInput != null)
+        {
+            playerInput.enabled = enabled;
+        }
     }
 
     void FixedUpdate() {

@@ -334,13 +334,17 @@ class RelayServer:
                     if room_id in self.game_rooms:
                         room = self.game_rooms[room_id]
                         with self.clients_lock:
+                            # Send to all players in the room except the sender
                             for player_id in room['players']:
                                 if player_id != client_id and player_id in self.clients:
-                                    self.send_tcp_message(self.clients[player_id]['tcp_socket'], {
-                                        'type': 'RELAY',
-                                        'from': client_id,
-                                        'message': message
-                                    })
+                                    try:
+                                        self.send_tcp_message(self.clients[player_id]['tcp_socket'], {
+                                            'type': 'RELAY',
+                                            'from': client_id,
+                                            'message': message
+                                        })
+                                    except Exception as e:
+                                        print(f"Error relaying message to {player_id}: {e}")
         
         elif msg_type == 'PING':
             # Send ping response
@@ -552,6 +556,7 @@ class RelayServer:
         
         return active_players
 
+ 
     def handle_udp_message(self, data, addr):
         """Process a message received over UDP"""
         try:
@@ -619,17 +624,21 @@ class RelayServer:
                     
                     with self.clients_lock:
                         for player_id in active_players:
-                            if player_id != client_id and player_id in self.clients and 'udp_ip' in self.clients[player_id]:
-                                target_addr = (self.clients[player_id]['udp_ip'], self.clients[player_id]['udp_port'])
-                                try:
-                                    self.udp_socket.sendto(serialized_data, target_addr)
-                                except Exception as e:
-                                    print(f"Error sending UDP data to {player_id}: {e}")
+                            # Skip sending back to the original sender
+                            if player_id != client_id and player_id in self.clients:
+                                # Make sure we have UDP info for this client
+                                if 'udp_ip' in self.clients[player_id] and 'udp_port' in self.clients[player_id]:
+                                    target_addr = (self.clients[player_id]['udp_ip'], self.clients[player_id]['udp_port'])
+                                    try:
+                                        self.udp_socket.sendto(serialized_data, target_addr)
+                                    except Exception as e:
+                                        print(f"Error forwarding UDP to {player_id}: {e}")
                 
         except json.JSONDecodeError:
             print(f"Invalid UDP JSON from {addr}")
         except Exception as e:
             print(f"UDP message handling error: {e}")
+
     
     def send_tcp_message(self, socket, data):
         """Send a JSON message over TCP"""
@@ -784,7 +793,6 @@ class RelayServer:
                 del positions[idx]
                 print(f"Released spawn position {idx} from client {client_id} in room {room_id}")
 
-    # Add a method to handle player disconnection from a room
     def handle_player_disconnect(self, room_id, client_id):
         # Release the spawn position
         self.release_spawn_position(room_id, client_id)
@@ -806,7 +814,10 @@ class RelayServer:
                     with self.clients_lock:
                         for player_id in room['players']:
                             if player_id in self.clients:
-                                self.send_tcp_message(self.clients[player_id]['tcp_socket'], message)
+                                try:
+                                    self.send_tcp_message(self.clients[player_id]['tcp_socket'], message)
+                                except Exception as e:
+                                    print(f"Error sending disconnect notification to {player_id}: {e}")
 
 
 class AdminConsole(cmd.Cmd):

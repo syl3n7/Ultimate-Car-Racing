@@ -47,6 +47,6 @@ MonoBehaviour:
   serverIP: 89.114.116.19
   tcpPort: 7777
   udpPort: 7778
-  heartbeatInterval: 5
+  heartbeatInterval: 1
   reconnectDelay: 3
   showDebugMessages: 1
