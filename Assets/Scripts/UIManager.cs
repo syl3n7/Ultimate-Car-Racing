@@ -760,12 +760,13 @@ public async void CreateRoom()
     {
         HideConnectionPanel();
         
-        // Send player name to server
+        // Send player name to server - note that we actually don't need to do this
+        // because the NetworkManager already sent the NAME command
         if (NetworkManager.Instance != null)
         {
             Dictionary<string, object> playerInfo = new Dictionary<string, object>
             {
-                { "type", "PLAYER_INFO" },
+                { "command", "PLAYER_INFO" },
                 { "name", playerName },
                 { "id", playerId }
             };
