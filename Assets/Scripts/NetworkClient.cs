@@ -67,7 +67,7 @@ public class NetworkClient : MonoBehaviour
     {
         if (Instance == null)
         {
-            Instance = this;  // Correctly set to this, not Instance
+            Instance = this;
             DontDestroyOnLoad(gameObject);
             Debug.Log("NetworkClient initialized as singleton");
             // Register for scene load events
@@ -100,7 +100,7 @@ public class NetworkClient : MonoBehaviour
         Dictionary<string, object> pingMessage = new Dictionary<string, object>
         {
             { "type", "PING" },
-            { "timestamp", DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond }
+            { "timestamp", DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond }
         };
         
         SendTcpMessage(pingMessage);
@@ -182,6 +182,7 @@ public class NetworkClient : MonoBehaviour
     {
         UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoaded;
     }
+    
     private IEnumerator ConnectToServer()
     {
         while (isConnecting)
@@ -205,6 +206,9 @@ public class NetworkClient : MonoBehaviour
 
                 // Start heartbeat
                 InvokeRepeating("SendHeartbeat", 0f, heartbeatInterval);
+
+                // Send initial registration message
+                SendRegistration();
 
                 if (OnConnected != null)
                     OnConnected.Invoke();
@@ -230,12 +234,27 @@ public class NetworkClient : MonoBehaviour
                 }
             }
 
-            // Moved the yield outside of the catch block
             yield return new WaitForSeconds(reconnectDelay);
         }
 
         if (OnConnectionFailed != null)
             OnConnectionFailed.Invoke();
+    }
+    
+    private void SendRegistration()
+    {
+        // Send initial registration message that includes client info
+        Dictionary<string, object> registrationMessage = new Dictionary<string, object>
+        {
+            { "type", "REGISTER" },
+            { "client_info", new Dictionary<string, object> {
+                { "name", SystemInfo.deviceName },
+                { "platform", Application.platform.ToString() },
+                { "version", Application.version }
+            }}
+        };
+        
+        SendTcpMessage(registrationMessage);
     }
     
     private void StartListeningThreads()
@@ -274,7 +293,7 @@ public class NetworkClient : MonoBehaviour
                 string data = Encoding.UTF8.GetString(receiveBuffer, 0, bytesRead);
                 messageBuilder.Append(data);
                 
-                // Process any complete messages
+                // Process any complete messages - messages are now newline delimited for the new server
                 string messages = messageBuilder.ToString();
                 int newlineIndex;
                 
@@ -343,36 +362,36 @@ public class NetworkClient : MonoBehaviour
             switch (messageType)
             {
                 case "RELAY":
-                if (OnRelayReceived != null)
-                {
-                    // Check if this is a SCENE_READY message
-                    Dictionary<string, object> relayData = message["message"] as Dictionary<string, object>;
-                    if (relayData != null && relayData.ContainsKey("type") && relayData["type"].ToString() == "SCENE_READY")
+                    if (OnRelayReceived != null)
                     {
-                        string readyPlayerId = relayData["player_id"].ToString();
-                        Debug.Log($"Received SCENE_READY from player {readyPlayerId}");
-                        
-                        // Force request the player's state to ensure we have it
-                        if (GameManager.Instance != null && readyPlayerId != clientId)
+                        // Check if this is a SCENE_READY message
+                        Dictionary<string, object> relayData = message["message"] as Dictionary<string, object>;
+                        if (relayData != null && relayData.ContainsKey("type") && relayData["type"].ToString() == "SCENE_READY")
                         {
-                            Dictionary<string, object> stateRequest = new Dictionary<string, object>
-                            {
-                                { "type", "RELAY_MESSAGE" },
-                                { "target_id", readyPlayerId },
-                                { "message", new Dictionary<string, object> {
-                                    { "type", "REQUEST_STATE" },
-                                    { "player_id", clientId }
-                                }}
-                            };
+                            string readyPlayerId = relayData["player_id"].ToString();
+                            Debug.Log($"Received SCENE_READY from player {readyPlayerId}");
                             
-                            SendTcpMessage(stateRequest);
-                            Debug.Log($"Requesting initial state from player {readyPlayerId}");
+                            // Force request the player's state to ensure we have it
+                            if (GameManager.Instance != null && readyPlayerId != clientId)
+                            {
+                                Dictionary<string, object> stateRequest = new Dictionary<string, object>
+                                {
+                                    { "type", "RELAY_MESSAGE" },
+                                    { "target_id", readyPlayerId },
+                                    { "message", new Dictionary<string, object> {
+                                        { "type", "REQUEST_STATE" },
+                                        { "player_id", clientId }
+                                    }}
+                                };
+                                
+                                SendTcpMessage(stateRequest);
+                                Debug.Log($"Requesting initial state from player {readyPlayerId}");
+                            }
                         }
+                        
+                        UnityMainThreadDispatcher.Instance().Enqueue(() => OnRelayReceived.Invoke(message));
                     }
-                    
-                    UnityMainThreadDispatcher.Instance().Enqueue(() => OnRelayReceived.Invoke(message));
-                }
-                break;
+                    break;
 
                 case "ROOM_PLAYERS":
                     if (OnRoomPlayersReceived != null)
@@ -392,7 +411,7 @@ public class NetworkClient : MonoBehaviour
                     if (message.ContainsKey("timestamp"))
                     {
                         long sentTime = Convert.ToInt64(message["timestamp"]);
-                        long now = DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond;
+                        long now = DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond;
                         latency = (now - sentTime);
                     }
                     break;
@@ -485,7 +504,8 @@ public class NetworkClient : MonoBehaviour
             
             // Get sender ID from either "from" or "client_id" field
             string fromField = message.ContainsKey("from") ? "from" : 
-                            message.ContainsKey("client_id") ? "client_id" : null;
+                            message.ContainsKey("client_id") ? "client_id" : 
+                            message.ContainsKey("player_id") ? "player_id" : null;
             
             if (fromField == null || !message.ContainsKey(fromField))
             {
@@ -519,7 +539,7 @@ public class NetworkClient : MonoBehaviour
                         {
                             if (GameManager.Instance != null)
                             {
-                                // Check if player needs to be spawned - SIMPLE VERSION
+                                // Check if player needs to be spawned
                                 bool playerExists = GameManager.Instance.IsPlayerActive(fromClientId);
                                 
                                 // Create state data
@@ -547,6 +567,30 @@ public class NetworkClient : MonoBehaviour
                                 GameManager.Instance.ApplyPlayerState(playerState, !playerExists);
                             }
                         });
+                    }
+                    else if (dataType == "PLAYER_INPUT" && gameData.ContainsKey("input"))
+                    {
+                        // Handle player input messages
+                        var inputData = gameData["input"] as Dictionary<string, object>;
+                        if (inputData != null)
+                        {
+                            var playerInput = new GameManager.PlayerInputData
+                            {
+                                playerId = fromClientId,
+                                steering = Convert.ToSingle(inputData["steering"]),
+                                throttle = Convert.ToSingle(inputData["throttle"]),
+                                brake = Convert.ToSingle(inputData["brake"]),
+                                timestamp = Convert.ToSingle(inputData["timestamp"])
+                            };
+                            
+                            UnityMainThreadDispatcher.Instance().Enqueue(() =>
+                            {
+                                if (GameManager.Instance != null)
+                                {
+                                    GameManager.Instance.ApplyPlayerInput(playerInput);
+                                }
+                            });
+                        }
                     }
                 }
             }
@@ -588,6 +632,24 @@ public class NetworkClient : MonoBehaviour
     
     public void Disconnect()
     {
+        // Send disconnect message if connected
+        if (isConnected && tcpClient != null && tcpClient.Connected)
+        {
+            Dictionary<string, object> disconnectMessage = new Dictionary<string, object>
+            {
+                { "type", "DISCONNECT" }
+            };
+            
+            try
+            {
+                SendTcpMessage(disconnectMessage);
+            }
+            catch (Exception)
+            {
+                // Ignore errors when trying to send disconnect message
+            }
+        }
+        
         // Stop threads
         tcpThreadRunning = false;
         udpThreadRunning = false;
@@ -661,6 +723,12 @@ public class NetworkClient : MonoBehaviour
             
         try
         {
+            // Ensure we include client_id in each message for the new server
+            if (!message.ContainsKey("client_id") && !string.IsNullOrEmpty(clientId))
+            {
+                message["client_id"] = clientId;
+            }
+            
             string jsonMessage = JsonConvert.SerializeObject(message);
             byte[] data = Encoding.UTF8.GetBytes(jsonMessage + "\n");
             tcpStream.Write(data, 0, data.Length);
@@ -679,6 +747,12 @@ public class NetworkClient : MonoBehaviour
             
         try
         {
+            // Ensure we include client_id in UDP messages
+            if (!message.ContainsKey("client_id") && !string.IsNullOrEmpty(clientId))
+            {
+                message["client_id"] = clientId;
+            }
+            
             string jsonMessage = JsonConvert.SerializeObject(message);
             byte[] data = Encoding.UTF8.GetBytes(jsonMessage);
             udpClient.Send(data, data.Length);
@@ -799,8 +873,6 @@ public class NetworkClient : MonoBehaviour
                 };
 
                 string jsonData = JsonConvert.SerializeObject(message);
-                Debug.Log($"Sending state: {jsonData}");
-                
                 byte[] data = Encoding.UTF8.GetBytes(jsonData);
                 
                 // Send using the correct method for a connected UdpClient
