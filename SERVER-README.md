@@ -1,140 +1,145 @@
-# Ultimate Car Racing - Server
+# MP-Server Protocol Documentation
 
-![Game Server](https://img.shields.io/badge/Game%20Server-Racing-brightgreen)
-![Python](https://img.shields.io/badge/Python-3.7%2B-blue)
-![License](https://img.shields.io/badge/License-MIT-yellow)
+## 1. Overview
+MP-Server is a simple TCP/UDP racing‐game server.  
+Clients connect over TCP (for commands, room management, chat) and send/receive UDP packets (for real‐time position updates).
 
-## Overview
+Ports (defaults):
+- TCP: 7777
+- UDP: 7778
 
-The Ultimate Car Racing Server is a high-performance networking server designed to facilitate multiplayer racing games. It provides both TCP and UDP communication channels for game clients, handling player connections, game room management, position synchronization, and message relaying between players.
+## 2. Prerequisites
+- .NET 9.0 runtime
+- A TCP‐capable socket library (e.g. `System.Net.Sockets.TcpClient` in .NET, `net` module in Node.js, or BSD sockets in C/C++)
+- A UDP socket library for state updates
+- UTF-8 support for text commands
+- JSON parser (server uses System.Text.Json for all command processing)
 
-## Features
+## 3. TCP Protocol
 
-- **Dual Protocol Support**: Simultaneous TCP (reliable) and UDP (fast) communication
-- **Game Room Management**: Create, join, and manage multiplayer game rooms
-- **Player Tracking**: Monitor player positions, latencies, and connection statuses
-- **Admin Console**: Real-time server monitoring and management
-- **Stress Testing**: Built-in tools for performance testing
-- **Spawn Position Management**: Automatic assignment of starting positions
-
-## Installation
-
-### Prerequisites
-
-- Python 3.7 or higher
-- pip package manager
-
-### Setup
-
-1. Clone or download the repository
-2. Install required dependencies:
-   ```bash
-   pip install tabulate
+### 3.1 Connection & Framing
+1. Client opens a TCP connection to server:  
+   `tcpClient.Connect("server.address", 7777)`
+2. Server immediately responds with a welcome message terminated by `\n`:  
+   ```
+   CONNECTED|<sessionId>\n
+   ```
+3. All subsequent messages are **newline‐delimited JSON**:
+   ```
+   {"command":"COMMAND_NAME","param1":"value1","param2":"value2"}\n
    ```
 
-## Running the Server
+### 3.2 Supported Commands
 
-Execute the server with:
-```bash
-python relay.py
+| Command        | Direction    | Payload (JSON)                                    | Response (JSON)                         |
+| -------------- | ------------ | ------------------------------------------------- | --------------------------------------- |
+| `NAME`         | Client → Srv | `{"command":"NAME","name":"playerName"}\n`        | `{"command":"NAME_OK","name":"playerName"}\n` |
+| `CREATE_ROOM`  | Client → Srv | `{"command":"CREATE_ROOM","name":"roomName"}\n`   | `{"command":"ROOM_CREATED","roomId":"id","name":"roomName"}\n` |
+| `JOIN_ROOM`    | Client → Srv | `{"command":"JOIN_ROOM","roomId":"id"}\n`         | `{"command":"JOIN_OK","roomId":"id"}\n` |
+| `PING`         | Client → Srv | `{"command":"PING"}\n`                            | `{"command":"PONG"}\n`                  |
+| Any other      | Client → Srv | e.g. `{"command":"FOO"}\n`                        | `{"command":"UNKNOWN_COMMAND","originalCommand":"FOO"}\n` |
+
+#### Error Handling
+- Malformed JSON commands return `{"command":"ERROR","message":"Invalid JSON format"}\n`.
+- Unrecognized commands return `{"command":"UNKNOWN_COMMAND","originalCommand":"cmd"}\n`.
+- If server detects inactivity (>60 s without messages), it will close the TCP socket.
+
+## 4. UDP Protocol
+
+### 4.1 Purpose
+Use UDP for low‐latency position & rotation updates once the client has joined or created a room.
+
+### 4.2 Packet Format (JSON-based)
+The server accepts and broadcasts JSON packets for position updates:
+
+```
+{"command":"UPDATE","sessionId":"id","position":{"x":0,"y":0,"z":0},"rotation":{"x":0,"y":0,"z":0,"w":1}}\n
 ```
 
-The server will start listening on:
-- TCP port 7777
-- UDP port 7778
+- `sessionId`: your TCP session ID  
+- `position`: Vector3 with x, y, z coordinates
+- `rotation`: Quaternion with x, y, z, w components
 
-## Admin Console Commands
+Server echoes or broadcasts state to other clients in the same room.
 
-Once the server is running, you can use these commands in the admin console:
-
-| Command       | Description                                  | Example                     |
-|---------------|----------------------------------------------|-----------------------------|
-| `players`     | List all connected players                  | `players`                   |
-| `rooms`       | List all active game rooms                  | `rooms`                     |
-| `kick`        | Kick a player                               | `kick client_5`             |
-| `broadcast`   | Send message to all players                 | `broadcast Server restart!` |
-| `stats`       | Show server statistics                      | `stats`                     |
-| `resetpos`    | Reset a player's position                   | `resetpos client_3`         |
-| `clear`       | Clear the console screen                    | `clear`                     |
-| `exit`        | Shut down the server                        | `exit`                      |
-
-## Client Protocol Documentation
-
-### Message Types
-
-#### TCP Messages
-
-| Type                | Direction       | Description                                  |
-|---------------------|-----------------|----------------------------------------------|
-| `REGISTERED`        | Server → Client | Sent when client first connects             |
-| `HEARTBEAT`         | Client → Server | Keep-alive message                          |
-| `HEARTBEAT_ACK`     | Server → Client | Response to heartbeat                       |
-| `HOST_GAME`         | Client → Server | Request to host a new game room             |
-| `GAME_HOSTED`       | Server → Client | Confirmation of game hosting                |
-| `LIST_GAMES`        | Client → Server | Request list of available rooms             |
-| `GAME_LIST`         | Server → Client | Response with room list                     |
-| `JOIN_GAME`         | Client → Server | Request to join a game room                 |
-| `JOINED_GAME`       | Server → Client | Confirmation of successful room join        |
-| `JOIN_FAILED`       | Server → Client | Notification of failed join attempt         |
-| `PLAYER_JOINED`     | Server → Client | Notification of new player in room          |
-| `RELAY_MESSAGE`     | Both            | Relay a message to other clients            |
-| `PING`             | Client → Server | Measure latency                            |
-| `PING_RESPONSE`    | Server → Client | Response to ping                           |
-| `PLAYER_INFO`      | Client → Server | Send player name and info                  |
-| `POSITION_UPDATE`  | Client → Server | Update player position                     |
-| `LEAVE_ROOM`       | Client → Server | Leave current game room                    |
-| `START_GAME`       | Client → Server | Host starts the game                       |
-| `GAME_STARTED`     | Server → Client | Notification that game has started         |
-| `PLAYER_DISCONNECTED` | Server → Client | Notification of player leaving            |
-| `SERVER_MESSAGE`   | Server → Client | Broadcast message from admin               |
-| `KICKED`           | Server → Client | Notification of being kicked               |
-| `RESET_POSITION`   | Server → Client | Force player to reset position             |
-
-#### UDP Messages
-
-| Type                | Description                                  |
-|---------------------|----------------------------------------------|
-| `POSITION_UPDATE`  | Frequent position updates                   |
-| `GAME_DATA`        | Game-specific data relay                    |
-
-## Configuration
-
-You can customize the server ports by modifying the constructor:
-
-```python
-server = RelayServer(tcp_port=7777, udp_port=7778)  # Change ports as needed
+### 4.3 Example (C# send)
+```csharp
+using var udp = new UdpClient();
+var posUpdate = new { 
+    command = "UPDATE", 
+    sessionId = sessionId, 
+    position = new { x = posX, y = posY, z = posZ },
+    rotation = new { x = rotX, y = rotY, z = rotZ, w = rotW }
+};
+var json = JsonSerializer.Serialize(posUpdate) + "\n";
+var bytes = Encoding.UTF8.GetBytes(json);
+await udp.SendAsync(bytes, bytes.Length, serverHost, 7778);
 ```
 
-## Performance Considerations
+## 5. Example TCP Client (C#)
 
-- The server uses threading for concurrent client handling
-- UDP is used for high-frequency position updates
-- TCP is used for reliable game state synchronization
-- Client timeouts are set to 60 seconds of inactivity
+```csharp
+using System;
+using System.Net.Sockets;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
 
-## Stress Testing
+class RacingClient
+{
+    private TcpClient _tcp;
+    private NetworkStream _stream;
+    private string _sessionId;
 
-The server includes built-in stress testing tools:
+    public async Task RunAsync(string host, int port)
+    {
+        _tcp = new TcpClient();
+        await _tcp.ConnectAsync(host, port);
+        _stream = _tcp.GetStream();
 
-1. Start a stress test:
-   ```json
-   {
-     "type": "STRESS_TEST_START",
-     "bot_count": 50
-   }
-   ```
+        // Read welcome
+        var reader = new StreamReader(_stream, Encoding.UTF8);
+        var welcome = await reader.ReadLineAsync();
+        Console.WriteLine(welcome); // "CONNECTED|<sessionId>"
+        _sessionId = welcome.Split('|')[1];
 
-2. Stop the stress test:
-   ```json
-   {
-     "type": "STRESS_TEST_STOP"
-   }
-   ```
+        // Set name
+        await SendJsonAsync(new { command = "NAME", name = "Speedy" });
+        var response = await reader.ReadLineAsync();
+        Console.WriteLine(response); // {"command":"NAME_OK","name":"Speedy"}
 
-## License
+        // Create a room
+        await SendJsonAsync(new { command = "CREATE_ROOM", name = "FastTrack" });
+        response = await reader.ReadLineAsync();
+        Console.WriteLine(response); // {"command":"ROOM_CREATED","roomId":"<id>","name":"FastTrack"}
 
-This project is open-source and available for use under the MIT License.
+        // ... then start your UDP updates …
+    }
 
-## Support
+    private async Task SendJsonAsync<T>(T data)
+    {
+        var json = JsonSerializer.Serialize(data) + "\n";
+        var bytes = Encoding.UTF8.GetBytes(json);
+        await _stream.WriteAsync(bytes, 0, bytes.Length);
+    }
+}
+```
 
-For issues or feature requests, please open an issue on the project repository.
+## 6. Logging & Debug
+- TCP events (connect, disconnect, commands) are logged at INFO level.
+- UDP packet receipt and processing are logged at DEBUG level.
+- JSON parsing errors are caught and logged.
+- Use console logger to trace flow:
+  ```bash
+  dotnet run --verbosity normal
+  ```
+
+## 7. Next Steps
+- Implement full UDP room‐broadcast logic.
+- Add authentication/tokens.
+- Extend command set (chat, start race, lap updates).
+- Harden error handling & reconnection logic.
+
+---
+
+With this guide and the samples above, you can implement a client in your language of choice, manage TCP commands, and stream position updates over UDP. Happy racing!

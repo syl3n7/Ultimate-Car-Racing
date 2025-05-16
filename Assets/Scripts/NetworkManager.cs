@@ -176,14 +176,11 @@ public class NetworkManager : MonoBehaviour
     
     private async Task SendRegistration()
     {
+        // Use lowercase "command" field as shown in the SERVER-README.md examples
         var registrationMessage = new Dictionary<string, object>
         {
-            { "type", "REGISTER" },
-            { "client_info", new Dictionary<string, object> {
-                { "name", SystemInfo.deviceName },
-                { "platform", Application.platform.ToString() },
-                { "version", Application.version }
-            }}
+            { "command", "NAME" },
+            { "name", SystemInfo.deviceName }
         };
         
         await SendTcpMessage(registrationMessage);
@@ -255,116 +252,155 @@ public class NetworkManager : MonoBehaviour
     }
     
     // Update ProcessServerMessage method to add more debugging
-    private void ProcessServerMessage(string jsonMessage)
+    private void ProcessServerMessage(string message)
     {
         try
         {
-            Debug.Log($"Received message from server: {jsonMessage}");
+            Debug.Log($"Received message from server: {message}");
             
-            var message = JsonConvert.DeserializeObject<Dictionary<string, object>>(jsonMessage);
-            if (message == null || !message.ContainsKey("type")) 
+            // Check if the message contains a pipe character, which might indicate an error or command prefix
+            if (message.Contains("|"))
             {
-                Debug.LogError("Message missing type property or invalid JSON");
+                string[] parts = message.Split(new char[] { '|' }, 2);
+                string command = parts[0];
+                string jsonContent = parts.Length > 1 ? parts[1] : "{}";
+                
+                Debug.Log($"Detected pipe format: Command={command}, Content={jsonContent}");
+                
+                // Handle specific command types
+                if (command == "UNKNOWN_COMMAND")
+                {
+                    // Try to parse the JSON content
+                    try 
+                    {
+                        var jsonObj = JsonConvert.DeserializeObject<Dictionary<string, object>>(jsonContent);
+                        if (jsonObj != null && jsonObj.ContainsKey("TYPE"))
+                        {
+                            string originalCommand = jsonObj["TYPE"].ToString();
+                            Debug.LogWarning($"Server reported unknown command: {originalCommand}");
+                            
+                            // If this was a REGISTER command, try the proper format
+                            if (originalCommand == "REGISTER")
+                            {
+                                Debug.Log("Retrying registration with correct format");
+                                _ = SendRegistration();
+                            }
+                        }
+                    }
+                    catch (Exception jsonEx)
+                    {
+                        Debug.LogError($"Error parsing JSON content after pipe: {jsonEx.Message}");
+                    }
+                    return;
+                }
+                else
+                {
+                    // For other pipe-delimited messages, try to handle them based on your documentation
+                    Debug.LogWarning($"Received pipe-delimited message with command: {command}");
+                    // You could add special handling for other pipe-delimited messages here if needed
+                    return;
+                }
+            }
+            
+            // Standard JSON processing for non-pipe messages
+            var messageObj = JsonConvert.DeserializeObject<Dictionary<string, object>>(message);
+            if (messageObj == null)
+            {
+                Debug.LogError("Failed to parse message as JSON");
                 return;
             }
             
-            string messageType = message["type"].ToString();
-            Debug.Log($"Processing message of type: {messageType}");
+            if (!messageObj.ContainsKey("command") && !messageObj.ContainsKey("type"))
+            {
+                Debug.LogError("Message missing both 'command' and 'type' properties");
+                return;
+            }
             
+            // Check for command field first (from SERVER-README.md)
+            string messageType = messageObj.ContainsKey("command") ? 
+                messageObj["command"].ToString() : 
+                messageObj["type"].ToString();
+                
+            Debug.Log($"Processing JSON message of type: {messageType}");
+            
+            // Handle messages based on command/type
             switch (messageType)
             {
-                case "REGISTERED":
-                    _clientId = message["client_id"].ToString();
-                    LogDebug($"Registered with server, client ID: {_clientId}");
-                    break;
-                
-                case "PING_RESPONSE":
-                    if (message.ContainsKey("timestamp"))
+                case "CONNECTED":
+                    if (messageObj.ContainsKey("sessionId"))
                     {
-                        long sentTime = Convert.ToInt64(message["timestamp"]);
-                        long now = DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond;
-                        _latency = (now - sentTime);
-                    }
-                    break;
-                
-                case "HEARTBEAT_ACK":
-                    // Just acknowledge, no action needed
-                    break;
-                
-                case "GAME_LIST":
-                    UnityMainThreadDispatcher.Instance().Enqueue(() => 
-                        OnRoomListReceived?.Invoke(message));
-                    break;
-                
-                case "GAME_HOSTED":
-                    Debug.Log($"GAME_HOSTED message received: {jsonMessage}");
-                    if (message.ContainsKey("room_id"))
-                    {
-                        _currentRoomId = message["room_id"].ToString();
-                        _isHost = true;
-                        Debug.Log($"Game hosted successfully with room ID: {_currentRoomId}");
+                        _clientId = messageObj["sessionId"].ToString();
+                        _isConnected = true;
+                        LogDebug($"Connected with session ID: {_clientId}");
                         UnityMainThreadDispatcher.Instance().Enqueue(() => 
-                        {
-                            Debug.Log("Invoking OnGameHosted event");
-                            OnGameHosted?.Invoke(message);
-                        });
-                    }
-                    else
-                    {
-                        Debug.LogError("GAME_HOSTED message missing room_id!");
+                            OnConnected?.Invoke("Connected successfully"));
                     }
                     break;
-                
-                case "JOINED_GAME":
-                    if (message.ContainsKey("room_id") && message.ContainsKey("host_id"))
+                    
+                case "REGISTERED":
+                    if (messageObj.ContainsKey("client_id"))
                     {
-                        _currentRoomId = message["room_id"].ToString();
-                        _hostId = message["host_id"].ToString();
-                        _isHost = (_hostId == _clientId);
+                        _clientId = messageObj["client_id"].ToString();
+                        LogDebug($"Registered with server, client ID: {_clientId}");
+                    }
+                    break;
+                    
+                case "NAME_OK":
+                    LogDebug($"Name acknowledged by server");
+                    break;
+                    
+                case "ROOM_CREATED":
+                    if (messageObj.ContainsKey("roomId") && messageObj.ContainsKey("name"))
+                    {
+                        _currentRoomId = messageObj["roomId"].ToString();
+                        _isHost = true;
+                        
+                        var roomCreatedMsg = new Dictionary<string, object>
+                        {
+                            { "room_id", _currentRoomId },
+                            { "room_name", messageObj["name"].ToString() }
+                        };
                         
                         UnityMainThreadDispatcher.Instance().Enqueue(() => 
-                            OnRoomJoined?.Invoke(message));
+                            OnGameHosted?.Invoke(roomCreatedMsg));
+                        
+                        LogDebug($"Room created: {_currentRoomId}, {messageObj["name"]}");
                     }
                     break;
-                
-                case "ROOM_PLAYERS":
-                    UnityMainThreadDispatcher.Instance().Enqueue(() => 
-                        OnRoomPlayersReceived?.Invoke(message));
+                    
+                case "JOIN_OK":
+                    if (messageObj.ContainsKey("roomId"))
+                    {
+                        _currentRoomId = messageObj["roomId"].ToString();
+                        
+                        var joinedMsg = new Dictionary<string, object>
+                        {
+                            { "room_id", _currentRoomId },
+                            { "host_id", _hostId ?? _clientId }
+                        };
+                        
+                        UnityMainThreadDispatcher.Instance().Enqueue(() => 
+                            OnRoomJoined?.Invoke(joinedMsg));
+                        
+                        LogDebug($"Joined room: {_currentRoomId}");
+                    }
+                    break;
+                    
+                case "PONG":
+                    long now = DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond;
+                    _latency = (now - _lastPingTime);
                     break;
                 
-                case "PLAYER_JOINED":
-                    UnityMainThreadDispatcher.Instance().Enqueue(() => 
-                        OnPlayerJoined?.Invoke(message));
-                    break;
-                
-                case "PLAYER_DISCONNECTED":
-                    UnityMainThreadDispatcher.Instance().Enqueue(() => 
-                        OnPlayerDisconnected?.Invoke(message));
-                    break;
-                
-                case "GAME_STARTED":
-                    UnityMainThreadDispatcher.Instance().Enqueue(() => 
-                        OnGameStarted?.Invoke(message));
-                    break;
-                
-                case "RELAY":
-                    UnityMainThreadDispatcher.Instance().Enqueue(() => 
-                        OnRelayReceived?.Invoke(message));
-                    break;
-                
-                case "SERVER_MESSAGE":
-                    UnityMainThreadDispatcher.Instance().Enqueue(() => 
-                        OnServerMessage?.Invoke(message));
-                    break;
-                
+                // Add other JSON message types from your documentation as needed
+                    
                 default:
-                    LogDebug($"Unknown message type: {messageType}");
+                    LogDebug($"Unhandled message type: {messageType}");
                     break;
             }
         }
         catch (Exception e)
         {
-            Debug.LogError($"Error processing server message: {e.Message}\nMessage: {jsonMessage}");
+            Debug.LogError($"Error processing server message: {e.Message}\nMessage: {message}");
         }
     }
     
@@ -395,7 +431,7 @@ public class NetworkManager : MonoBehaviour
             if (messageType == "GAME_DATA" && message.ContainsKey("data"))
             {
                 var gameData = message["data"] as Dictionary<string, object>;
-                if (gameData != null && gameData.ContainsKey("type"))
+                if (gameData != null && gameData.containsKey("type"))
                 {
                     string dataType = gameData["type"].ToString();
                     
