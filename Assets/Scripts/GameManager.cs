@@ -571,26 +571,28 @@ public class GameManager : MonoBehaviour
     public void ApplyPlayerState(PlayerStateData stateData, bool teleport = false)
     {
         string playerId = stateData.playerId;
-        Debug.Log($"ApplyPlayerState called for player {playerId} at position {stateData.position}");
-
+        Debug.Log($"ApplyPlayerState called for player {playerId} at position {stateData.position}, teleport={teleport}");
+        
         // If we don't have this player yet, spawn them
-        if (!activePlayers.ContainsKey(playerId))
+        if (!activePlayers.ContainsKey(playerId) || activePlayers[playerId] == null || activePlayers[playerId].gameObject == null)
         {
-            Debug.Log($"Player {playerId} not in activePlayers list - spawning them");
+            Debug.Log($"URGENT: Player {playerId} not in activePlayers list or is invalid - forcing spawn");
             SpawnRemotePlayer(playerId, stateData.position, stateData.rotation);
+            teleport = true; // Force teleport for newly spawned players
         }
-
+        
+        // Try again after potential spawn
         if (activePlayers.TryGetValue(playerId, out CarController controller))
         {
-            // Check if the controller and its GameObject are still valid
+            // Double-check if the controller is still valid
             if (controller == null || controller.gameObject == null)
             {
-                Debug.LogWarning($"Controller for player {playerId} was destroyed - respawning");
+                Debug.LogWarning($"Controller for player {playerId} was destroyed after checking - respawning again");
                 activePlayers.Remove(playerId);
                 SpawnRemotePlayer(playerId, stateData.position, stateData.rotation);
                 return;
             }
-
+            
             Rigidbody rb = controller.GetComponent<Rigidbody>();
             if (rb != null)
             {
@@ -599,7 +601,7 @@ public class GameManager : MonoBehaviour
                     Debug.Log($"Teleporting player {playerId} to {stateData.position}");
                     controller.transform.position = stateData.position;
                     controller.transform.rotation = stateData.rotation;
-                    rb.linearVelocity = stateData.velocity;
+                    rb.velocity = stateData.velocity;
                     rb.angularVelocity = stateData.angularVelocity;
                 }
                 else
@@ -607,10 +609,14 @@ public class GameManager : MonoBehaviour
                     // Smoothly interpolate position and rotation
                     controller.transform.position = Vector3.Lerp(controller.transform.position, stateData.position, 0.25f);
                     controller.transform.rotation = Quaternion.Slerp(controller.transform.rotation, stateData.rotation, 0.25f);
-                    rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, stateData.velocity, 0.25f);
+                    rb.velocity = Vector3.Lerp(rb.velocity, stateData.velocity, 0.25f);
                     rb.angularVelocity = Vector3.Lerp(rb.angularVelocity, stateData.angularVelocity, 0.25f);
                 }
             }
+        }
+        else
+        {
+            Debug.LogError($"Failed to find controller for player {playerId} even after spawn attempt!");
         }
     }
     

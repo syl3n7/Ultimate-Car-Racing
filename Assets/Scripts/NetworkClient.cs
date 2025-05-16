@@ -468,31 +468,28 @@ public class NetworkClient : MonoBehaviour
     {
         try
         {
-            // Log the full message for debugging
-            Debug.Log($"RAW UDP: {jsonMessage}");
-
             Dictionary<string, object> message = JsonConvert.DeserializeObject<Dictionary<string, object>>(jsonMessage);
-
+            
             string messageType = message["type"].ToString();
-
+            
             // Get client ID from either "from" or "client_id" field
             string fromField = message.ContainsKey("from") ? "from" :
                             message.ContainsKey("client_id") ? "client_id" : null;
-
+            
             if (fromField == null || !message.ContainsKey(fromField))
             {
                 Debug.LogWarning($"UDP message missing sender ID: {jsonMessage}");
                 return;
             }
-
+            
             string fromClientId = message[fromField].ToString();
-
+            
             // Skip our own messages
             if (fromClientId == clientId)
             {
                 return;
             }
-
+            
             // Process GAME_DATA messages
             if (messageType == "GAME_DATA" && message.ContainsKey("data"))
             {
@@ -500,15 +497,18 @@ public class NetworkClient : MonoBehaviour
                 if (gameData != null && gameData.ContainsKey("type"))
                 {
                     string dataType = gameData["type"].ToString();
-
+                    
                     // For PLAYER_STATE, extract state and pass to GameManager
                     if (dataType == "PLAYER_STATE" && gameData.ContainsKey("state"))
                     {
-                        Debug.Log($"*** RECEIVED PLAYER_STATE FROM {fromClientId} ***");
-
+                        Debug.Log($"NETWORK CLIENT: Received PLAYER_STATE from {fromClientId}");
+                        
                         var stateData = gameData["state"] as Dictionary<string, object>;
+                        
                         UnityMainThreadDispatcher.Instance().Enqueue(() =>
                         {
+                            Debug.Log($"NETWORK CLIENT: Processing state from {fromClientId} on main thread");
+                            
                             if (GameManager.Instance != null)
                             {
                                 // Create a PlayerStateData object to pass to GameManager
@@ -521,10 +521,24 @@ public class NetworkClient : MonoBehaviour
                                     angularVelocity = ParseVector3(stateData["angularVelocity"]),
                                     timestamp = Convert.ToSingle(stateData["timestamp"])
                                 };
-
-                                // Force teleport on first state update
-                                bool firstUpdate = true; // Always force teleport to ensure cars are created
-                                GameManager.Instance.ApplyPlayerState(playerState, firstUpdate);
+                                
+                                // FORCE SPAWNING by checking if this player exists already
+                                bool playerExists = GameManager.Instance.IsPlayerActive(fromClientId);
+                                
+                                if (!playerExists)
+                                {
+                                    Debug.Log($"NETWORK CLIENT: Player {fromClientId} DOES NOT EXIST - forcing spawn");
+                                    
+                                    // Directly try to spawn the player first
+                                    GameManager.Instance.SpawnRemotePlayer(
+                                        fromClientId, 
+                                        playerState.position, 
+                                        playerState.rotation
+                                    );
+                                }
+                                
+                                // Then apply the state update
+                                GameManager.Instance.ApplyPlayerState(playerState, !playerExists);
                             }
                         });
                     }
