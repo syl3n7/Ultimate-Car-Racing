@@ -36,6 +36,8 @@ public class NetworkClient : MonoBehaviour
     private bool udpThreadRunning = false;
     private string clientId;
     private string currentRoomId;
+    private string hostId;
+    private bool isHost;
     
     // Message events
     public delegate void MessageReceivedHandler(Dictionary<string, object> message);
@@ -412,9 +414,7 @@ public class NetworkClient : MonoBehaviour
                     break;
 
                 case "JOINED_GAME":
-                    currentRoomId = message["room_id"].ToString();
-                    if (OnJoinedGame != null)
-                        UnityMainThreadDispatcher.Instance().Enqueue(() => OnJoinedGame.Invoke(message));
+                    OnJoinedGame(message);
                     break;
 
                 case "PLAYER_JOINED":
@@ -472,8 +472,8 @@ public class NetworkClient : MonoBehaviour
             
             string messageType = message["type"].ToString();
             
-            // Get client ID from either "from" or "client_id" field
-            string fromField = message.ContainsKey("from") ? "from" :
+            // Get sender ID from either "from" or "client_id" field
+            string fromField = message.ContainsKey("from") ? "from" : 
                             message.ContainsKey("client_id") ? "client_id" : null;
             
             if (fromField == null || !message.ContainsKey(fromField))
@@ -486,9 +486,10 @@ public class NetworkClient : MonoBehaviour
             
             // Skip our own messages
             if (fromClientId == clientId)
-            {
                 return;
-            }
+            
+            // Check if this is from the host when we're a client
+            bool isFromHost = fromClientId == hostId && clientId != hostId;
             
             // Process GAME_DATA messages
             if (messageType == "GAME_DATA" && message.ContainsKey("data"))
@@ -501,17 +502,16 @@ public class NetworkClient : MonoBehaviour
                     // For PLAYER_STATE, extract state and pass to GameManager
                     if (dataType == "PLAYER_STATE" && gameData.ContainsKey("state"))
                     {
-                        Debug.Log($"NETWORK CLIENT: Received PLAYER_STATE from {fromClientId}");
-                        
                         var stateData = gameData["state"] as Dictionary<string, object>;
                         
                         UnityMainThreadDispatcher.Instance().Enqueue(() =>
                         {
-                            Debug.Log($"NETWORK CLIENT: Processing state from {fromClientId} on main thread");
-                            
                             if (GameManager.Instance != null)
                             {
-                                // Create a PlayerStateData object to pass to GameManager
+                                // Check if player needs to be spawned - SIMPLE VERSION
+                                bool playerExists = GameManager.Instance.IsPlayerActive(fromClientId);
+                                
+                                // Create state data
                                 var playerState = new GameManager.PlayerStateData
                                 {
                                     playerId = fromClientId,
@@ -522,14 +522,9 @@ public class NetworkClient : MonoBehaviour
                                     timestamp = Convert.ToSingle(stateData["timestamp"])
                                 };
                                 
-                                // FORCE SPAWNING by checking if this player exists already
-                                bool playerExists = GameManager.Instance.IsPlayerActive(fromClientId);
-                                
+                                // We ALWAYS spawn the host's car if we're a client, or if the player doesn't exist yet
                                 if (!playerExists)
                                 {
-                                    Debug.Log($"NETWORK CLIENT: Player {fromClientId} DOES NOT EXIST - forcing spawn");
-                                    
-                                    // Directly try to spawn the player first
                                     GameManager.Instance.SpawnRemotePlayer(
                                         fromClientId, 
                                         playerState.position, 
@@ -537,7 +532,7 @@ public class NetworkClient : MonoBehaviour
                                     );
                                 }
                                 
-                                // Then apply the state update
+                                // Apply state (teleport if new spawn)
                                 GameManager.Instance.ApplyPlayerState(playerState, !playerExists);
                             }
                         });
@@ -861,5 +856,21 @@ public class NetworkClient : MonoBehaviour
     {
         if (showDebugMessages)
             Debug.Log($"[NetworkClient] {message}");
+    }
+
+    private void OnJoinedGame(Dictionary<string, object> message)
+    {
+        HideConnectionPanel();
+
+        if (message.ContainsKey("room_id") && message.ContainsKey("host_id"))
+        {
+            currentRoomId = message["room_id"].ToString();
+            hostId = message["host_id"].ToString(); // Store the host ID
+            
+            // Check if we are the host
+            isHost = (hostId == clientId);
+            
+            // ... rest of your existing code...
+        }
     }
 }

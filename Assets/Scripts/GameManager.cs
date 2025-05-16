@@ -601,7 +601,7 @@ public class GameManager : MonoBehaviour
                     Debug.Log($"Teleporting player {playerId} to {stateData.position}");
                     controller.transform.position = stateData.position;
                     controller.transform.rotation = stateData.rotation;
-                    rb.velocity = stateData.velocity;
+                    rb.linearVelocity = stateData.velocity;
                     rb.angularVelocity = stateData.angularVelocity;
                 }
                 else
@@ -609,7 +609,7 @@ public class GameManager : MonoBehaviour
                     // Smoothly interpolate position and rotation
                     controller.transform.position = Vector3.Lerp(controller.transform.position, stateData.position, 0.25f);
                     controller.transform.rotation = Quaternion.Slerp(controller.transform.rotation, stateData.rotation, 0.25f);
-                    rb.velocity = Vector3.Lerp(rb.velocity, stateData.velocity, 0.25f);
+                    rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, stateData.velocity, 0.25f);
                     rb.angularVelocity = Vector3.Lerp(rb.angularVelocity, stateData.angularVelocity, 0.25f);
                 }
             }
