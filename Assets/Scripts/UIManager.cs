@@ -109,20 +109,20 @@ public class UIManager : MonoBehaviour
         ConnectAllUIButtons();
         
         // Register for network events
-        NetworkClient networkClient = NetworkClient.Instance;
-        if (networkClient != null)
+        NetworkManager networkManager = NetworkManager.Instance;
+        if (networkManager != null)
         {
-            networkClient.OnRoomPlayersReceived += OnRoomPlayersReceived;
-            networkClient.OnConnected += OnConnected;
-            networkClient.OnDisconnected += OnDisconnected;
-            networkClient.OnConnectionFailed += OnConnectionFailed;
-            networkClient.OnRoomListReceived += OnRoomListReceived;
-            networkClient.OnGameHosted += OnGameHosted;
-            networkClient.OnJoinedGame += OnJoinedGame;
-            networkClient.OnPlayerJoined += OnPlayerJoined;
-            networkClient.OnPlayerDisconnected += OnPlayerDisconnected;
-            networkClient.OnGameStarted += OnGameStarted;
-            networkClient.OnServerMessage += OnServerMessage;
+            networkManager.OnConnected += (msg) => OnConnected();
+            networkManager.OnDisconnected += (msg) => OnDisconnected();
+            networkManager.OnConnectionFailed += (msg) => OnConnectionFailed();
+            networkManager.OnRoomListReceived += OnRoomListReceived;
+            networkManager.OnGameHosted += OnGameHosted;
+            networkManager.OnRoomJoined += OnJoinedGame;
+            networkManager.OnPlayerJoined += OnPlayerJoined;
+            networkManager.OnPlayerDisconnected += OnPlayerDisconnected;
+            networkManager.OnGameStarted += OnGameStarted;
+            networkManager.OnServerMessage += OnServerMessage;
+            networkManager.OnRoomPlayersReceived += OnRoomPlayersReceived;
         }
         
         // Verify required references
@@ -272,10 +272,10 @@ public class UIManager : MonoBehaviour
         multiplayerPanel.SetActive(true);
         
         // Connect to server if not already connected
-        if (NetworkClient.Instance != null && !NetworkClient.Instance.IsConnected())
+        if (NetworkManager.Instance != null && !NetworkManager.Instance.IsConnected())
         {
             ShowConnectionPanel("Connecting to server...");
-            NetworkClient.Instance.Connect();
+            _ = NetworkManager.Instance.Connect();
         }
     }
     public void OnPlayButtonClicked()
@@ -532,21 +532,21 @@ public void CreateRoom()
         GameManager.SelectedTrackIndex = 0; // Set to default track
     }
     
-    if (NetworkClient.Instance == null)
+    if (NetworkManager.Instance == null)
     {
-        Debug.LogError("NetworkClient.Instance is null");
-        ShowNotification("Network client not available");
+        Debug.LogError("NetworkManager.Instance is null");
+        ShowNotification("Network manager not available");
         return;
     }
     
-    if (!NetworkClient.Instance.IsConnected())
+    if (!NetworkManager.Instance.IsConnected())
     {
         Debug.LogWarning("Not connected to server");
         ShowNotification("Not connected to server. Please try again.");
         
         // Try reconnecting
         ShowConnectionPanel("Connecting to server...");
-        NetworkClient.Instance.Connect();
+        _ = NetworkManager.Instance.Connect();
         return;
     }
     
@@ -558,7 +558,7 @@ public void CreateRoom()
     
     Debug.Log($"Creating room: {roomName}, Max players: {maxPlayers}");
     ShowConnectionPanel("Creating room...");
-    NetworkClient.Instance.HostGame(roomName, maxPlayers);
+    NetworkManager.Instance.HostGame(roomName, maxPlayers);
 }
     
     public void JoinSelectedRoom()

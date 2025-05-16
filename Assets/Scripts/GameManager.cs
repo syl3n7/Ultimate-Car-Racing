@@ -230,9 +230,9 @@ public class GameManager : MonoBehaviour
         if (localPlayerId != null && activePlayers.ContainsKey(localPlayerId))
         {
             var stateData = GetPlayerState(localPlayerId);
-            if (stateData != null && NetworkClient.Instance != null)
+            if (stateData != null && NetworkManager.Instance != null)
             {
-                NetworkClient.Instance.SendPlayerState(stateData);
+                NetworkManager.Instance.SendPlayerState(stateData);
             }
         }
     }
@@ -264,9 +264,9 @@ public class GameManager : MonoBehaviour
         if (localPlayerId != null && activePlayers.ContainsKey(localPlayerId))
         {
             var inputData = GetPlayerInput(localPlayerId);
-            if (inputData != null && NetworkClient.Instance != null)
+            if (inputData != null && NetworkManager.Instance != null)
             {
-                NetworkClient.Instance.SendPlayerInput(inputData);
+                NetworkManager.Instance.SendPlayerInput(inputData);
             }
         }
     }
@@ -287,9 +287,9 @@ public class GameManager : MonoBehaviour
             return;
         }
         // Check if we're in a multiplayer game
-        if (isMultiplayerGame && NetworkClient.Instance != null)
+        if (isMultiplayerGame && NetworkManager.Instance != null)
         {
-            localPlayerId = NetworkClient.Instance.GetClientId();
+            localPlayerId = NetworkManager.Instance.GetClientId();
             
             // Use multiplayer spawn position - ADD RESPAWN HEIGHT to Y value
             Vector3 spawnPosition = new Vector3(
