@@ -747,6 +747,7 @@ public async void CreateRoom()
     
         // Show/hide start game button based on host status
         startGameButton.gameObject.SetActive(isHost);
+        Debug.Log($"Start game button active: {startGameButton.gameObject.activeSelf}, isHost: {isHost}");
     
         // Clear player list
         foreach (Transform child in playerListContent)
@@ -755,8 +756,10 @@ public async void CreateRoom()
         }
     
         // Populate player list
+        Debug.Log($"Adding {playersInRoom.Count} players to player list UI");
         foreach (string playerId in playersInRoom)
         {
+            Debug.Log($"Creating player item for: {playerId}");
             GameObject playerItem = Instantiate(playerListItemPrefab, playerListContent);
             TextMeshProUGUI playerText = playerItem.GetComponentInChildren<TextMeshProUGUI>();
     
@@ -771,6 +774,7 @@ public async void CreateRoom()
                 playerDisplayName += " (You)";
     
             playerText.text = playerDisplayName;
+            Debug.Log($"Added player to UI: {playerDisplayName}");
         }
     
         Debug.Log("Room info updated successfully");
@@ -958,7 +962,7 @@ public async void CreateRoom()
         {
             currentRoomId = message["room_id"].ToString();
             currentRoomName = createRoomNameInput.text;
-            isHost = true;
+            isHost = true;  // Explicitly set host status
             
             // Add self to players list
             string clientId = NetworkManager.Instance.GetClientId();
@@ -980,24 +984,91 @@ public async void CreateRoom()
     
     private void OnRoomPlayersReceived(Dictionary<string, object> message)
     {
+        Debug.Log($"OnRoomPlayersReceived: {JsonConvert.SerializeObject(message)}");
+        
+        // Clear the current player list to get fresh data
+        playersInRoom.Clear();
+        
         if (message.ContainsKey("players"))
         {
-            var players = message["players"] as Newtonsoft.Json.Linq.JArray;
-            if (players != null)
+            Newtonsoft.Json.Linq.JArray playersArray = null;
+            
+            // Handle different possible data types
+            if (message["players"] is Newtonsoft.Json.Linq.JArray jArray)
             {
-                // Don't clear, just add any missing players
-                foreach (var player in players)
+                playersArray = jArray;
+            }
+            else if (message["players"] is string jsonStr)
+            {
+                // Try to parse string as JSON
+                try
                 {
-                    string playerId = player.ToString();
-                    if (!playersInRoom.Contains(playerId))
+                    playersArray = Newtonsoft.Json.Linq.JArray.Parse(jsonStr);
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"Failed to parse players JSON string: {e.Message}");
+                }
+            }
+            
+            if (playersArray != null)
+            {
+                Debug.Log($"Found {playersArray.Count} players in room");
+                
+                foreach (var playerToken in playersArray)
+                {
+                    try
                     {
-                        playersInRoom.Add(playerId);
+                        // The player data can be either a simple ID string or a complete object
+                        if (playerToken.Type == Newtonsoft.Json.Linq.JTokenType.String)
+                        {
+                            string playerId = playerToken.ToString();
+                            if (!string.IsNullOrEmpty(playerId))
+                            {
+                                playersInRoom.Add(playerId);
+                                Debug.Log($"Added player ID: {playerId}");
+                            }
+                        }
+                        else if (playerToken.Type == Newtonsoft.Json.Linq.JTokenType.Object)
+                        {
+                            // Extract ID from player object
+                            var playerObj = playerToken.ToObject<Dictionary<string, object>>();
+                            if (playerObj != null && playerObj.ContainsKey("id"))
+                            {
+                                string playerId = playerObj["id"].ToString();
+                                if (!string.IsNullOrEmpty(playerId))
+                                {
+                                    playersInRoom.Add(playerId);
+                                    Debug.Log($"Added player ID from object: {playerId}");
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        Debug.LogError($"Error processing player token: {e.Message}");
                     }
                 }
                 
-                // Update the lobby UI
+                // Check if we're added to the room ourselves
+                string clientId = NetworkManager.Instance.GetClientId();
+                if (!playersInRoom.Contains(clientId))
+                {
+                    playersInRoom.Add(clientId);
+                    Debug.Log($"Added self to player list: {clientId}");
+                }
+                
+                // Properly update the UI
                 UpdateRoomInfo();
             }
+            else
+            {
+                Debug.LogError("Failed to parse players array");
+            }
+        }
+        else
+        {
+            Debug.LogError("Room players message does not contain 'players' key");
         }
     }
 
@@ -1014,6 +1085,8 @@ public async void CreateRoom()
             string hostId = message["host_id"].ToString();
             string clientId = NetworkManager.Instance.GetClientId();
             isHost = (hostId == clientId);
+            
+            Debug.Log($"Joined room: ID={currentRoomId}, ClientID={clientId}, HostID={hostId}, isHost={isHost}");
 
             // CHANGE: Don't clear the player list, and request player list from server
             playersInRoom.Clear();
@@ -1029,9 +1102,11 @@ public async void CreateRoom()
                 };
 
                 _ = NetworkManager.Instance.SendTcpMessage(playerListRequest);
+                Debug.Log($"Sent request for room players: {JsonConvert.SerializeObject(playerListRequest)}");
             }
 
             ShowRoomLobbyPanel();
+            UpdateRoomInfo();
             ShowNotification("Joined room successfully");
         }
     }
@@ -1145,5 +1220,38 @@ public async void CreateRoom()
         if (roomLobbyPanel == null) Debug.LogError("roomLobbyPanel is null!");
         if (connectionPanel == null) Debug.LogError("connectionPanel is null!");
         if (notificationPanel == null) Debug.LogError("notificationPanel is null!");
+    }
+
+    // Add a periodic refresh of the player list to catch any updates
+    private float lastPlayerListRefreshTime = 0f;
+    private const float PLAYER_LIST_REFRESH_INTERVAL = 3f; // Refresh player list every 3 seconds
+
+    private void Update()
+    {
+        // Periodically refresh the player list when in room lobby
+        if (roomLobbyPanel != null && roomLobbyPanel.activeSelf && !string.IsNullOrEmpty(currentRoomId))
+        {
+            if (Time.time - lastPlayerListRefreshTime > PLAYER_LIST_REFRESH_INTERVAL)
+            {
+                RefreshPlayerList();
+                lastPlayerListRefreshTime = Time.time;
+            }
+        }
+    }
+
+    private void RefreshPlayerList()
+    {
+        // Request the complete player list from the server
+        if (NetworkManager.Instance != null && NetworkManager.Instance.IsConnected())
+        {
+            Dictionary<string, object> playerListRequest = new Dictionary<string, object>
+            {
+                { "command", "GET_ROOM_PLAYERS" },
+                { "roomId", currentRoomId }
+            };
+
+            _ = NetworkManager.Instance.SendTcpMessage(playerListRequest);
+            Debug.Log("Sending periodic player list refresh request");
+        }
     }
 }

@@ -423,13 +423,26 @@ public class NetworkManager : MonoBehaviour
                     }
                     break;
                     
-                case "PONG":
-                    long now = DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond;
-                    _latency = (now - _lastPingTime);
-                    break;
+                case "ROOM_PLAYERS":
+                    Debug.Log($"Room players list received: {message}");
                     
-                case "GAME_STARTED":
-                    Debug.Log($"Game started message received: {message}");
+                    // Check if the message contains the players array
+                    if (messageObj.ContainsKey("players"))
+                    {
+                        var roomPlayersMsg = new Dictionary<string, object>();
+                        
+                        // Copy the original message fields
+                        foreach (var kvp in messageObj)
+                        {
+                            roomPlayersMsg[kvp.Key] = kvp.Value;
+                        }
+                        
+                        Debug.Log($"Forwarding players list with {roomPlayersMsg.Count} fields");
+                        
+                        UnityMainThreadDispatcher.Instance().Enqueue(() => 
+                            OnRoomPlayersReceived?.Invoke(roomPlayersMsg));
+                    }
+                    break;
                     
                     var gameStartedMsg = new Dictionary<string, object>();
                     
