@@ -648,6 +648,7 @@ public class GameManager : MonoBehaviour
             Rigidbody rb = controller.GetComponent<Rigidbody>();
             if (rb != null)
             {
+                // Check if teleport flag was sent in the update or if we're forcing teleport
                 if (teleport)
                 {
                     Debug.Log($"Teleporting player {playerId} to {stateData.position}");
@@ -713,6 +714,12 @@ public class GameManager : MonoBehaviour
         }
     }
 
+    // Helper method to get local player ID
+    public string GetLocalPlayerId()
+    {
+        return localPlayerId;
+    }
+    
     // Update the player spawning system to use server-assigned spawn positions for all players
     public void SetAllPlayerSpawnPositions(Dictionary<string, object> allSpawnPositions) 
     {
@@ -759,6 +766,14 @@ public class GameManager : MonoBehaviour
                     
                     // Store in player garage indices
                     playerGarageIndices[playerId] = spawnIndex;
+                    
+                    // If this is a remote player, pre-spawn them immediately at their assigned position
+                    if (playerId != localPlayerId && !activePlayers.ContainsKey(playerId))
+                    {
+                        Vector3 position = new Vector3(posX, posY, posZ);
+                        SpawnRemotePlayer(playerId, position, Quaternion.identity);
+                        Debug.Log($"Pre-spawned remote player {playerId} at position ({posX}, {posY}, {posZ})");
+                    }
                     
                     Debug.Log($"Assigned player {playerId} to garage {spawnIndex} at position ({posX}, {posY}, {posZ})");
                 }
