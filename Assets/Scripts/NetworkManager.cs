@@ -553,10 +553,6 @@ public class NetworkManager : MonoBehaviour
                     // Make sure we update the scene on the main thread
                     UnityMainThreadDispatcher.Instance().Enqueue(() => {
                         OnGameStarted?.Invoke(gameStartedMsg);
-                        
-                        // Request immediate state sync with all players
-                        StartCoroutine(RequestInitialPlayerStates(1.0f));
-                        
                         LogDebug($"Game started for room: {_currentRoomId}");
                     });
                     break;
@@ -659,15 +655,11 @@ public class NetworkManager : MonoBehaviour
         }
     }
     
-    // In ProcessUdpMessage - Handle UDP position updates with teleport flag
     private void ProcessUdpMessage(string jsonMessage)
     {
         try
         {
-            // For performance, log only in debug mode
-            if (showDebugMessages)
-                Debug.Log($"Received UDP message: {jsonMessage}");
-                
+            Debug.Log($"Received UDP message: {jsonMessage}");
             var message = JsonConvert.DeserializeObject<Dictionary<string, object>>(jsonMessage);
             
             // Skip if message is invalid
@@ -709,59 +701,13 @@ public class NetworkManager : MonoBehaviour
                                 Convert.ToSingle(rotation["w"])
                             );
                             
-                            // Extract velocities if available
-                            Vector3 velocity = Vector3.zero;
-                            Vector3 angularVelocity = Vector3.zero;
-                            
-                            if (message.ContainsKey("velocity"))
-                            {
-                                var velocityObj = message["velocity"] as Newtonsoft.Json.Linq.JObject;
-                                if (velocityObj != null)
-                                {
-                                    velocity = new Vector3(
-                                        Convert.ToSingle(velocityObj["x"]),
-                                        Convert.ToSingle(velocityObj["y"]),
-                                        Convert.ToSingle(velocityObj["z"])
-                                    );
-                                }
-                            }
-                            
-                            if (message.ContainsKey("angularVelocity"))
-                            {
-                                var angVelObj = message["angularVelocity"] as Newtonsoft.Json.Linq.JObject;
-                                if (angVelObj != null)
-                                {
-                                    angularVelocity = new Vector3(
-                                        Convert.ToSingle(angVelObj["x"]),
-                                        Convert.ToSingle(angVelObj["y"]),
-                                        Convert.ToSingle(angVelObj["z"])
-                                    );
-                                }
-                            }
-                            
-                            // Check for teleport flag
-                            bool teleport = !playerExists; // Always teleport if player doesn't exist
-                            if (message.ContainsKey("teleport"))
-                            {
-                                // Parse teleport flag - might be bool or string
-                                var teleportValue = message["teleport"];
-                                if (teleportValue is bool boolValue)
-                                {
-                                    teleport = teleport || boolValue;
-                                }
-                                else
-                                {
-                                    teleport = teleport || Convert.ToBoolean(teleportValue.ToString());
-                                }
-                            }
-                            
                             var playerState = new GameManager.PlayerStateData
                             {
                                 playerId = fromClientId,
                                 position = pos,
                                 rotation = rot,
-                                velocity = velocity,
-                                angularVelocity = angularVelocity,
+                                velocity = Vector3.zero,  // Server doesn't provide velocity
+                                angularVelocity = Vector3.zero, // Server doesn't provide angular velocity
                                 timestamp = Time.time
                             };
                             
@@ -776,7 +722,7 @@ public class NetworkManager : MonoBehaviour
                             }
                             
                             // Update the player's state
-                            GameManager.Instance.ApplyPlayerState(playerState, teleport);
+                            GameManager.Instance.ApplyPlayerState(playerState, !playerExists);
                         }
                     });
                 }
@@ -1036,66 +982,33 @@ public class NetworkManager : MonoBehaviour
         SendTcpMessage(message);
     }
     
-    // In SendPlayerState method - Add support for teleport flag
-    public void SendPlayerState(GameManager.PlayerStateData stateData, bool forceTeleport = false)
+    public void SendPlayerState(GameManager.PlayerStateData stateData)
     {
-        if (!_isConnected || _udpClient == null || string.IsNullOrEmpty(_currentRoomId))
-            return;
-            
-        try
+        if (!_isConnected || string.IsNullOrEmpty(_currentRoomId)) return;
+        
+        // According to SERVER-README.md section 4.2, the UDP format must be:
+        // {"command":"UPDATE","sessionId":"id","position":{"x":0,"y":0,"z":0},"rotation":{"x":0,"y":0,"z":0,"w":1}}
+        var message = new Dictionary<string, object>
         {
-            // Create UDP packet with player state
-            var posUpdateMsg = new Dictionary<string, object>
+            ["command"] = "UPDATE",
+            ["sessionId"] = _clientId,
+            ["position"] = new Dictionary<string, float>
             {
-                { "command", "UPDATE" },
-                { "sessionId", _clientId },
-                { "roomId", _currentRoomId },
-                { "position", new Dictionary<string, float>
-                    {
-                        { "x", stateData.position.x },
-                        { "y", stateData.position.y },
-                        { "z", stateData.position.z }
-                    }
-                },
-                { "rotation", new Dictionary<string, float>
-                    {
-                        { "x", stateData.rotation.x },
-                        { "y", stateData.rotation.y },
-                        { "z", stateData.rotation.z },
-                        { "w", stateData.rotation.w }
-                    }
-                },
-                { "velocity", new Dictionary<string, float>
-                    {
-                        { "x", stateData.velocity.x },
-                        { "y", stateData.velocity.y },
-                        { "z", stateData.velocity.z }
-                    }
-                },
-                { "angularVelocity", new Dictionary<string, float>
-                    {
-                        { "x", stateData.angularVelocity.x },
-                        { "y", stateData.angularVelocity.y },
-                        { "z", stateData.angularVelocity.z }
-                    }
-                },
-                { "timestamp", stateData.timestamp },
-                { "client_id", _clientId }, // Match field name from documentation
-                { "teleport", forceTeleport } // Add teleport flag for initial sync
-            };
-            
-            // Convert to JSON and send via UDP
-            string json = JsonConvert.SerializeObject(posUpdateMsg);
-            byte[] data = Encoding.UTF8.GetBytes(json);
-            
-            _udpClient.Send(data, data.Length);
-            
-            LogDebug($"Sent player state update for {stateData.playerId}, teleport={forceTeleport}");
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"Error sending player state: {e.Message}");
-        }
+                ["x"] = stateData.position.x,
+                ["y"] = stateData.position.y,
+                ["z"] = stateData.position.z
+            },
+            ["rotation"] = new Dictionary<string, float>
+            {
+                ["x"] = stateData.rotation.x,
+                ["y"] = stateData.rotation.y,
+                ["z"] = stateData.rotation.z,
+                ["w"] = stateData.rotation.w
+            }
+        };
+        
+        // Debug.Log($"Sending UDP state update: {JsonConvert.SerializeObject(message)}");
+        SendUdpMessage(message);
     }
     
     // Make sure we properly format the UDP INPUT command according to documentation
@@ -1202,59 +1115,5 @@ public class NetworkManager : MonoBehaviour
     {
         // Return the stored host ID, or default to client ID if none is available
         return _hostId ?? _clientId;
-    }
-
-    // Add a coroutine to request initial state from all players in the room
-    private IEnumerator RequestInitialPlayerStates(float initialDelay)
-    {
-        // Wait for the scene to load and local player to be spawned
-        yield return new WaitForSeconds(initialDelay);
-        
-        Debug.Log("Requesting initial player states...");
-        
-        // Force an immediate state sync from our player
-        if (GameManager.Instance != null)
-        {
-            var localPlayerId = GameManager.Instance.GetLocalPlayerId();
-            var stateData = GameManager.Instance.GetPlayerState(localPlayerId);
-            if (stateData != null)
-            {
-                // Force send our state immediately
-                SendPlayerState(stateData);
-                Debug.Log($"Sent initial state for local player: {localPlayerId}");
-                
-                // Start continuous polling for other players
-                StartCoroutine(PollForRemotePlayers(5.0f));
-            }
-        }
-    }
-    
-    // Continuously poll for remote players that might not have spawned yet
-    private IEnumerator PollForRemotePlayers(float duration)
-    {
-        float startTime = Time.time;
-        float checkInterval = 0.5f;
-        
-        while (Time.time - startTime < duration)
-        {
-            yield return new WaitForSeconds(checkInterval);
-            
-            if (!string.IsNullOrEmpty(_currentRoomId))
-            {
-                // Request room players to ensure we have the latest list
-                GetRoomPlayers(_currentRoomId);
-                
-                if (GameManager.Instance != null)
-                {
-                    // Force send our state again for any players that might have joined late
-                    var localPlayerId = GameManager.Instance.GetLocalPlayerId();
-                    var stateData = GameManager.Instance.GetPlayerState(localPlayerId);
-                    if (stateData != null)
-                    {
-                        SendPlayerState(stateData, true); // Include teleport flag
-                    }
-                }
-            }
-        }
     }
 }
