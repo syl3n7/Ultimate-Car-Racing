@@ -169,9 +169,8 @@ public class GameManager : MonoBehaviour
     }
     
     // In BroadcastSceneReady method - update to use NetworkManager
-    private IEnumerator BroadcastSceneReady()
+    public IEnumerator BroadcastSceneReady()
     {
-        // Wait for grace period to ensure scene is fully loaded
         yield return new WaitForSeconds(SCENE_LOAD_GRACE_PERIOD);
         
         // Mark scene as fully loaded
@@ -180,29 +179,22 @@ public class GameManager : MonoBehaviour
         // Broadcast "scene ready" message to other players
         if (NetworkManager.Instance != null && isMultiplayerGame)
         {
-            // Get player list from NetworkManager instead of activePlayers
             string currentRoomId = NetworkManager.Instance.GetCurrentRoomId();
             
             if (!string.IsNullOrEmpty(currentRoomId))
             {
-                // First, request the latest player list from the server
                 Dictionary<string, object> getPlayersMsg = new Dictionary<string, object>
                 {
                     { "command", "GET_ROOM_PLAYERS" },
                     { "roomId", currentRoomId }
                 };
                 
-                // Send this first and wait briefly for server to respond
                 _ = NetworkManager.Instance.SendTcpMessage(getPlayersMsg);
-                
-                // Wait a moment for server to send player list
                 yield return new WaitForSeconds(0.5f);
                 
-                // Now notify the host that we're ready
                 Dictionary<string, object> readyMessage = new Dictionary<string, object>
                 {
                     { "command", "RELAY_MESSAGE" },
-                    // Send to room host first to ensure everyone gets notified
                     { "targetId", NetworkManager.Instance.GetRoomHostId() },
                     { "message", $"SCENE_READY:{localPlayerId}" }
                 };
