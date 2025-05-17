@@ -120,16 +120,17 @@ public class NetworkManager : MonoBehaviour
         
         if (_isConnected && !string.IsNullOrEmpty(_currentRoomId))
         {
-            // According to SERVER-README.md, RELAY_MESSAGE requires targetId and message
+            // According to SERVER-README.md section 3.2 and 7.4, RELAY_MESSAGE requires:
+            // {"command":"RELAY_MESSAGE","targetId":"playerId","message":"text"}
             var readyMessage = new Dictionary<string, object>
             {
                 { "command", "RELAY_MESSAGE" },
                 { "targetId", "all" }, // Target all players in the room
-                { "message", "SCENE_READY" }
+                { "message", $"SCENE_READY:{_clientId}" } // Include our ID in the message
             };
             
             SendTcpMessage(readyMessage);
-            Debug.Log("Sent scene ready notification after scene change");
+            Debug.Log($"Sent SCENE_READY:{_clientId} message to all players");
         }
     }
     
@@ -174,15 +175,18 @@ public class NetworkManager : MonoBehaviour
         }
     }
     
-    // Fix SendRegistration to use NAME command
+    // Fix SendRegistration to use NAME command according to section 3.2 of SERVER-README.md
     private async Task SendRegistration()
     {
+        // According to SERVER-README.md section 3.2:
+        // {"command":"NAME","name":"playerName"} -> {"command":"NAME_OK","name":"playerName"}
         var registrationMessage = new Dictionary<string, object>
         {
             { "command", "NAME" },
             { "name", _deviceName }
         };
         
+        Debug.Log($"Sending player registration with name: {_deviceName}");
         await SendTcpMessage(registrationMessage);
     }
     
@@ -408,6 +412,14 @@ public class NetworkManager : MonoBehaviour
                     {
                         _currentRoomId = messageObj["roomId"].ToString();
                         
+                        // According to SERVER-README.md section 3.2, store the host ID if provided
+                        if (messageObj.ContainsKey("hostId"))
+                        {
+                            _hostId = messageObj["hostId"].ToString();
+                            _isHost = (_hostId == _clientId);
+                            Debug.Log($"Room host is: {_hostId}, local client is: {_clientId}, isHost: {_isHost}");
+                        }
+                        
                         var joinedMsg = new Dictionary<string, object>
                         {
                             { "room_id", _currentRoomId },
@@ -444,10 +456,16 @@ public class NetworkManager : MonoBehaviour
                     }
                     break;
                     
+                case "GAME_STARTED":
+                    Debug.Log($"Game started message received: {message}");
+                    
+                    // According to SERVER-README.md section 3.2, the GAME_STARTED response format is:
+                    // {"command":"GAME_STARTED","roomId":"roomId","hostId":"hostId"}
+                    // The server doesn't provide spawn position, so we need to create a default one
+                    
                     var gameStartedMsg = new Dictionary<string, object>();
                     
-                    // According to SERVER-README.md, the GAME_STARTED message only contains roomId
-                    // We need to create a default spawn position since the server doesn't provide one
+                    // Create a default spawn position since the server doesn't provide one
                     var spawnPosObj = new Newtonsoft.Json.Linq.JObject();
                     spawnPosObj["x"] = 0f;
                     spawnPosObj["y"] = 5f;  // Start slightly above ground to prevent physics issues
@@ -456,10 +474,16 @@ public class NetworkManager : MonoBehaviour
                     
                     gameStartedMsg["spawn_position"] = spawnPosObj;
                     
-                    // Include room ID
+                    // Include room ID and host ID from server response
                     if (messageObj.ContainsKey("roomId"))
                     {
                         gameStartedMsg["room_id"] = messageObj["roomId"];
+                    }
+                    
+                    // Include host ID if provided
+                    if (messageObj.ContainsKey("hostId"))
+                    {
+                        gameStartedMsg["host_id"] = messageObj["hostId"];
                     }
                     
                     Debug.Log($"Created spawn position for player: {spawnPosObj["x"]},{spawnPosObj["y"]},{spawnPosObj["z"]}");
@@ -477,6 +501,84 @@ public class NetworkManager : MonoBehaviour
                     
                 case "ERROR":
                     Debug.LogError($"Server error: {messageObj["message"]}");
+                    break;
+                    
+                case "RELAYED_MESSAGE":
+                    Debug.Log($"Received relayed message: {message}");
+                    
+                    // According to SERVER-README.md section 3.2, RELAYED_MESSAGE has format:
+                    // {"command":"RELAYED_MESSAGE","senderId":"id","senderName":"name","message":"text"}
+                    
+                    if (messageObj.ContainsKey("senderId") && messageObj.ContainsKey("message"))
+                    {
+                        var relayedMsg = new Dictionary<string, object>
+                        {
+                            { "sender_id", messageObj["senderId"] },
+                            { "message", messageObj["message"] }
+                        };
+                        
+                        // Include sender name if provided
+                        if (messageObj.ContainsKey("senderName"))
+                        {
+                            relayedMsg["sender_name"] = messageObj["senderName"];
+                        }
+                        
+                        // If this is a SCENE_READY message, handle it specially
+                        string msgContent = messageObj["message"].ToString();
+                        if (msgContent.StartsWith("SCENE_READY:"))
+                        {
+                            try
+                            {
+                                string[] parts = msgContent.Split(':');
+                                if (parts.Length > 1)
+                                {
+                                    string readyPlayerId = parts[1];
+                                    Debug.Log($"Player {readyPlayerId} is ready - scene loaded");
+                                    
+                                    // Notify GameManager that this player is ready
+                                    UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                                        if (GameManager.Instance != null)
+                                        {
+                                            GameManager.Instance.HandlePlayerReady(readyPlayerId);
+                                        }
+                                    });
+                                }
+                            }
+                            catch (Exception e)
+                            {
+                                Debug.LogError($"Error processing SCENE_READY message: {e.Message}");
+                            }
+                        }
+                        
+                        UnityMainThreadDispatcher.Instance().Enqueue(() => 
+                            OnRelayReceived?.Invoke(relayedMsg));
+                    }
+                    break;
+
+                case "PLAYER_INFO":
+                    // According to section 3.2, PLAYER_INFO response format:
+                    // {"command":"PLAYER_INFO","playerInfo":{"id":"id","name":"playerName","currentRoomId":"roomId"}}
+                    Debug.Log($"Received player info from server: {message}");
+                    
+                    // Forward the player info to UI manager if needed
+                    if (messageObj.ContainsKey("playerInfo"))
+                    {
+                        var playerInfoMsg = new Dictionary<string, object>();
+                        playerInfoMsg["player_info"] = messageObj["playerInfo"];
+                        
+                        UnityMainThreadDispatcher.Instance().Enqueue(() => 
+                            OnServerMessage?.Invoke(playerInfoMsg));
+                    }
+                    break;
+
+                case "PONG":
+                    // According to SERVER-README.md section 3.2, PONG is the response to PING
+                    // We can't directly calculate latency here because Time.time can only be called from main thread
+                    // Instead, dispatch to main thread to calculate latency
+                    UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                        _latency = Time.time - _lastPingTime;
+                        LogDebug($"Received PONG response, latency: {_latency * 1000:F2}ms");
+                    });
                     break;
                     
                 default:
@@ -683,21 +785,22 @@ public class NetworkManager : MonoBehaviour
         
         try
         {
-            // Server doesn't have a special disconnect command, just close the socket
+            // According to SERVER-README.md section 3.2, BYE is a supported command
             if (_tcpClient != null && _tcpClient.Connected)
             {
                 var disconnectMessage = new Dictionary<string, object>
                 {
-                    { "command", "BYE" } // This isn't in the spec but might be supported
+                    { "command", "BYE" }
                 };
                 
                 // Fire and forget - don't await
                 SendTcpMessage(disconnectMessage);
+                Debug.Log("Sent BYE command to server");
             }
         }
-        catch (Exception)
+        catch (Exception e)
         {
-            // Ignore errors when trying to send disconnect
+            Debug.LogError($"Error sending disconnect message: {e.Message}");
         }
         
         // Cancel ongoing operations
@@ -710,6 +813,8 @@ public class NetworkManager : MonoBehaviour
         // Reset state
         _isConnected = false;
         _currentRoomId = null;
+        _hostId = null;
+        _isHost = false;
         
         OnDisconnected?.Invoke("Disconnected from server");
         LogDebug("Disconnected from server");
@@ -754,14 +859,27 @@ public class NetworkManager : MonoBehaviour
         SendTcpMessage(message);
     }
     
+    // According to SERVER-README.md section 3.2, only the host can start the game
+    // The format is: {"command":"START_GAME"} - no roomId needed since server knows player's room
     public void StartGame()
     {
-        if (!_isConnected || string.IsNullOrEmpty(_currentRoomId)) return;
+        if (!_isConnected || string.IsNullOrEmpty(_currentRoomId)) 
+        {
+            Debug.LogError("Cannot start game: Not connected or no room ID");
+            return;
+        }
+        
+        if (!_isHost)
+        {
+            Debug.LogError("Cannot start game: Only the host can start the game");
+            return;
+        }
+        
+        Debug.Log($"Sending START_GAME command for room: {_currentRoomId} as host: {_isHost}");
         
         var message = new Dictionary<string, object>
         {
-            { "command", "START_GAME" },
-            { "roomId", _currentRoomId }
+            { "command", "START_GAME" }
         };
         
         SendTcpMessage(message);
@@ -771,10 +889,11 @@ public class NetworkManager : MonoBehaviour
     {
         if (!_isConnected || string.IsNullOrEmpty(_currentRoomId)) return;
         
+        // According to SERVER-README.md section 3.2, LEAVE_ROOM doesn't take a roomId parameter
+        // {"command":"LEAVE_ROOM"}
         var message = new Dictionary<string, object>
         {
-            { "command", "LEAVE_ROOM" },
-            { "roomId", _currentRoomId }
+            { "command", "LEAVE_ROOM" }
         };
         
         SendTcpMessage(message);
@@ -825,14 +944,17 @@ public class NetworkManager : MonoBehaviour
             }
         };
         
-        Debug.Log($"Sending UDP state update: {JsonConvert.SerializeObject(message)}");
+        // Debug.Log($"Sending UDP state update: {JsonConvert.SerializeObject(message)}");
         SendUdpMessage(message);
     }
     
+    // Make sure we properly format the UDP INPUT command according to documentation
     public void SendPlayerInput(GameManager.PlayerInputData input)
     {
         if (!_isConnected || string.IsNullOrEmpty(_currentRoomId)) return;
         
+        // According to SERVER-README.md section 4.2, the INPUT format must be:
+        // {"command":"INPUT","sessionId":"id","roomId":"roomId","input":{...},"client_id":"id"}
         var message = new Dictionary<string, object>
         {
             { "command", "INPUT" },
@@ -845,10 +967,43 @@ public class NetworkManager : MonoBehaviour
                     { "brake", input.brake },
                     { "timestamp", input.timestamp }
                 }
-            }
+            },
+            { "client_id", _clientId } // Required according to docs
         };
         
+        // Debug.Log($"Sending UDP input: {JsonConvert.SerializeObject(message)}");
         SendUdpMessage(message);
+    }
+    
+    // Fix GET_ROOM_PLAYERS to include roomId parameter as required in the documentation
+    public void GetRoomPlayers(string roomId)
+    {
+        if (!_isConnected) return;
+        
+        // According to SERVER-README.md section 3.2, GET_ROOM_PLAYERS should include roomId
+        var message = new Dictionary<string, object>
+        {
+            { "command", "GET_ROOM_PLAYERS" },
+            { "roomId", roomId }
+        };
+        
+        SendTcpMessage(message);
+    }
+
+    // Get player information from the server
+    public void RequestPlayerInfo()
+    {
+        if (!_isConnected) return;
+        
+        // According to SERVER-README.md section 3.2, PLAYER_INFO command:
+        // {"command":"PLAYER_INFO"}
+        var message = new Dictionary<string, object>
+        {
+            { "command", "PLAYER_INFO" }
+        };
+        
+        SendTcpMessage(message);
+        Debug.Log("Sent PLAYER_INFO request to server");
     }
     
     // Utility methods
@@ -881,6 +1036,12 @@ public class NetworkManager : MonoBehaviour
         roomData["player_count"] = serverRoom.ContainsKey("playerCount") ? serverRoom["playerCount"] : 0;
         roomData["max_players"] = 20; // Default to 20 if not provided
         roomData["is_active"] = serverRoom.ContainsKey("isActive") ? serverRoom["isActive"] : false;
+        
+        // Per section 3.2, store the hostId if provided, for host status determination later
+        if (serverRoom.ContainsKey("hostId"))
+        {
+            roomData["host_id"] = serverRoom["hostId"];
+        }
         
         roomsList.Add(roomData);
         Debug.Log($"Added room: {roomData["name"]} (ID: {roomData["room_id"]})");

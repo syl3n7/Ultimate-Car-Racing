@@ -633,13 +633,38 @@ public async void CreateRoom()
         }
     }
     
-    // In StartGame method - update to use NetworkManager
+    // In StartGame method - update to use NetworkManager with server protocol
     public void StartGame()
     {
-        if (isHost && NetworkManager.Instance != null && NetworkManager.Instance.IsConnected())
+        if (!isHost)
         {
+            // According to SERVER-README.md, only the host can start the game
+            ShowNotification("Only the host can start the game");
+            return;
+        }
+        
+        if (NetworkManager.Instance != null && NetworkManager.Instance.IsConnected() && !string.IsNullOrEmpty(currentRoomId))
+        {
+            // Show visual feedback
             ShowConnectionPanel("Starting game...");
+            
+            // Check if there are any players in the room
+            if (playersInRoom.Count <= 0)
+            {
+                ShowNotification("Cannot start game with no players");
+                HideConnectionPanel();
+                return;
+            }
+            
+            Debug.Log($"Host is starting game for room: {currentRoomId} with {playersInRoom.Count} players");
+            
+            // Send the start game command according to server documentation
             NetworkManager.Instance.StartGame();
+        }
+        else
+        {
+            ShowNotification("Cannot start game - connection issue");
+            Debug.LogError("Start game failed: Not connected or no room ID");
         }
     }
     
@@ -747,7 +772,18 @@ public async void CreateRoom()
     
         // Show/hide start game button based on host status
         startGameButton.gameObject.SetActive(isHost);
-        Debug.Log($"Start game button active: {startGameButton.gameObject.activeSelf}, isHost: {isHost}");
+        Debug.Log($"Start game button visibility set to {isHost} (isHost={isHost})");
+        
+        // Make sure button is properly interactive
+        if (isHost)
+        {
+            startGameButton.interactable = true;
+            
+            // Add visual indicator that this player is the host
+            ColorBlock colors = startGameButton.colors;
+            colors.normalColor = new Color(0.8f, 0.9f, 0.8f);
+            startGameButton.colors = colors;
+        }
     
         // Clear player list
         foreach (Transform child in playerListContent)
@@ -788,19 +824,16 @@ public async void CreateRoom()
     {
         HideConnectionPanel();
         
-        // Send player name to server - note that we actually don't need to do this
-        // because the NetworkManager already sent the NAME command
+        // According to SERVER-README.md section 3.2, only NAME is needed for registration
+        // NetworkManager already sent the NAME command during connection
+        
+        // Just for extra in-game information, we can use PLAYER_INFO command to get details
         if (NetworkManager.Instance != null)
         {
-            Dictionary<string, object> playerInfo = new Dictionary<string, object>
-            {
-                { "command", "PLAYER_INFO" },
-                { "name", playerName },
-                { "id", playerId }
-            };
-            
-            _ = NetworkManager.Instance.SendTcpMessage(playerInfo);
+            NetworkManager.Instance.RequestPlayerInfo();
         }
+        
+        ShowNotification("Connected to server");
     }
     
     private void OnDisconnected()
@@ -1095,14 +1128,9 @@ public async void CreateRoom()
             // Request the complete player list from the server
             if (NetworkManager.Instance != null)
             {
-                Dictionary<string, object> playerListRequest = new Dictionary<string, object>
-                {
-                    { "command", "GET_ROOM_PLAYERS" },
-                    { "roomId", currentRoomId }
-                };
-
-                _ = NetworkManager.Instance.SendTcpMessage(playerListRequest);
-                Debug.Log($"Sent request for room players: {JsonConvert.SerializeObject(playerListRequest)}");
+                // Use the proper helper method
+                NetworkManager.Instance.GetRoomPlayers(currentRoomId);
+                Debug.Log($"Sent request for room players: {currentRoomId}");
             }
 
             ShowRoomLobbyPanel();
@@ -1242,15 +1270,10 @@ public async void CreateRoom()
     private void RefreshPlayerList()
     {
         // Request the complete player list from the server
-        if (NetworkManager.Instance != null && NetworkManager.Instance.IsConnected())
+        if (NetworkManager.Instance != null && NetworkManager.Instance.IsConnected() && !string.IsNullOrEmpty(currentRoomId))
         {
-            Dictionary<string, object> playerListRequest = new Dictionary<string, object>
-            {
-                { "command", "GET_ROOM_PLAYERS" },
-                { "roomId", currentRoomId }
-            };
-
-            _ = NetworkManager.Instance.SendTcpMessage(playerListRequest);
+            // Use the proper helper method that formats the command correctly
+            NetworkManager.Instance.GetRoomPlayers(currentRoomId);
             Debug.Log("Sending periodic player list refresh request");
         }
     }
