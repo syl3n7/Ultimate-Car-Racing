@@ -1049,4 +1049,11 @@ public class NetworkManager : MonoBehaviour
         roomsList.Add(roomData);
         Debug.Log($"Added room: {roomData["name"]} (ID: {roomData["room_id"]})");
     }
+
+    // Helper method to get the room host ID
+    public string GetRoomHostId()
+    {
+        // Return the stored host ID, or default to client ID if none is available
+        return _hostId ?? _clientId;
+    }
 }

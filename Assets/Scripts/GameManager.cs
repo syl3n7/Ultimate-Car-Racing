@@ -180,31 +180,39 @@ public class GameManager : MonoBehaviour
         // Broadcast "scene ready" message to other players
         if (NetworkManager.Instance != null && isMultiplayerGame)
         {
-            // Get the list of players in the current room
-            if (activePlayers.Count > 0)
+            // Get player list from NetworkManager instead of activePlayers
+            string currentRoomId = NetworkManager.Instance.GetCurrentRoomId();
+            
+            if (!string.IsNullOrEmpty(currentRoomId))
             {
-                // Send to each player individually instead of using "all" which isn't supported
-                foreach (string playerId in activePlayers.Keys)
+                // First, request the latest player list from the server
+                Dictionary<string, object> getPlayersMsg = new Dictionary<string, object>
                 {
-                    // Don't send to ourselves
-                    if (playerId != localPlayerId)
-                    {
-                        // According to SERVER-README.md, RELAY_MESSAGE requires targetId and message
-                        Dictionary<string, object> readyMessage = new Dictionary<string, object>
-                        {
-                            { "command", "RELAY_MESSAGE" },
-                            { "targetId", playerId }, // Target this specific player
-                            { "message", $"SCENE_READY:{localPlayerId}" } // Include player ID in the message
-                        };
-                        
-                        _ = NetworkManager.Instance.SendTcpMessage(readyMessage);
-                        Debug.Log($"Sent SCENE_READY message to player: {playerId}");
-                    }
-                }
+                    { "command", "GET_ROOM_PLAYERS" },
+                    { "roomId", currentRoomId }
+                };
+                
+                // Send this first and wait briefly for server to respond
+                _ = NetworkManager.Instance.SendTcpMessage(getPlayersMsg);
+                
+                // Wait a moment for server to send player list
+                yield return new WaitForSeconds(0.5f);
+                
+                // Now notify the host that we're ready
+                Dictionary<string, object> readyMessage = new Dictionary<string, object>
+                {
+                    { "command", "RELAY_MESSAGE" },
+                    // Send to room host first to ensure everyone gets notified
+                    { "targetId", NetworkManager.Instance.GetRoomHostId() },
+                    { "message", $"SCENE_READY:{localPlayerId}" }
+                };
+                
+                _ = NetworkManager.Instance.SendTcpMessage(readyMessage);
+                Debug.Log($"Sent SCENE_READY message to room host");
             }
             else
             {
-                Debug.LogWarning("No players found to send SCENE_READY messages to");
+                Debug.LogWarning("Cannot send SCENE_READY message - not in a room");
             }
         }
     }
