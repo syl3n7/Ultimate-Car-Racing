@@ -180,6 +180,14 @@ public class UIManager : MonoBehaviour
         ConnectButton("RefreshRoomsButton", RefreshRoomList);
         ConnectButton("BackFromRoomListButton", ShowMultiplayerPanel);
         
+        // Add explicit listener to Refresh button if it exists in Inspector
+        if (refreshRoomsButton != null)
+        {
+            refreshRoomsButton.onClick.RemoveAllListeners();
+            refreshRoomsButton.onClick.AddListener(RefreshRoomList);
+            Debug.Log("Explicitly connected RefreshRoomsButton from inspector reference");
+        }
+        
         // Room lobby panel buttons
         ConnectButton("StartGameButton", StartGame);
         ConnectButton("LeaveRoomButton", LeaveRoom);
@@ -664,13 +672,29 @@ public async void CreateRoom()
     {
         if (NetworkManager.Instance != null && NetworkManager.Instance.IsConnected())
         {
+            Debug.Log("Requesting room list from server");
             ClearRoomList();
+            
+            // Show a temporary "Loading..." message
+            GameObject loadingText = new GameObject("LoadingText");
+            loadingText.transform.SetParent(roomListContent, false);
+            TextMeshProUGUI textComponent = loadingText.AddComponent<TextMeshProUGUI>();
+            textComponent.text = "Loading rooms...";
+            textComponent.fontSize = 24;
+            textComponent.alignment = TextAlignmentOptions.Center;
+            
             NetworkManager.Instance.RequestRoomList();
+        }
+        else
+        {
+            Debug.LogError("Cannot refresh room list - not connected to server");
+            ShowNotification("Not connected to server");
         }
     }
     
     private void ClearRoomList()
     {
+        Debug.Log("Clearing room list UI");
         foreach (Transform child in roomListContent)
         {
             Destroy(child.gameObject);
@@ -796,29 +820,125 @@ public async void CreateRoom()
         // Clear previous room list
         ClearRoomList();
         
+        Debug.Log($"UIManager.OnRoomListReceived: {JsonConvert.SerializeObject(message)}");
+        
         // Parse room list from message
         if (message.ContainsKey("rooms"))
         {
-            var rooms = message["rooms"] as Newtonsoft.Json.Linq.JArray;
-            if (rooms != null)
+            try 
             {
-                foreach (var roomObject in rooms)
+                var roomsObj = message["rooms"];
+                
+                // Handle different possible types
+                List<Dictionary<string, object>> roomList = null;
+                
+                if (roomsObj is Newtonsoft.Json.Linq.JArray jArray)
                 {
-                    var room = roomObject.ToObject<Dictionary<string, object>>();
+                    roomList = jArray.ToObject<List<Dictionary<string, object>>>();
+                }
+                else if (roomsObj is List<Dictionary<string, object>> directList)
+                {
+                    roomList = directList;
+                }
+                else if (roomsObj is IEnumerable<object> enumerable)
+                {
+                    roomList = new List<Dictionary<string, object>>();
+                    foreach (var item in enumerable)
+                    {
+                        if (item is Dictionary<string, object> dict)
+                        {
+                            roomList.Add(dict);
+                        }
+                    }
+                }
+                
+                if (roomList == null || roomList.Count == 0)
+                {
+                    // Add a message to the UI when no rooms are available
+                    GameObject emptyListText = new GameObject("EmptyListText");
+                    emptyListText.transform.SetParent(roomListContent, false);
+                    TextMeshProUGUI textComponent = emptyListText.AddComponent<TextMeshProUGUI>();
+                    textComponent.text = "No rooms available. Create one!";
+                    textComponent.fontSize = 24;
+                    textComponent.alignment = TextAlignmentOptions.Center;
+                    return;
+                }
+                
+                Debug.Log($"Processing {roomList.Count} rooms");
+                
+                foreach (var room in roomList)
+                {
+                    Debug.Log($"Processing room: {JsonConvert.SerializeObject(room)}");
                     
                     // Create room list item
                     GameObject roomItem = Instantiate(roomListItemPrefab, roomListContent);
                     RoomListItem roomListItem = roomItem.GetComponent<RoomListItem>();
                     
-                    string roomId = room["room_id"].ToString();
-                    string roomName = room["name"].ToString();
-                    int playerCount = Convert.ToInt32(room["player_count"]);
-                    int maxPlayers = Convert.ToInt32(room["max_players"]);
+                    if (roomListItem == null)
+                    {
+                        Debug.LogError("RoomListItem component not found on instantiated prefab!");
+                        continue;
+                    }
                     
-                    roomListItem.Initialize(roomId, roomName, playerCount, maxPlayers);
-                    roomListItem.OnSelected += OnRoomSelected;
+                    try {
+                        string roomId = room["room_id"].ToString();
+                        string roomName = room["name"].ToString();
+                        
+                        // Handle player_count numeric conversion safely
+                        int playerCount = 0;
+                        if (room.ContainsKey("player_count"))
+                        {
+                            if (room["player_count"] is int intVal)
+                                playerCount = intVal;
+                            else
+                                int.TryParse(room["player_count"].ToString(), out playerCount);
+                        }
+                        
+                        // Handle max_players numeric conversion safely  
+                        int maxPlayers = 20;
+                        if (room.ContainsKey("max_players"))
+                        {
+                            if (room["max_players"] is int intVal)
+                                maxPlayers = intVal;
+                            else
+                                int.TryParse(room["max_players"].ToString(), out maxPlayers);
+                        }
+                        
+                        Debug.Log($"Initializing room UI: ID={roomId}, Name={roomName}, Players={playerCount}/{maxPlayers}");
+                        roomListItem.Initialize(roomId, roomName, playerCount, maxPlayers);
+                        roomListItem.OnSelected += OnRoomSelected;
+                    }
+                    catch (Exception e) {
+                        Debug.LogError($"Error initializing room list item: {e.Message}\nRoom data: {JsonConvert.SerializeObject(room)}");
+                        Destroy(roomItem);
+                    }
                 }
             }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error processing rooms list: {ex.Message}\n{ex.StackTrace}");
+                
+                // Add a friendly error message to the room list
+                GameObject errorText = new GameObject("ErrorText");
+                errorText.transform.SetParent(roomListContent, false);
+                TextMeshProUGUI textComponent = errorText.AddComponent<TextMeshProUGUI>();
+                textComponent.text = "Error loading room list. Please try again.";
+                textComponent.fontSize = 20;
+                textComponent.color = Color.red;
+                textComponent.alignment = TextAlignmentOptions.Center;
+            }
+        }
+        else
+        {
+            Debug.LogError("Room list message does not contain 'rooms' key");
+            
+            // Add a friendly error message
+            GameObject errorText = new GameObject("ErrorText");
+            errorText.transform.SetParent(roomListContent, false);
+            TextMeshProUGUI textComponent = errorText.AddComponent<TextMeshProUGUI>();
+            textComponent.text = "No rooms found. Try creating one!";
+            textComponent.fontSize = 20;
+            textComponent.alignment = TextAlignmentOptions.Center;
         }
     }
     

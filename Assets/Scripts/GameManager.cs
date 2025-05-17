@@ -180,14 +180,12 @@ public class GameManager : MonoBehaviour
         // Broadcast "scene ready" message to all players
         if (NetworkManager.Instance != null && isMultiplayerGame)
         {
+            // According to SERVER-README.md, RELAY_MESSAGE requires targetId and message
             Dictionary<string, object> readyMessage = new Dictionary<string, object>
             {
                 { "command", "RELAY_MESSAGE" },
-                { "roomId", NetworkManager.Instance.GetCurrentRoomId() },
-                { "message", new Dictionary<string, object> {
-                    { "type", "SCENE_READY" },
-                    { "playerId", localPlayerId }
-                }}
+                { "targetId", "all" }, // Target all players
+                { "message", $"SCENE_READY:{localPlayerId}" } // Include player ID in the message
             };
             
             _ = NetworkManager.Instance.SendTcpMessage(readyMessage);

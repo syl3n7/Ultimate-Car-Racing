@@ -120,14 +120,12 @@ public class NetworkManager : MonoBehaviour
         
         if (_isConnected && !string.IsNullOrEmpty(_currentRoomId))
         {
+            // According to SERVER-README.md, RELAY_MESSAGE requires targetId and message
             var readyMessage = new Dictionary<string, object>
             {
                 { "command", "RELAY_MESSAGE" },
-                { "roomId", _currentRoomId },
-                { "message", new Dictionary<string, object> {
-                    { "type", "SCENE_READY" },
-                    { "playerId", _clientId }
-                }}
+                { "targetId", "all" }, // Target all players in the room
+                { "message", "SCENE_READY" }
             };
             
             SendTcpMessage(readyMessage);
@@ -344,27 +342,62 @@ public class NetworkManager : MonoBehaviour
                     
                     if (messageObj.ContainsKey("rooms"))
                     {
-                        var serverRooms = messageObj["rooms"] as Newtonsoft.Json.Linq.JArray;
-                        if (serverRooms != null)
+                        // Extract the rooms array more carefully
+                        try
                         {
-                            foreach (var roomObj in serverRooms)
+                            // Check different possible types for the rooms property
+                            if (messageObj["rooms"] is Newtonsoft.Json.Linq.JArray jArray)
                             {
-                                var serverRoom = roomObj.ToObject<Dictionary<string, object>>();
-                                var roomData = new Dictionary<string, object>();
-                                
-                                // Match keys with our UI's expected format
-                                roomData["room_id"] = serverRoom.ContainsKey("id") ? serverRoom["id"] : "";
-                                roomData["name"] = serverRoom.ContainsKey("name") ? serverRoom["name"] : "Unknown Room";
-                                roomData["player_count"] = serverRoom.ContainsKey("playerCount") ? serverRoom["playerCount"] : 0;
-                                roomData["max_players"] = 20; // Default to 20 if not provided
-                                roomData["is_active"] = serverRoom.ContainsKey("isActive") ? serverRoom["isActive"] : false;
-                                
-                                roomsList.Add(roomData);
+                                // It's already a JArray
+                                foreach (var roomObj in jArray)
+                                {
+                                    var serverRoom = roomObj.ToObject<Dictionary<string, object>>();
+                                    AddRoomToList(roomsList, serverRoom);
+                                }
+                            }
+                            else if (messageObj["rooms"] is IEnumerable<object> enumerable)
+                            {
+                                // It's a generic enumerable
+                                foreach (var roomObj in enumerable)
+                                {
+                                    if (roomObj is Newtonsoft.Json.Linq.JObject jObject)
+                                    {
+                                        var serverRoom = jObject.ToObject<Dictionary<string, object>>();
+                                        AddRoomToList(roomsList, serverRoom);
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                // Try to deserialize it directly
+                                string roomsJson = messageObj["rooms"].ToString();
+                                var directRooms = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(roomsJson);
+                                if (directRooms != null)
+                                {
+                                    foreach (var serverRoom in directRooms)
+                                    {
+                                        AddRoomToList(roomsList, serverRoom);
+                                    }
+                                }
+                                else
+                                {
+                                    Debug.LogError($"Could not parse rooms data: {roomsJson}");
+                                }
                             }
                         }
+                        catch (Exception ex)
+                        {
+                            Debug.LogError($"Error parsing rooms data: {ex.Message}");
+                        }
+                    }
+                    else
+                    {
+                        Debug.LogError("Server response missing 'rooms' array");
                     }
                     
                     roomListMsg["rooms"] = roomsList;
+                    
+                    Debug.Log($"Final processed room list: {JsonConvert.SerializeObject(roomListMsg)}");
                     
                     UnityMainThreadDispatcher.Instance().Enqueue(() => 
                         OnRoomListReceived?.Invoke(roomListMsg));
@@ -689,10 +722,15 @@ public class NetworkManager : MonoBehaviour
         SendTcpMessage(message);
     }
     
-    // Fix JoinGame to use JOIN_ROOM command
     public void JoinGame(string roomId)
     {
-        if (!_isConnected) return;
+        if (!_isConnected) 
+        {
+            Debug.LogError("Cannot join game: Not connected to server");
+            return; 
+        }
+        
+        Debug.Log($"Joining room with ID: {roomId}");
         
         var message = new Dictionary<string, object>
         {
@@ -733,7 +771,13 @@ public class NetworkManager : MonoBehaviour
     
     public void RequestRoomList()
     {
-        if (!_isConnected) return;
+        if (!_isConnected) 
+        {
+            Debug.LogError("Cannot request room list: Not connected to server");
+            return;
+        }
+        
+        Debug.Log("Sending LIST_ROOMS request to server");
         
         var message = new Dictionary<string, object>
         {
@@ -811,5 +855,21 @@ public class NetworkManager : MonoBehaviour
     public bool HasGameHostedSubscribers()
     {
         return OnGameHosted != null;
+    }
+
+    // Helper method to add a room to the room list with proper mapping
+    private void AddRoomToList(List<Dictionary<string, object>> roomsList, Dictionary<string, object> serverRoom)
+    {
+        var roomData = new Dictionary<string, object>();
+        
+        // Match keys with our UI's expected format - according to SERVER-README.md field names
+        roomData["room_id"] = serverRoom.ContainsKey("id") ? serverRoom["id"] : "";
+        roomData["name"] = serverRoom.ContainsKey("name") ? serverRoom["name"] : "Unknown Room";
+        roomData["player_count"] = serverRoom.ContainsKey("playerCount") ? serverRoom["playerCount"] : 0;
+        roomData["max_players"] = 20; // Default to 20 if not provided
+        roomData["is_active"] = serverRoom.ContainsKey("isActive") ? serverRoom["isActive"] : false;
+        
+        roomsList.Add(roomData);
+        Debug.Log($"Added room: {roomData["name"]} (ID: {roomData["room_id"]})");
     }
 }
