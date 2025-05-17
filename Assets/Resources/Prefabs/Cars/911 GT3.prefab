@@ -1565,6 +1565,7 @@ GameObject:
   - component: {fileID: 9203691710431408469}
   - component: {fileID: 1649533749991156644}
   - component: {fileID: 5504385061549013875}
+  - component: {fileID: 1825832816261373692}
   m_Layer: 0
   m_Name: 911 GT3
   m_TagString: Untagged
@@ -1680,10 +1681,134 @@ MonoBehaviour:
   - collider: {fileID: 5579520465180962469}
     wheelType: 1
   moveInput: {x: 0, y: 0}
-  powerMultiplier: 1000
   maxSteer: 30
   wheelbase: 2.5
   trackwidth: 1.5
+  maxTorque: 3000
+  maxRPM: 7000
+  idleRPM: 800
+  gearRatios:
+  - 3.5
+  - 2.5
+  - 1.8
+  - 1.3
+  - 1
+  gearSpeeds: []
+  finalDriveRatio: 3.5
+  reverseGearRatio: 3
+  engineBrakeTorque: 500
+  shiftUpRPM: 6500
+  shiftDownRPM: 3000
+  engineIdleClip: {fileID: 8300000, guid: 0c61060f0c07041938101d54b2a9c66b, type: 3}
+  engineRunningClip: {fileID: 8300000, guid: 8cd8a661c6877405f95a10fcd63b8522, type: 3}
+  minPitch: 0.7
+  maxPitch: 1.5
+  pitchMultiplier: 1
+  maxSpeed: 200
+  steeringResponseSpeed: 2
+  speedSteeringFactor: 0.5
+  driftFactor: 0.7
+  downforce: 10
+  brakeForce: 5000
+  reverseSpeedLimit: 30
+  brakeToReverseThreshold: 1
+--- !u!82 &1825832816261373692
+AudioSource:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2511016263285469459}
+  m_Enabled: 1
+  serializedVersion: 4
+  OutputAudioMixerGroup: {fileID: 0}
+  m_audioClip: {fileID: 0}
+  m_Resource: {fileID: 0}
+  m_PlayOnAwake: 1
+  m_Volume: 1
+  m_Pitch: 1
+  Loop: 0
+  Mute: 0
+  Spatialize: 0
+  SpatializePostEffects: 0
+  Priority: 128
+  DopplerLevel: 1
+  MinDistance: 1
+  MaxDistance: 500
+  Pan2D: 0
+  rolloffMode: 0
+  BypassEffects: 0
+  BypassListenerEffects: 0
+  BypassReverbZones: 0
+  rolloffCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    - serializedVersion: 3
+      time: 1
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  panLevelCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  spreadCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  reverbZoneMixCustomCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0.33333334
+      outWeight: 0.33333334
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
 --- !u!1 &3029459065386186060
 GameObject:
   m_ObjectHideFlags: 0
@@ -1826,13 +1951,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 3899064719861362454}
   serializedVersion: 2
-  m_LocalRotation: {x: -0.14794612, y: -0.011275143, z: 0.0016432995, w: -0.9889298}
-  m_LocalPosition: {x: -0.0994127, y: 2.5719361, z: -5.630416}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 6957268438475115364}
-  m_LocalEulerAnglesHint: {x: 2.858, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!20 &4018535812038315126
 Camera:
   m_ObjectHideFlags: 0
@@ -1950,8 +2075,21 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   target: {fileID: 0}
   smoothSpeed: 10
-  offset: {x: 0, y: 5, z: -10}
+  offset: {x: 0, y: 5, z: 10}
   lookAtTarget: 1
+  mouseSensitivity: 2
+  mouseControlTimeout: 5
+  maxVerticalAngle: 80
+  minVerticalAngle: -20
+  distanceDamping: 0.2
+  heightDamping: 0.2
+  rotationDamping: 1
+  speedInfluence: 0.1
+  maxSpeedForCameraPullback: 50
+  positionDeadzone: 0.05
+  rotationDeadzone: 0.5
+  velocityDeadzone: 0.01
+  maxCameraTiltAngle: 5
 --- !u!1 &4130333239285054592
 GameObject:
   m_ObjectHideFlags: 0

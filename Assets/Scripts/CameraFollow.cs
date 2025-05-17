@@ -2,32 +2,173 @@ using UnityEngine;
 
 public class CameraFollow : MonoBehaviour
 {
+    [Header("Follow Settings")]
     public Transform target;
-    public float smoothSpeed = 10f;
+    public float smoothSpeed = 5f;
     public Vector3 offset = new Vector3(0, 5, -10);
     public bool lookAtTarget = true;
+    
+    [Header("Mouse Control")]
+    public float mouseSensitivity = 2f;
+    public float mouseControlTimeout = 5f;
+    public float maxVerticalAngle = 80f;
+    public float minVerticalAngle = -20f;
+    
+    [Header("Advanced Follow")]
+    public float distanceDamping = 0.2f;
+    public float heightDamping = 0.2f;
+    public float rotationDamping = 1f;
+    public float speedInfluence = 0.1f;
+    public float maxSpeedForCameraPullback = 50f;
+    
+    [Header("Deadzone Settings")]
+    public float positionDeadzone = 0.05f;
+    public float rotationDeadzone = 0.5f;
+    public float velocityDeadzone = 0.01f;
+    
+    [Header("Stabilization")]
+    public float maxCameraTiltAngle = 5f;
+
+    private float lastMouseInputTime;
+    private float currentRotationX;
+    private float currentRotationY;
+    private Vector3 initialOffset;
+    private Vector3 velocity = Vector3.zero;
+    private Vector3 lastTargetPosition;
+    private Quaternion lastTargetRotation;
+    private bool useMouseControl;
+    
+    void Start()
+    {
+        initialOffset = offset;
+        currentRotationX = transform.eulerAngles.y;
+        currentRotationY = transform.eulerAngles.x;
+        if (target != null)
+        {
+            lastTargetPosition = target.position;
+            lastTargetRotation = target.rotation;
+        }
+    }
     
     void LateUpdate()
     {
         if (target == null)
             return;
             
+        HandleMouseInput();
+        
+        useMouseControl = Time.time - lastMouseInputTime < mouseControlTimeout;
+        
+        if (useMouseControl)
+        {
+            MouseControlCamera();
+        }
+        else
+        {
+            AutoFollowCamera();
+            StabilizeCamera();
+        }
+    }
+    
+    void HandleMouseInput()
+    {
+        if (Input.GetAxis("Mouse X") != 0 || Input.GetAxis("Mouse Y") != 0)
+        {
+            lastMouseInputTime = Time.time;
+        }
+    }
+    
+    void MouseControlCamera()
+    {
+        float mouseX = Input.GetAxis("Mouse X") * mouseSensitivity;
+        float mouseY = -Input.GetAxis("Mouse Y") * mouseSensitivity;
+        
+        currentRotationX += mouseX;
+        currentRotationY += mouseY;
+        currentRotationY = Mathf.Clamp(currentRotationY, minVerticalAngle, maxVerticalAngle);
+        
+        Quaternion rotation = Quaternion.Euler(currentRotationY, currentRotationX, 0);
+        Vector3 desiredPosition = target.position + rotation * initialOffset;
+        
+        transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, distanceDamping);
+        
+        // Look directly at target without smoothing during mouse control
+        transform.LookAt(target);
+    }
+    
+    void AutoFollowCamera()
+    {
+        // Always update position regardless of deadzone for smooth movement
+        Vector3 targetForward = target.forward;
+        targetForward.y = 0;
+        targetForward.Normalize();
+
         // Calculate desired position
-        Vector3 desiredPosition = target.position + offset;
-        
-        // Smoothly move to that position
-        Vector3 smoothedPosition = Vector3.Lerp(transform.position, desiredPosition, smoothSpeed * Time.deltaTime);
-        transform.position = smoothedPosition;
-        
-        // Optionally look at the target
+        Vector3 desiredPosition = target.position 
+            - targetForward * initialOffset.z 
+            + Vector3.up * offset.y 
+            + target.right * initialOffset.x;
+
+        // Apply smoothing
+        transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, 
+            ref velocity, distanceDamping);
+
+        // Handle rotation
         if (lookAtTarget)
         {
-            transform.LookAt(target);
+            Vector3 lookTarget = target.position + Vector3.up * (offset.y * 0.3f);
+            Vector3 lookDirection = lookTarget - transform.position;
+            
+            if (lookDirection != Vector3.zero)
+            {
+                Quaternion targetRotation = Quaternion.LookRotation(lookDirection);
+                transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, 
+                    rotationDamping * Time.deltaTime * 5f);
+            }
         }
+        else
+        {
+            // Match target's y rotation only
+            float targetYRotation = target.eulerAngles.y;
+            transform.rotation = Quaternion.Slerp(transform.rotation, 
+                Quaternion.Euler(transform.eulerAngles.x, targetYRotation, transform.eulerAngles.z), 
+                rotationDamping * Time.deltaTime * 5f);
+        }
+
+        // Update last known positions
+        lastTargetPosition = target.position;
+        lastTargetRotation = target.rotation;
+    }
+    
+    void StabilizeCamera()
+    {
+        // Keep camera relatively level by zeroing out roll
+        transform.rotation = Quaternion.Euler(
+            transform.eulerAngles.x,
+            transform.eulerAngles.y,
+            0);
     }
     
     public void SetTarget(Transform newTarget)
     {
         target = newTarget;
+        if (target != null)
+        {
+            // Initialize camera position based on target's current orientation
+            Vector3 targetForward = target.forward;
+            targetForward.y = 0;
+            targetForward.Normalize();
+            
+            transform.position = target.position 
+                - targetForward * initialOffset.z 
+                + Vector3.up * offset.y 
+                + target.right * initialOffset.x;
+                
+            transform.LookAt(target.position + Vector3.up * (offset.y * 0.3f));
+            
+            lastTargetPosition = target.position;
+            lastTargetRotation = target.rotation;
+            velocity = Vector3.zero;
+        }
     }
 }
