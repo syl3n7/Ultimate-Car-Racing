@@ -1200,8 +1200,13 @@ public async void CreateRoom()
             if (message.ContainsKey("all_spawn_positions") && GameManager.Instance != null)
             {
                 var allSpawnPositions = message["all_spawn_positions"];
-                GameManager.Instance.SetAllPlayerSpawnPositions(allSpawnPositions as Dictionary<string, object>);
-                Debug.Log("Processed all player spawn positions");
+                
+                // Track spawn position processing
+                Debug.Log($"All spawn positions: {JsonConvert.SerializeObject(allSpawnPositions)}");
+                
+                // Process spawn positions after a slight delay to ensure 
+                // both players have time to load/process the information
+                StartCoroutine(ProcessSpawnPositionsWithDelay(allSpawnPositions as Dictionary<string, object>, 0.5f));
             }
             
             // Request the player list before loading the scene
@@ -1335,12 +1340,25 @@ public async void CreateRoom()
     {
         for (int i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++)
         {
-            UnityEngine.SceneManagement.Scene scene = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);
+            UnityEngine.SceneManagement.Scene scene = UnityEngine.SceneManager.SceneManager.GetSceneAt(i);
             if (scene.name == sceneName)
             {
                 return true;
             }
         }
         return false;
+    }
+
+    // Add a method to process spawn positions after a delay
+    private IEnumerator ProcessSpawnPositionsWithDelay(Dictionary<string, object> spawnPositions, float delay)
+    {
+        // Wait for the specified delay to ensure both clients have time to load
+        yield return new WaitForSeconds(delay);
+        
+        if (GameManager.Instance != null && spawnPositions != null)
+        {
+            Debug.Log($"Processing {spawnPositions.Count} spawn positions after delay");
+            GameManager.Instance.SetAllPlayerSpawnPositions(spawnPositions);
+        }
     }
 }

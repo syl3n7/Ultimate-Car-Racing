@@ -402,16 +402,21 @@ public class GameManager : MonoBehaviour
             return;
         }
         
-        // Remove any existing player with this ID first
-        if (activePlayers.ContainsKey(playerId))
+        // Check if player already exists - if so, just update position
+        if (activePlayers.ContainsKey(playerId) && activePlayers[playerId] != null && activePlayers[playerId].gameObject != null)
         {
-            var existingController = activePlayers[playerId];
-            if (existingController != null && existingController.gameObject != null)
+            Debug.Log($"Remote player {playerId} already exists - just updating position to {position}");
+            // Move the existing player to the new position
+            var controller = activePlayers[playerId];
+            Rigidbody rb = controller.GetComponent<Rigidbody>();
+            if (rb != null)
             {
-                Debug.Log($"Destroying existing player object for {playerId}");
-                Destroy(existingController.gameObject);
+                rb.linearVelocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
             }
-            activePlayers.Remove(playerId);
+            controller.transform.position = position;
+            controller.transform.rotation = rotation;
+            return;
         }
         
         // Add a small delay to ensure we're not spawning players too quickly
@@ -727,6 +732,28 @@ public class GameManager : MonoBehaviour
         
         Debug.Log($"Setting spawn positions for all {allSpawnPositions.Count} players");
         
+        // First, clear any existing remote players to avoid duplicates
+        List<string> remotesToRemove = new List<string>();
+        foreach (var kvp in activePlayers)
+        {
+            // Don't remove the local player
+            if (kvp.Key != localPlayerId)
+            {
+                remotesToRemove.Add(kvp.Key);
+            }
+        }
+        
+        // Now remove the remote players
+        foreach (string remoteId in remotesToRemove)
+        {
+            Debug.Log($"Removing existing remote player: {remoteId}");
+            if (activePlayers[remoteId] != null && activePlayers[remoteId].gameObject != null)
+            {
+                Destroy(activePlayers[remoteId].gameObject);
+            }
+            activePlayers.Remove(remoteId);
+        }
+        
         foreach (var kvp in allSpawnPositions)
         {
             string playerId = kvp.Key;
@@ -767,12 +794,15 @@ public class GameManager : MonoBehaviour
                     // Store in player garage indices
                     playerGarageIndices[playerId] = spawnIndex;
                     
-                    // If this is a remote player, pre-spawn them immediately at their assigned position
+                    // If this is a remote player (not the local player), and we haven't already spawned this player
                     if (playerId != localPlayerId && !activePlayers.ContainsKey(playerId))
                     {
-                        Vector3 position = new Vector3(posX, posY, posZ);
-                        SpawnRemotePlayer(playerId, position, Quaternion.identity);
-                        Debug.Log($"Pre-spawned remote player {playerId} at position ({posX}, {posY}, {posZ})");
+                        Debug.Log($"Pre-spawning remote player {playerId} at garage position {spawnIndex}");
+                        
+                        // Use the actual track garage position rather than the raw server position
+                        // This ensures players are in their correct garages rather than on top of each other
+                        Vector3 garagePosition = trackGaragePositions[spawnIndex];
+                        SpawnRemotePlayer(playerId, garagePosition, Quaternion.identity);
                     }
                     
                     Debug.Log($"Assigned player {playerId} to garage {spawnIndex} at position ({posX}, {posY}, {posZ})");
