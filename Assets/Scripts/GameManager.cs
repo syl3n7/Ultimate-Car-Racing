@@ -414,16 +414,6 @@ public class GameManager : MonoBehaviour
             activePlayers.Remove(playerId);
         }
         
-        // Add a small delay to ensure we're not spawning players too quickly
-        // This helps with network synchronization issues
-        StartCoroutine(SpawnRemotePlayerWithDelay(playerId, position, rotation, 0.2f));
-    }
-    
-    private IEnumerator SpawnRemotePlayerWithDelay(string playerId, Vector3 position, Quaternion rotation, float delay)
-    {
-        // Wait for the specified delay
-        yield return new WaitForSeconds(delay);
-        
         // Force-create a new player (always refresh)
         try 
         {
@@ -431,7 +421,7 @@ public class GameManager : MonoBehaviour
             if (playerCarPrefabs == null || playerCarPrefabs.Count == 0)
             {
                 Debug.LogError("Cannot spawn remote player: No car prefabs available!");
-                yield break;
+                return;
             }
             
             // Use the second car model if available
@@ -710,63 +700,6 @@ public class GameManager : MonoBehaviour
         {
             Destroy(controller.gameObject);
             activePlayers.Remove(playerId);
-        }
-    }
-
-    // Update the player spawning system to use server-assigned spawn positions for all players
-    public void SetAllPlayerSpawnPositions(Dictionary<string, object> allSpawnPositions) 
-    {
-        if (allSpawnPositions == null) return;
-        
-        Debug.Log($"Setting spawn positions for all {allSpawnPositions.Count} players");
-        
-        foreach (var kvp in allSpawnPositions)
-        {
-            string playerId = kvp.Key;
-            var spawnPos = kvp.Value as Newtonsoft.Json.Linq.JObject;
-            
-            if (spawnPos != null)
-            {
-                try
-                {
-                    // Extract position
-                    float posX = Convert.ToSingle(spawnPos["x"]);
-                    float posY = Convert.ToSingle(spawnPos["y"]);
-                    float posZ = Convert.ToSingle(spawnPos["z"]);
-                    
-                    // Find garage index based on position
-                    int spawnIndex = 0;
-                    if (posX >= 60 && posX < 70) spawnIndex = 0;
-                    else if (posX >= 54 && posX < 60) spawnIndex = 1;
-                    else if (posX >= 47 && posX < 54) spawnIndex = 2;
-                    else if (posX >= 41 && posX < 47) spawnIndex = 3;
-                    else if (posX >= 35 && posX < 41) spawnIndex = 4;
-                    else if (posX >= 28 && posX < 35) spawnIndex = 5;
-                    else if (posX >= 22 && posX < 28) spawnIndex = 6;
-                    else if (posX >= 16 && posX < 22) spawnIndex = 7;
-                    else if (posX >= 9 && posX < 16) spawnIndex = 8;
-                    else if (posX >= 3 && posX < 9) spawnIndex = 9;
-                    else if (posX >= -3 && posX < 3) spawnIndex = 10;
-                    else if (posX >= -9 && posX < -3) spawnIndex = 11;
-                    else if (posX >= -15 && posX < -9) spawnIndex = 12;
-                    else if (posX >= -22 && posX < -15) spawnIndex = 13;
-                    else if (posX >= -28 && posX < -22) spawnIndex = 14;
-                    else if (posX >= -34 && posX < -28) spawnIndex = 15;
-                    else if (posX >= -41 && posX < -34) spawnIndex = 16;
-                    else if (posX >= -47 && posX < -41) spawnIndex = 17;
-                    else if (posX >= -54 && posX < -47) spawnIndex = 18;
-                    else if (posX < -54) spawnIndex = 19;
-                    
-                    // Store in player garage indices
-                    playerGarageIndices[playerId] = spawnIndex;
-                    
-                    Debug.Log($"Assigned player {playerId} to garage {spawnIndex} at position ({posX}, {posY}, {posZ})");
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError($"Error parsing spawn position for player {playerId}: {e.Message}");
-                }
-            }
         }
     }
 }

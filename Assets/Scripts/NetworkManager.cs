@@ -481,42 +481,7 @@ public class NetworkManager : MonoBehaviour
                             {
                                 // Use server-assigned spawn position
                                 gameStartedMsg["spawn_position"] = mySpawnPos;
-                                
-                                // Add index based on position matching the documentation's predefined positions
-                                float posX = Convert.ToSingle(mySpawnPos["x"]);
-                                float posY = Convert.ToSingle(mySpawnPos["y"]);
-                                float posZ = Convert.ToSingle(mySpawnPos["z"]);
-                                
-                                // Find the closest matching predefined position from Section 7.3
-                                int spawnIndex = 0;
-                                if (posX >= 60 && posX < 70) spawnIndex = 0;       // Position 0: (66, -2, 0.8)
-                                else if (posX >= 54 && posX < 60) spawnIndex = 1;  // Position 1: (60, -2, 0.8)
-                                else if (posX >= 47 && posX < 54) spawnIndex = 2;  // Position 2: (54, -2, 0.8)
-                                else if (posX >= 41 && posX < 47) spawnIndex = 3;  // Position 3: (47, -2, 0.8)
-                                else if (posX >= 35 && posX < 41) spawnIndex = 4;  // Position 4: (41, -2, 0.8)
-                                else if (posX >= 28 && posX < 35) spawnIndex = 5;  // Position 5: (35, -2, 0.8)
-                                else if (posX >= 22 && posX < 28) spawnIndex = 6;  // Position 6: (28, -2, 0.8)
-                                else if (posX >= 16 && posX < 22) spawnIndex = 7;  // Position 7: (22, -2, 0.8)
-                                else if (posX >= 9 && posX < 16) spawnIndex = 8;   // Position 8: (16, -2, 0.8)
-                                else if (posX >= 3 && posX < 9) spawnIndex = 9;    // Position 9: (9, -2, 0.8)
-                                else if (posX >= -3 && posX < 3) spawnIndex = 10;  // Position 10: (3, -2, 0.8)
-                                else if (posX >= -9 && posX < -3) spawnIndex = 11; // Position 11: (-3, -2, 0.8)
-                                else if (posX >= -15 && posX < -9) spawnIndex = 12; // Position 12: (-9, -2, 0.8)
-                                else if (posX >= -22 && posX < -15) spawnIndex = 13; // Position 13: (-15, -2, 0.8)
-                                else if (posX >= -28 && posX < -22) spawnIndex = 14; // Position 14: (-22, -2, 0.8)
-                                else if (posX >= -34 && posX < -28) spawnIndex = 15; // Position 15: (-28, -2, 0.8)
-                                else if (posX >= -41 && posX < -34) spawnIndex = 16; // Position 16: (-34, -2, 0.8)
-                                else if (posX >= -47 && posX < -41) spawnIndex = 17; // Position 17: (-41, -2, 0.8)
-                                else if (posX >= -54 && posX < -47) spawnIndex = 18; // Position 18: (-47, -2, 0.8)
-                                else if (posX < -54) spawnIndex = 19;              // Position 19: (-54, -2, 0.8)
-                                
-                                // Add the index to the spawn position
-                                mySpawnPos["index"] = spawnIndex;
-                                
-                                // Store all other player positions for later reference
-                                gameStartedMsg["all_spawn_positions"] = spawnPositions;
-                                
-                                Debug.Log($"Using server-assigned spawn position: {mySpawnPos["x"]},{mySpawnPos["y"]},{mySpawnPos["z"]} with index {spawnIndex} for player {_clientId}");
+                                Debug.Log($"Using server-assigned spawn position: {mySpawnPos["x"]},{mySpawnPos["y"]},{mySpawnPos["z"]} for player {_clientId}");
                             }
                         }
                     }
