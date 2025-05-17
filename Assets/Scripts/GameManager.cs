@@ -315,7 +315,7 @@ public class GameManager : MonoBehaviour
                 multiplayerSpawnPosition.y + respawnHeight, // Add the respawn height
                 multiplayerSpawnPosition.z
             );
-            Debug.Log($"Spawning car at position: {spawnPosition}, original position was {multiplayerSpawnPosition}");
+            Debug.Log($"Spawning LOCAL PLAYER car at position: {spawnPosition}, original position was {multiplayerSpawnPosition}");
             
             Quaternion spawnRotation = Quaternion.identity;
             
@@ -343,12 +343,19 @@ public class GameManager : MonoBehaviour
                 int carIndex = Mathf.Clamp(SelectedCarIndex, 0, playerCarPrefabs.Count - 1);
                 localPlayerObject = Instantiate(playerCarPrefabs[carIndex], spawnPosition, spawnRotation);
                 
+                // Properly tag and name it for easy identification
+                localPlayerObject.tag = "Player";
+                localPlayerObject.name = $"LocalPlayer_{localPlayerId}";
+                
                 // Initialize car controller
                 CarController carController = localPlayerObject.GetComponent<CarController>();
                 if (carController != null)
                 {
                     InitializeCarController(carController, localPlayerId, true);
                     activePlayers.Add(localPlayerId, carController);
+                    
+                    // Force camera to follow this player
+                    SetupCameraForLocalPlayer(localPlayerObject.transform);
                 }
             }
         }
@@ -381,12 +388,19 @@ public class GameManager : MonoBehaviour
                 int carIndex = Mathf.Clamp(SelectedCarIndex, 0, playerCarPrefabs.Count - 1);
                 localPlayerObject = Instantiate(playerCarPrefabs[carIndex], spawnPosition, spawnRotation);
                 
+                // Properly tag and name it
+                localPlayerObject.tag = "Player";
+                localPlayerObject.name = $"LocalPlayer_{localPlayerId}";
+                
                 // Initialize car controller
                 CarController carController = localPlayerObject.GetComponent<CarController>();
                 if (carController != null)
                 {
                     InitializeCarController(carController, localPlayerId, true);
                     activePlayers.Add(localPlayerId, carController);
+                    
+                    // Force camera to follow this player
+                    SetupCameraForLocalPlayer(localPlayerObject.transform);
                 }
             }
         }
@@ -434,22 +448,8 @@ public class GameManager : MonoBehaviour
                 position.z
             );
             
-            // Instantiate the car
-            GameObject carObject = Instantiate(playerCarPrefabs[carIndex], spawnPosition, rotation);
-            carObject.name = $"RemotePlayer_{playerId}";
-            
-            // Make it red to distinguish from local car
-            Renderer[] renderers = carObject.GetComponentsInChildren<Renderer>();
-            foreach (Renderer r in renderers)
-            {
-                foreach (Material mat in r.materials)
-                {
-                    if (mat.HasProperty("_Color"))
-                    {
-                        mat.color = Color.red;
-                    }
-                }
-            }
+            // Create a display-only version of the car for remote players
+            GameObject carObject = CreateDisplayOnlyCar(playerCarPrefabs[carIndex], spawnPosition, rotation, playerId);
             
             // Set up the car controller
             CarController carController = carObject.GetComponent<CarController>();
@@ -471,6 +471,59 @@ public class GameManager : MonoBehaviour
         }
     }
     
+    // Create a display-only version of the car prefab that won't interfere with player input
+    private GameObject CreateDisplayOnlyCar(GameObject originalPrefab, Vector3 position, Quaternion rotation, string playerId)
+    {
+        // Instantiate the car
+        GameObject carObject = Instantiate(originalPrefab, position, rotation);
+        carObject.name = $"RemotePlayer_{playerId}";
+        
+        // Make it red to distinguish from local car
+        Renderer[] renderers = carObject.GetComponentsInChildren<Renderer>();
+        foreach (Renderer r in renderers)
+        {
+            foreach (Material mat in r.materials)
+            {
+                if (mat.HasProperty("_Color"))
+                {
+                    mat.color = Color.red;
+                }
+            }
+        }
+        
+        // Disable components that might interfere with input
+        DisableInputComponents(carObject);
+        
+        return carObject;
+    }
+    
+    // Disable any components that might capture or interfere with input
+    private void DisableInputComponents(GameObject carObject)
+    {
+        // Disable PlayerInput component if it exists
+        PlayerInput playerInput = carObject.GetComponent<PlayerInput>();
+        if (playerInput != null)
+        {
+            playerInput.enabled = false;
+        }
+        
+        // Disable any input-related script components
+        var inputComponents = carObject.GetComponentsInChildren<MonoBehaviour>();
+        foreach (var component in inputComponents)
+        {
+            // Disable any components with "Input" in the name except the essential ones
+            if (component.GetType().Name.Contains("Input") && 
+                component.GetType().Name != "CarController" && 
+                component.GetType().Name != "Rigidbody")
+            {
+                component.enabled = false;
+            }
+        }
+        
+        // Add a tag to identify this as a remote car
+        carObject.tag = "RemotePlayer";
+    }
+    
     // Initialize the car controller
     private void InitializeCarController(CarController controller, string playerId, bool isLocal)
     {
@@ -481,12 +534,17 @@ public class GameManager : MonoBehaviour
         {
             // Setup for local car
             controller.isLocalPlayer = true;
+            controller.gameObject.tag = "Player";
+            
+            // Add debug info to help troubleshoot
+            Debug.Log($"*** LOCAL PLAYER CAR INITIALIZED: {controller.gameObject.name} with ID {playerId} ***");
             
             // Setup camera follow
             CameraFollow cameraFollow = FindObjectOfType<CameraFollow>();
             if (cameraFollow != null)
             {
                 cameraFollow.target = controller.transform;
+                Debug.Log($"Camera now following local player: {controller.gameObject.name}");
             }
             
             // Make sure controls are enabled
@@ -496,16 +554,64 @@ public class GameManager : MonoBehaviour
         {
             // Setup for remote car - important differences
             controller.isLocalPlayer = false;
+            controller.gameObject.tag = "RemotePlayer";
+            
+            // Add debug info
+            Debug.Log($"REMOTE PLAYER CAR INITIALIZED: {controller.gameObject.name} with ID {playerId}");
             
             // Disable local controls
             controller.EnableControls(false);
             
-            // Make sure physics simulation is active
+            // Make sure physics simulation is active but less performance-intensive
             Rigidbody rb = controller.GetComponent<Rigidbody>();
             if (rb != null)
             {
                 rb.isKinematic = false;
                 rb.sleepThreshold = 0.0f; // Never sleep
+                rb.collisionDetectionMode = CollisionDetectionMode.Discrete; // Use simpler collision detection
+                rb.interpolation = RigidbodyInterpolation.None; // Disable interpolation to save performance
+            }
+            
+            // Modify the car's layer to prevent input interference
+            controller.gameObject.layer = LayerMask.NameToLayer("Ignore Raycast");
+        }
+    }
+    
+    // Set up camera to follow local player
+    private void SetupCameraForLocalPlayer(Transform playerTransform)
+    {
+        Debug.Log($"Setting up camera to follow local player: {playerTransform.name}");
+        
+        // Find all CameraFollow scripts in the scene
+        CameraFollow[] cameraFollowers = FindObjectsOfType<CameraFollow>();
+        
+        if (cameraFollowers.Length > 0)
+        {
+            foreach (CameraFollow cam in cameraFollowers)
+            {
+                cam.SetTarget(playerTransform);
+                Debug.Log($"Camera {cam.name} now following {playerTransform.name}");
+            }
+        }
+        else
+        {
+            // If no camera follow script found, try to find main camera and add one
+            Camera mainCamera = Camera.main;
+            if (mainCamera != null)
+            {
+                CameraFollow cameraFollow = mainCamera.GetComponent<CameraFollow>();
+                if (cameraFollow == null)
+                {
+                    cameraFollow = mainCamera.gameObject.AddComponent<CameraFollow>();
+                    Debug.Log("Added CameraFollow component to main camera");
+                }
+                
+                cameraFollow.SetTarget(playerTransform);
+                Debug.Log($"Camera now following {playerTransform.name}");
+            }
+            else
+            {
+                Debug.LogError("No main camera found in the scene!");
             }
         }
     }

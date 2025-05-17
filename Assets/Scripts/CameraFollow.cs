@@ -48,12 +48,45 @@ public class CameraFollow : MonoBehaviour
             lastTargetPosition = target.position;
             lastTargetRotation = target.rotation;
         }
+        
+        // At start, make sure we're following the local player
+        FindAndSetLocalPlayerTarget();
+    }
+    
+    // Find and set the local player as the camera target
+    void FindAndSetLocalPlayerTarget()
+    {
+        // Find local player object with tag
+        GameObject localPlayerObj = GameObject.FindWithTag("Player");
+        if (localPlayerObj != null)
+        {
+            target = localPlayerObj.transform;
+            Debug.Log($"Camera set to follow local player: {localPlayerObj.name}");
+            
+            // Initialize last positions after finding target
+            if (target != null)
+            {
+                lastTargetPosition = target.position;
+                lastTargetRotation = target.rotation;
+            }
+        }
+        else
+        {
+            Debug.LogWarning("Cannot find a GameObject tagged as 'Player'!");
+        }
     }
     
     void LateUpdate()
     {
-        if (target == null)
-            return;
+        // If target is null or tagged as remote player, try to find local player again
+        if (target == null || (target != null && target.CompareTag("RemotePlayer")))
+        {
+            FindAndSetLocalPlayerTarget();
+            
+            // If still no target, exit early
+            if (target == null)
+                return;
+        }
             
         HandleMouseInput();
         

@@ -174,6 +174,23 @@ public class CarController : MonoBehaviour
         {
             playerInput.enabled = enabled;
         }
+        
+        // For remote players, disable additional components that might interfere with inputs
+        if (!enabled)
+        {
+            // Disable any input-related components
+            var inputComponents = GetComponentsInChildren<MonoBehaviour>();
+            foreach (var component in inputComponents)
+            {
+                if (component.GetType().Name.Contains("Input") && component != this)
+                {
+                    component.enabled = false;
+                }
+            }
+            
+            // Set a layer that ignores raycasts to prevent UI interaction
+            gameObject.layer = LayerMask.NameToLayer("Ignore Raycast");
+        }
     }
 
     void FixedUpdate() 
