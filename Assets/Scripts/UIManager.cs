@@ -904,8 +904,8 @@ public async void CreateRoom()
             {
                 Dictionary<string, object> playerListRequest = new Dictionary<string, object>
                 {
-                    { "type", "GET_ROOM_PLAYERS" },
-                    { "room_id", currentRoomId }
+                    { "command", "GET_ROOM_PLAYERS" },
+                    { "roomId", currentRoomId }
                 };
 
                 _ = NetworkManager.Instance.SendTcpMessage(playerListRequest);
@@ -971,8 +971,8 @@ public async void CreateRoom()
             {
                 Dictionary<string, object> playerListRequest = new Dictionary<string, object>
                 {
-                    { "type", "GET_ROOM_PLAYERS" },
-                    { "room_id", currentRoomId }
+                    { "command", "GET_ROOM_PLAYERS" },
+                    { "roomId", currentRoomId }
                 };
                 
                 _ = NetworkManager.Instance.SendTcpMessage(playerListRequest);

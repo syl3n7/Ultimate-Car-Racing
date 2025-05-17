@@ -182,11 +182,11 @@ public class GameManager : MonoBehaviour
         {
             Dictionary<string, object> readyMessage = new Dictionary<string, object>
             {
-                { "type", "RELAY_MESSAGE" },
-                { "room_id", NetworkManager.Instance.GetCurrentRoomId() },
+                { "command", "RELAY_MESSAGE" },
+                { "roomId", NetworkManager.Instance.GetCurrentRoomId() },
                 { "message", new Dictionary<string, object> {
                     { "type", "SCENE_READY" },
-                    { "player_id", localPlayerId }
+                    { "playerId", localPlayerId }
                 }}
             };
             

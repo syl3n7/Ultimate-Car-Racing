@@ -122,11 +122,11 @@ public class NetworkManager : MonoBehaviour
         {
             var readyMessage = new Dictionary<string, object>
             {
-                { "type", "RELAY_MESSAGE" },
-                { "room_id", _currentRoomId },
+                { "command", "RELAY_MESSAGE" },
+                { "roomId", _currentRoomId },
                 { "message", new Dictionary<string, object> {
                     { "type", "SCENE_READY" },
-                    { "player_id", _clientId }
+                    { "playerId", _clientId }
                 }}
             };
             
@@ -310,17 +310,6 @@ public class NetworkManager : MonoBehaviour
             // Handle messages based on command
             switch (messageType)
             {
-                case "CONNECTED":
-                    if (messageObj.ContainsKey("sessionId"))
-                    {
-                        _clientId = messageObj["sessionId"].ToString();
-                        _isConnected = true;
-                        LogDebug($"Connected with session ID: {_clientId}");
-                        UnityMainThreadDispatcher.Instance().Enqueue(() => 
-                            OnConnected?.Invoke("Connected successfully"));
-                    }
-                    break;
-                    
                 case "NAME_OK":
                     LogDebug($"Name acknowledged by server");
                     break;
@@ -336,6 +325,8 @@ public class NetworkManager : MonoBehaviour
                             { "room_id", _currentRoomId },
                             { "room_name", messageObj["name"].ToString() }
                         };
+                        
+                        Debug.Log($"Successfully created room: {roomCreatedMsg["room_name"]} with ID: {roomCreatedMsg["room_id"]}");
                         
                         UnityMainThreadDispatcher.Instance().Enqueue(() => 
                             OnGameHosted?.Invoke(roomCreatedMsg));
@@ -354,6 +345,8 @@ public class NetworkManager : MonoBehaviour
                             { "room_id", _currentRoomId },
                             { "host_id", _hostId ?? _clientId }
                         };
+                        
+                        Debug.Log($"Successfully joined room with ID: {_currentRoomId}");
                         
                         UnityMainThreadDispatcher.Instance().Enqueue(() => 
                             OnRoomJoined?.Invoke(joinedMsg));
@@ -575,7 +568,7 @@ public class NetworkManager : MonoBehaviour
     {
         var heartbeatMessage = new Dictionary<string, object>
         {
-            { "command", "HEARTBEAT" }
+            { "command", "PING" } // Using PING as heartbeat since server supports it
         };
         
         SendTcpMessage(heartbeatMessage);
@@ -599,12 +592,12 @@ public class NetworkManager : MonoBehaviour
         
         try
         {
-            // Send disconnect message
+            // Server doesn't have a special disconnect command, just close the socket
             if (_tcpClient != null && _tcpClient.Connected)
             {
                 var disconnectMessage = new Dictionary<string, object>
                 {
-                    { "type", "DISCONNECT" }
+                    { "command", "BYE" } // This isn't in the spec but might be supported
                 };
                 
                 // Fire and forget - don't await
@@ -671,8 +664,8 @@ public class NetworkManager : MonoBehaviour
         
         var message = new Dictionary<string, object>
         {
-            { "type", "START_GAME" },
-            { "room_id", _currentRoomId }
+            { "command", "START_GAME" },
+            { "roomId", _currentRoomId }
         };
         
         SendTcpMessage(message);
@@ -684,8 +677,8 @@ public class NetworkManager : MonoBehaviour
         
         var message = new Dictionary<string, object>
         {
-            { "type", "LEAVE_ROOM" },
-            { "room_id", _currentRoomId }
+            { "command", "LEAVE_ROOM" },
+            { "roomId", _currentRoomId }
         };
         
         SendTcpMessage(message);
@@ -699,7 +692,7 @@ public class NetworkManager : MonoBehaviour
         
         var message = new Dictionary<string, object>
         {
-            { "type", "LIST_GAMES" }
+            { "command", "LIST_ROOMS" }
         };
         
         SendTcpMessage(message);
@@ -711,41 +704,20 @@ public class NetworkManager : MonoBehaviour
         
         var message = new Dictionary<string, object>
         {
-            ["type"] = "GAME_DATA",
-            ["client_id"] = _clientId,
-            ["room_id"] = _currentRoomId,
-            ["data"] = new Dictionary<string, object>
+            ["command"] = "UPDATE",
+            ["sessionId"] = _clientId,
+            ["position"] = new Dictionary<string, float>
             {
-                ["type"] = "PLAYER_STATE",
-                ["state"] = new Dictionary<string, object>
-                {
-                    ["position"] = new Dictionary<string, float>
-                    {
-                        ["x"] = stateData.position.x,
-                        ["y"] = stateData.position.y,
-                        ["z"] = stateData.position.z
-                    },
-                    ["rotation"] = new Dictionary<string, float>
-                    {
-                        ["x"] = stateData.rotation.x,
-                        ["y"] = stateData.rotation.y,
-                        ["z"] = stateData.rotation.z,
-                        ["w"] = stateData.rotation.w
-                    },
-                    ["velocity"] = new Dictionary<string, float>
-                    {
-                        ["x"] = stateData.velocity.x,
-                        ["y"] = stateData.velocity.y,
-                        ["z"] = stateData.velocity.z
-                    },
-                    ["angularVelocity"] = new Dictionary<string, float>
-                    {
-                        ["x"] = stateData.angularVelocity.x,
-                        ["y"] = stateData.angularVelocity.y,
-                        ["z"] = stateData.angularVelocity.z
-                    },
-                    ["timestamp"] = stateData.timestamp
-                }
+                ["x"] = stateData.position.x,
+                ["y"] = stateData.position.y,
+                ["z"] = stateData.position.z
+            },
+            ["rotation"] = new Dictionary<string, float>
+            {
+                ["x"] = stateData.rotation.x,
+                ["y"] = stateData.rotation.y,
+                ["z"] = stateData.rotation.z,
+                ["w"] = stateData.rotation.w
             }
         };
         
@@ -758,20 +730,15 @@ public class NetworkManager : MonoBehaviour
         
         var message = new Dictionary<string, object>
         {
-            { "type", "GAME_DATA" },
-            { "client_id", _clientId },
-            { "room_id", _currentRoomId },
-            { "data", new Dictionary<string, object>
+            { "command", "INPUT" },
+            { "sessionId", _clientId },
+            { "roomId", _currentRoomId },
+            { "input", new Dictionary<string, object>
                 {
-                    { "type", "PLAYER_INPUT" },
-                    { "input", new Dictionary<string, object>
-                        {
-                            { "steering", input.steering },
-                            { "throttle", input.throttle },
-                            { "brake", input.brake },
-                            { "timestamp", input.timestamp }
-                        }
-                    }
+                    { "steering", input.steering },
+                    { "throttle", input.throttle },
+                    { "brake", input.brake },
+                    { "timestamp", input.timestamp }
                 }
             }
         };
