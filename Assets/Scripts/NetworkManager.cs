@@ -550,16 +550,8 @@ public class NetworkManager : MonoBehaviour
                         gameStartedMsg["host_id"] = messageObj["hostId"];
                     }
                     
-    // Make sure we update the scene on the main thread
+                    // Make sure we update the scene on the main thread
                     UnityMainThreadDispatcher.Instance().Enqueue(() => {
-                        // First check if we need to reset existing remote players
-                        // This ensures we don't have duplicates when the game starts
-                        if (GameManager.Instance != null && message.ContainsKey("all_spawn_positions"))
-                        {
-                            var spawnPositions = message["all_spawn_positions"] as Dictionary<string, object>;
-                            GameManager.Instance.SetAllPlayerSpawnPositions(spawnPositions);
-                        }
-                        
                         OnGameStarted?.Invoke(gameStartedMsg);
                         
                         // Request immediate state sync with all players
@@ -1213,7 +1205,7 @@ public class NetworkManager : MonoBehaviour
     }
 
     // Add a coroutine to request initial state from all players in the room
-    private IEnumerator<WaitForSeconds> RequestInitialPlayerStates(float initialDelay)
+    private IEnumerator RequestInitialPlayerStates(float initialDelay)
     {
         // Wait for the scene to load and local player to be spawned
         yield return new WaitForSeconds(initialDelay);
@@ -1238,7 +1230,7 @@ public class NetworkManager : MonoBehaviour
     }
     
     // Continuously poll for remote players that might not have spawned yet
-    private IEnumerator<WaitForSeconds> PollForRemotePlayers(float duration)
+    private IEnumerator PollForRemotePlayers(float duration)
     {
         float startTime = Time.time;
         float checkInterval = 0.5f;
