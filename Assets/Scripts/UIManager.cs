@@ -1171,6 +1171,11 @@ public async void CreateRoom()
     {
         HideConnectionPanel();
         
+        // Show clear feedback to the user that the game is starting
+        ShowNotification("Game starting! Loading race track...");
+        
+        Debug.Log($"OnGameStarted received with message: {JsonConvert.SerializeObject(message)}");
+        
         if (message.ContainsKey("spawn_position"))
         {
             var spawnPosObj = message["spawn_position"] as Newtonsoft.Json.Linq.JObject;
@@ -1189,6 +1194,8 @@ public async void CreateRoom()
                 spawnIndex = Convert.ToInt32(spawnPosObj["index"]);
             }
             
+            Debug.Log($"Game started with spawn position: {spawnPosition}, index: {spawnIndex}");
+            
             // Request the player list before loading the scene
             if (NetworkManager.Instance != null && !string.IsNullOrEmpty(currentRoomId))
             {
@@ -1201,30 +1208,67 @@ public async void CreateRoom()
                 _ = NetworkManager.Instance.SendTcpMessage(playerListRequest);
             }
 
-            // Hide UI and load game scene
+            // Hide UI and ensure all panels are disabled before loading scene
             HideAllPanels();
             
-            // Set spawn position in GameManager
+            // IMPORTANT: Set spawn position in GameManager BEFORE loading scene
             if (GameManager.Instance != null)
             {
                 // Set the spawn position and index before loading the scene
                 GameManager.Instance.SetMultiplayerSpawnPosition(spawnPosition, spawnIndex);
                 
-                // Load the selected track scene - FIXED: Use just "RaceTrack" instead of "RaceTrack{trackIndex}"
+                // Load the race track scene - use the correct scene name
+                // FIXED: Use the generic "RaceTrack" scene name instead of track-specific
                 string sceneName = "RaceTrack";
                 
-                Debug.Log($"Loading race scene: {sceneName}");
-                UnityEngine.SceneManagement.SceneManager.LoadScene(sceneName);
+                Debug.Log($"Loading race scene: {sceneName} (immediate scene transition)");
+                
+                // Force GC collection before loading scene to reduce potential stutter
+                System.GC.Collect();
+                
+                // Use the LoadSceneAsync method with an immediate callback to ensure the scene loads
+                StartCoroutine(LoadRaceSceneAsync(sceneName));
             }
             else
             {
                 Debug.LogError("GameManager.Instance is null when trying to start game!");
+                ShowNotification("Error: Game manager not found. Please restart the game.");
             }
         }
         else
         {
             Debug.LogError("Spawn position data missing in game start message!");
+            ShowNotification("Error: Missing spawn data. Please try again.");
         }
+    }
+    
+    // Add a coroutine to handle scene loading asynchronously
+    private IEnumerator LoadRaceSceneAsync(string sceneName)
+    {
+        Debug.Log($"Starting async scene load for {sceneName}");
+        
+        // Begin loading the scene
+        AsyncOperation asyncLoad = UnityEngine.SceneManagement.SceneManager.LoadSceneAsync(sceneName);
+        
+        // Don't allow scene activation until we're ready (optional)
+        // asyncLoad.allowSceneActivation = false;
+        
+        // Show loading progress
+        while (!asyncLoad.isDone)
+        {
+            float progress = Mathf.Clamp01(asyncLoad.progress / 0.9f);
+            Debug.Log($"Loading progress: {progress * 100}%");
+            
+            // If we're close to done, allow activation
+            // if (asyncLoad.progress >= 0.9f)
+            // {
+            //     asyncLoad.allowSceneActivation = true;
+            // }
+            
+            yield return null;
+        }
+        
+        Debug.Log("Scene load completed");
     }    
     private void OnServerMessage(Dictionary<string, object> message)
     {
@@ -1276,5 +1320,19 @@ public async void CreateRoom()
             NetworkManager.Instance.GetRoomPlayers(currentRoomId);
             Debug.Log("Sending periodic player list refresh request");
         }
+    }
+
+    // Add a method to check if the scene is already loaded to prevent duplicate loads
+    public bool IsSceneLoaded(string sceneName)
+    {
+        for (int i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++)
+        {
+            UnityEngine.SceneManagement.Scene scene = UnityEngine.SceneManagement.SceneManager.GetSceneAt(i);
+            if (scene.name == sceneName)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 }

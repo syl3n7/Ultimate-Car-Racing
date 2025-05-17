@@ -490,11 +490,12 @@ public class NetworkManager : MonoBehaviour
                     }
                     
                     Debug.Log($"Created spawn position for player: {spawnPosObj["x"]},{spawnPosObj["y"]},{spawnPosObj["z"]}");
-                    
-                    UnityMainThreadDispatcher.Instance().Enqueue(() => 
-                        OnGameStarted?.Invoke(gameStartedMsg));
-                    
-                    LogDebug($"Game started for room: {_currentRoomId}");
+
+                    // Make sure we update the scene on the main thread
+                    UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                        OnGameStarted?.Invoke(gameStartedMsg);
+                        LogDebug($"Game started for room: {_currentRoomId}");
+                    });
                     break;
                 
                 // Handle errors properly 
