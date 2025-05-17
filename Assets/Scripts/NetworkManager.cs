@@ -462,22 +462,48 @@ public class NetworkManager : MonoBehaviour
                 case "GAME_STARTED":
                     Debug.Log($"Game started message received: {message}");
                     
-                    // According to SERVER-README.md section 3.2, the GAME_STARTED response format is:
-                    // {"command":"GAME_STARTED","roomId":"roomId","hostId":"hostId"}
-                    // The server doesn't provide spawn position, so we need to create a default one
+                    // According to SERVER-README.md section 7.3, the GAME_STARTED response format should include spawn positions:
+                    // {"command":"GAME_STARTED","roomId":"roomId","hostId":"hostId","spawnPositions":{"playerId1":{"x":66,"y":-2,"z":0.8},"playerId2":{"x":60,"y":-2,"z":0.8}}}
                     
                     var gameStartedMsg = new Dictionary<string, object>();
                     
-                    // Create a default spawn position since the server doesn't provide one
-                    var spawnPosObj = new Newtonsoft.Json.Linq.JObject();
-                    spawnPosObj["x"] = 0f;
-                    spawnPosObj["y"] = 5f;  // Start slightly above ground to prevent physics issues
-                    spawnPosObj["z"] = 0f;
-                    spawnPosObj["index"] = 0; // Default spawn index
+                    // Check if server provided spawn positions
+                    if (messageObj.ContainsKey("spawnPositions"))
+                    {
+                        Debug.Log("Server provided spawn positions, using those");
+                        
+                        // Extract spawn position for this player
+                        var spawnPositions = messageObj["spawnPositions"] as Newtonsoft.Json.Linq.JObject;
+                        if (spawnPositions != null && spawnPositions.ContainsKey(_clientId))
+                        {
+                            var mySpawnPos = spawnPositions[_clientId] as Newtonsoft.Json.Linq.JObject;
+                            if (mySpawnPos != null)
+                            {
+                                // Use server-assigned spawn position
+                                gameStartedMsg["spawn_position"] = mySpawnPos;
+                                Debug.Log($"Using server-assigned spawn position: {mySpawnPos["x"]},{mySpawnPos["y"]},{mySpawnPos["z"]} for player {_clientId}");
+                            }
+                        }
+                    }
                     
-                    gameStartedMsg["spawn_position"] = spawnPosObj;
+                    // If no position found or provided, use a default position based on predefined garage positions
+                    if (!gameStartedMsg.ContainsKey("spawn_position"))
+                    {
+                        Debug.Log("No spawn position found in server message, using fallback position");
+                        
+                        // Find an appropriate fallback position using predefined garage positions from section 7.3
+                        // The track garage positions are defined in the GameManager class
+                        var spawnPosObj = new Newtonsoft.Json.Linq.JObject();
+                        spawnPosObj["x"] = 66f;  // Position 0 from documentation
+                        spawnPosObj["y"] = -2f;
+                        spawnPosObj["z"] = 0.8f;
+                        spawnPosObj["index"] = 0; // Default spawn index
+                        
+                        gameStartedMsg["spawn_position"] = spawnPosObj;
+                        Debug.Log($"Using fallback spawn position: {spawnPosObj["x"]},{spawnPosObj["y"]},{spawnPosObj["z"]}");
+                    }
                     
-                    // Include room ID and host ID from server response
+                    // Include room ID from server response
                     if (messageObj.ContainsKey("roomId"))
                     {
                         gameStartedMsg["room_id"] = messageObj["roomId"];
@@ -489,8 +515,6 @@ public class NetworkManager : MonoBehaviour
                         gameStartedMsg["host_id"] = messageObj["hostId"];
                     }
                     
-                    Debug.Log($"Created spawn position for player: {spawnPosObj["x"]},{spawnPosObj["y"]},{spawnPosObj["z"]}");
-
                     // Make sure we update the scene on the main thread
                     UnityMainThreadDispatcher.Instance().Enqueue(() => {
                         OnGameStarted?.Invoke(gameStartedMsg);
