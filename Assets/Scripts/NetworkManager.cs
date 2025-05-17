@@ -359,6 +359,30 @@ public class NetworkManager : MonoBehaviour
                     long now = DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond;
                     _latency = (now - _lastPingTime);
                     break;
+                    
+                case "GAME_STARTED":
+                    Debug.Log($"Game started message received: {message}");
+                    
+                    var gameStartedMsg = new Dictionary<string, object>();
+                    
+                    // Extract spawn position if available
+                    if (messageObj.ContainsKey("spawnPosition"))
+                    {
+                        var spawnPosObj = messageObj["spawnPosition"] as Newtonsoft.Json.Linq.JObject;
+                        gameStartedMsg["spawn_position"] = spawnPosObj;
+                    }
+                    
+                    // Include room ID
+                    if (messageObj.ContainsKey("roomId"))
+                    {
+                        gameStartedMsg["room_id"] = messageObj["roomId"];
+                    }
+                    
+                    UnityMainThreadDispatcher.Instance().Enqueue(() => 
+                        OnGameStarted?.Invoke(gameStartedMsg));
+                    
+                    LogDebug($"Game started for room: {_currentRoomId}");
+                    break;
                 
                 // Handle errors properly 
                 case "UNKNOWN_COMMAND":
