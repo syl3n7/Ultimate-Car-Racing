@@ -177,19 +177,35 @@ public class GameManager : MonoBehaviour
         // Mark scene as fully loaded
         sceneFullyLoaded = true;
         
-        // Broadcast "scene ready" message to all players
+        // Broadcast "scene ready" message to other players
         if (NetworkManager.Instance != null && isMultiplayerGame)
         {
-            // According to SERVER-README.md, RELAY_MESSAGE requires targetId and message
-            Dictionary<string, object> readyMessage = new Dictionary<string, object>
+            // Get the list of players in the current room
+            if (activePlayers.Count > 0)
             {
-                { "command", "RELAY_MESSAGE" },
-                { "targetId", "all" }, // Target all players
-                { "message", $"SCENE_READY:{localPlayerId}" } // Include player ID in the message
-            };
-            
-            _ = NetworkManager.Instance.SendTcpMessage(readyMessage);
-            Debug.Log("Sent SCENE_READY message to all players");
+                // Send to each player individually instead of using "all" which isn't supported
+                foreach (string playerId in activePlayers.Keys)
+                {
+                    // Don't send to ourselves
+                    if (playerId != localPlayerId)
+                    {
+                        // According to SERVER-README.md, RELAY_MESSAGE requires targetId and message
+                        Dictionary<string, object> readyMessage = new Dictionary<string, object>
+                        {
+                            { "command", "RELAY_MESSAGE" },
+                            { "targetId", playerId }, // Target this specific player
+                            { "message", $"SCENE_READY:{localPlayerId}" } // Include player ID in the message
+                        };
+                        
+                        _ = NetworkManager.Instance.SendTcpMessage(readyMessage);
+                        Debug.Log($"Sent SCENE_READY message to player: {playerId}");
+                    }
+                }
+            }
+            else
+            {
+                Debug.LogWarning("No players found to send SCENE_READY messages to");
+            }
         }
     }
 
@@ -287,6 +303,7 @@ public class GameManager : MonoBehaviour
             Debug.Log("Not spawning player in menu/lobby scene");
             return;
         }
+        
         // Check if we're in a multiplayer game
         if (isMultiplayerGame && NetworkManager.Instance != null)
         {
@@ -306,6 +323,18 @@ public class GameManager : MonoBehaviour
             if (!playerGarageIndices.ContainsKey(localPlayerId))
             {
                 playerGarageIndices[localPlayerId] = multiplayerSpawnIndex;
+            }
+            
+            // First check if player already exists to avoid dictionary key collision
+            if (activePlayers.ContainsKey(localPlayerId))
+            {
+                Debug.Log($"Player with ID {localPlayerId} already exists. Removing before respawning.");
+                CarController existingController = activePlayers[localPlayerId];
+                if (existingController != null && existingController.gameObject != null)
+                {
+                    Destroy(existingController.gameObject);
+                }
+                activePlayers.Remove(localPlayerId);
             }
             
             // Instantiate car prefab
@@ -333,6 +362,18 @@ public class GameManager : MonoBehaviour
                                 trackGaragePositions[0] + Vector3.up * respawnHeight : 
                                 new Vector3(0, 5, 0);
             Quaternion spawnRotation = Quaternion.identity;
+            
+            // Check for existing player
+            if (activePlayers.ContainsKey(localPlayerId))
+            {
+                Debug.Log($"Player with ID {localPlayerId} already exists. Removing before respawning.");
+                CarController existingController = activePlayers[localPlayerId];
+                if (existingController != null && existingController.gameObject != null)
+                {
+                    Destroy(existingController.gameObject);
+                }
+                activePlayers.Remove(localPlayerId);
+            }
             
             // Instantiate car prefab
             if (playerCarPrefabs.Count > 0)

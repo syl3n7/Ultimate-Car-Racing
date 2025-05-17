@@ -120,17 +120,20 @@ public class NetworkManager : MonoBehaviour
         
         if (_isConnected && !string.IsNullOrEmpty(_currentRoomId))
         {
-            // According to SERVER-README.md section 3.2 and 7.4, RELAY_MESSAGE requires:
-            // {"command":"RELAY_MESSAGE","targetId":"playerId","message":"text"}
-            var readyMessage = new Dictionary<string, object>
-            {
-                { "command", "RELAY_MESSAGE" },
-                { "targetId", "all" }, // Target all players in the room
-                { "message", $"SCENE_READY:{_clientId}" } // Include our ID in the message
-            };
+            Debug.Log("Sending scene ready notification after scene change");
             
-            SendTcpMessage(readyMessage);
-            Debug.Log($"Sent SCENE_READY:{_clientId} message to all players");
+            // According to SERVER-README.md, SCENE_READY needs to be sent to each player individually
+            // We can't use "all" as targetId - instead we'll broadcast to room via GameManager
+            // Use BroadcastSceneReady method which is already set up correctly
+            if (GameManager.Instance != null)
+            {
+                GameManager.Instance.BroadcastSceneReady();
+                Debug.Log($"Broadcasted scene ready state via GameManager");
+            }
+            else
+            {
+                Debug.LogError("Cannot broadcast SCENE_READY - GameManager instance is null");
+            }
         }
     }
     
