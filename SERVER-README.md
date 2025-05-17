@@ -35,11 +35,13 @@ Ports (defaults):
 | -------------- | ------------ | ------------------------------------------------- | --------------------------------------- |
 | `NAME`         | Client → Srv | `{"command":"NAME","name":"playerName"}`        | `{"command":"NAME_OK","name":"playerName"}` |
 | `CREATE_ROOM`  | Client → Srv | `{"command":"CREATE_ROOM","name":"roomName"}`   | `{"command":"ROOM_CREATED","roomId":"id","name":"roomName"}` |
-| `JOIN_ROOM`    | Client → Srv | `{"command":"JOIN_ROOM","roomId":"id"}`         | `{"command":"JOIN_OK","roomId":"id"}` |
+| `JOIN_ROOM`    | Client → Srv | `{"command":"JOIN_ROOM","roomId":"id"}`         | `{"command":"JOIN_OK","roomId":"id"}` or `{"command":"ERROR","message":"Failed to join room. Room may be full or inactive."}` |
+| `LEAVE_ROOM`   | Client → Srv | `{"command":"LEAVE_ROOM"}`                      | `{"command":"LEAVE_OK","roomId":"id"}` or `{"command":"ERROR","message":"Cannot leave room. No room joined."}` |
 | `PING`         | Client → Srv | `{"command":"PING"}`                            | `{"command":"PONG"}`                  |
 | `LIST_ROOMS`   | Client → Srv | `{"command":"LIST_ROOMS"}`                     | `{"command":"ROOM_LIST","rooms":[{"id":"id","name":"roomName","playerCount":0,"isActive":false}]}` |
 | `PLAYER_INFO`  | Client → Srv | `{"command":"PLAYER_INFO"}`                    | `{"command":"PLAYER_INFO","playerInfo":{"id":"id","name":"playerName","currentRoomId":"roomId"}}` |
 | `START_GAME`   | Client → Srv | `{"command":"START_GAME"}`                     | `{"command":"GAME_STARTED","roomId":"roomId"}` or `{"command":"ERROR","message":"Cannot start game. No room joined or room not found."}` |
+| `BYE`          | Client → Srv | `{"command":"BYE"}`                            | `{"command":"BYE_OK"}` |
 | Any other      | Client → Srv | e.g. `{"command":"FOO"}`                        | `{"command":"UNKNOWN_COMMAND","originalCommand":"FOO"}` |
 
 #### Error Handling
@@ -59,13 +61,29 @@ The server accepts and broadcasts JSON packets for position updates:
 {"command":"UPDATE","sessionId":"id","position":{"x":0,"y":0,"z":0},"rotation":{"x":0,"y":0,"z":0,"w":1}}\n
 ```
 
-- `sessionId`: your TCP session ID  
-- `position`: Vector3 with x, y, z coordinates
-- `rotation`: Quaternion with x, y, z, w components
+#### Required Fields:
+- `command`: Must be "UPDATE"
+- `sessionId`: Your TCP session ID (received during connection)
+- `position`: A Vector3 object with:
+  - `x`: X coordinate (float)
+  - `y`: Y coordinate (float)
+  - `z`: Z coordinate (float)
+- `rotation`: A Quaternion object with:
+  - `x`: X component (float)
+  - `y`: Y component (float)
+  - `z`: Z component (float)
+  - `w`: W component (float, default 1.0)
 
-Server echoes or broadcasts state to other clients in the same room.
+Server echoes these updates to all other clients in the same room (excluding the sender).
 
-### 4.3 Example (C# send)
+### 4.3 UDP Broadcasting Behavior
+- Position updates are sent only to players in the same room
+- Each player must send at least one UDP packet to register their endpoint with the server
+- The server records the UDP endpoint (IP:port) with the player's session
+- Players without a registered UDP endpoint won't receive position broadcasts
+- The server automatically handles mapping between player sessions and UDP endpoints
+
+### 4.4 Example (C# send)
 ```csharp
 using var udp = new UdpClient();
 var posUpdate = new { 
@@ -79,7 +97,51 @@ var bytes = Encoding.UTF8.GetBytes(json);
 await udp.SendAsync(bytes, bytes.Length, serverHost, 7778);
 ```
 
-## 5. Example TCP Client (C#)
+### 4.5 Example (C# receive)
+```csharp
+using var udpClient = new UdpClient(localPort); // Local port to listen on
+var endpoint = new IPEndPoint(IPAddress.Any, 0);
+
+while (true)
+{
+    var result = await udpClient.ReceiveAsync();
+    var json = Encoding.UTF8.GetString(result.Buffer);
+    var update = JsonSerializer.Deserialize<JsonElement>(json);
+    
+    // Extract values
+    var sessionId = update.GetProperty("sessionId").GetString();
+    var position = update.GetProperty("position");
+    var rotation = update.GetProperty("rotation");
+    
+    float posX = position.GetProperty("x").GetSingle();
+    float posY = position.GetProperty("y").GetSingle();
+    float posZ = position.GetProperty("z").GetSingle();
+    
+    float rotX = rotation.GetProperty("x").GetSingle();
+    float rotY = rotation.GetProperty("y").GetSingle();
+    float rotZ = rotation.GetProperty("z").GetSingle();
+    float rotW = rotation.GetProperty("w").GetSingle();
+    
+    // Use position and rotation to update game state
+    // ...
+}
+```
+
+## 5. Room Management
+
+### 5.1 Room Properties
+- Each room has a unique ID, name, and a host player
+- Rooms have a maximum player limit (default: 20)
+- Rooms can be active (game started) or inactive (lobby)
+- Creation timestamp is recorded
+
+### 5.2 Room Operations
+- Create room: A player can create a new room and becomes its host
+- Join room: Players can join rooms that are not active and not full
+- Start game: The host can start the game, which marks the room as active
+- List rooms: Get all available rooms with their basic information
+
+## 6. Example TCP Client (C#)
 
 ```csharp
 using System;
@@ -128,20 +190,34 @@ class RacingClient
 }
 ```
 
-## 6. Logging & Debug
-- TCP events (connect, disconnect, commands) are logged at INFO level.
-- UDP packet receipt and processing are logged at DEBUG level.
-- JSON parsing errors are caught and logged.
+## 7. Player Session Management
+
+### 7.1 Session Lifecycle
+- Sessions are created when a client connects via TCP
+- Each session has a unique ID that's shared with the client
+- Inactivity timeout: Sessions with no activity for > 60 seconds are disconnected
+- Sessions track player name, current room, and last activity time
+
+### 7.2 Position Updates
+- Player position and rotation are tracked via the PlayerInfo record
+- Position is represented as Vector3 (x, y, z)
+- Rotation is represented as Quaternion (x, y, z, w)
+
+## 8. Logging & Debug
+- TCP events (connect, disconnect, commands) are logged at INFO level
+- UDP packet receipt and processing are logged at DEBUG level
+- JSON parsing errors are caught and logged
 - Use console logger to trace flow:
   ```bash
   dotnet run --verbosity normal
   ```
 
-## 7. Next Steps
-- Implement full UDP room‐broadcast logic.
-- Add authentication/tokens.
-- Extend command set (chat, start race, lap updates).
-- Harden error handling & reconnection logic.
+## 9. Next Steps
+- Add authentication/tokens for secure player identification
+- Implement chat functionality
+- Add race-specific features like lap counting and race timing
+- Add server admin commands for room management
+- Optimize UDP broadcast for large player counts
 
 ---
 
