@@ -335,6 +335,41 @@ public class NetworkManager : MonoBehaviour
                     }
                     break;
                     
+                case "ROOM_LIST":
+                    Debug.Log($"Room list received: {message}");
+                    
+                    // Convert the server's room list format to our internal format
+                    var roomListMsg = new Dictionary<string, object>();
+                    var roomsList = new List<Dictionary<string, object>>();
+                    
+                    if (messageObj.ContainsKey("rooms"))
+                    {
+                        var serverRooms = messageObj["rooms"] as Newtonsoft.Json.Linq.JArray;
+                        if (serverRooms != null)
+                        {
+                            foreach (var roomObj in serverRooms)
+                            {
+                                var serverRoom = roomObj.ToObject<Dictionary<string, object>>();
+                                var roomData = new Dictionary<string, object>();
+                                
+                                // Match keys with our UI's expected format
+                                roomData["room_id"] = serverRoom.ContainsKey("id") ? serverRoom["id"] : "";
+                                roomData["name"] = serverRoom.ContainsKey("name") ? serverRoom["name"] : "Unknown Room";
+                                roomData["player_count"] = serverRoom.ContainsKey("playerCount") ? serverRoom["playerCount"] : 0;
+                                roomData["max_players"] = 20; // Default to 20 if not provided
+                                roomData["is_active"] = serverRoom.ContainsKey("isActive") ? serverRoom["isActive"] : false;
+                                
+                                roomsList.Add(roomData);
+                            }
+                        }
+                    }
+                    
+                    roomListMsg["rooms"] = roomsList;
+                    
+                    UnityMainThreadDispatcher.Instance().Enqueue(() => 
+                        OnRoomListReceived?.Invoke(roomListMsg));
+                    break;
+                    
                 case "JOIN_OK":
                     if (messageObj.ContainsKey("roomId"))
                     {
@@ -365,18 +400,23 @@ public class NetworkManager : MonoBehaviour
                     
                     var gameStartedMsg = new Dictionary<string, object>();
                     
-                    // Extract spawn position if available
-                    if (messageObj.ContainsKey("spawnPosition"))
-                    {
-                        var spawnPosObj = messageObj["spawnPosition"] as Newtonsoft.Json.Linq.JObject;
-                        gameStartedMsg["spawn_position"] = spawnPosObj;
-                    }
+                    // According to SERVER-README.md, the GAME_STARTED message only contains roomId
+                    // We need to create a default spawn position since the server doesn't provide one
+                    var spawnPosObj = new Newtonsoft.Json.Linq.JObject();
+                    spawnPosObj["x"] = 0f;
+                    spawnPosObj["y"] = 5f;  // Start slightly above ground to prevent physics issues
+                    spawnPosObj["z"] = 0f;
+                    spawnPosObj["index"] = 0; // Default spawn index
+                    
+                    gameStartedMsg["spawn_position"] = spawnPosObj;
                     
                     // Include room ID
                     if (messageObj.ContainsKey("roomId"))
                     {
                         gameStartedMsg["room_id"] = messageObj["roomId"];
                     }
+                    
+                    Debug.Log($"Created spawn position for player: {spawnPosObj["x"]},{spawnPosObj["y"]},{spawnPosObj["z"]}");
                     
                     UnityMainThreadDispatcher.Instance().Enqueue(() => 
                         OnGameStarted?.Invoke(gameStartedMsg));
@@ -408,91 +448,72 @@ public class NetworkManager : MonoBehaviour
     {
         try
         {
+            Debug.Log($"Received UDP message: {jsonMessage}");
             var message = JsonConvert.DeserializeObject<Dictionary<string, object>>(jsonMessage);
             
-            // Skip if message is invalid or from self
-            if (message == null || !message.ContainsKey("type")) return;
+            // Skip if message is invalid
+            if (message == null) return;
             
-            // Get sender ID from various possible fields
-            string fromField = message.ContainsKey("from") ? "from" : 
-                            message.ContainsKey("client_id") ? "client_id" : 
-                            message.ContainsKey("player_id") ? "player_id" : null;
+            // Based on SERVER-README.md, UDP packets use the UPDATE command format:
+            // {"command":"UPDATE","sessionId":"id","position":{"x":0,"y":0,"z":0},"rotation":{"x":0,"y":0,"z":0,"w":1}}
             
-            if (fromField == null || !message.ContainsKey(fromField)) return;
-            
-            string fromClientId = message[fromField].ToString();
-            
-            // Skip our own messages
-            if (fromClientId == _clientId) return;
-            
-            string messageType = message["type"].ToString();
-            
-            // Process GAME_DATA messages
-            if (messageType == "GAME_DATA" && message.ContainsKey("data"))
+            if (message.ContainsKey("command") && message["command"].ToString() == "UPDATE" && 
+                message.ContainsKey("sessionId") && message.ContainsKey("position") && message.ContainsKey("rotation"))
             {
-                var gameData = message["data"] as Dictionary<string, object>;
-                if (gameData != null && gameData.ContainsKey("type"))
+                string fromClientId = message["sessionId"].ToString();
+                
+                // Skip our own messages
+                if (fromClientId == _clientId) return;
+                
+                var position = message["position"] as Newtonsoft.Json.Linq.JObject;
+                var rotation = message["rotation"] as Newtonsoft.Json.Linq.JObject;
+                
+                if (position != null && rotation != null)
                 {
-                    string dataType = gameData["type"].ToString();
-                    
-                    // Handle PLAYER_STATE
-                    if (dataType == "PLAYER_STATE" && gameData.ContainsKey("state"))
+                    UnityMainThreadDispatcher.Instance().Enqueue(() =>
                     {
-                        var stateData = gameData["state"] as Dictionary<string, object>;
-                        
-                        UnityMainThreadDispatcher.Instance().Enqueue(() =>
+                        if (GameManager.Instance != null)
                         {
-                            if (GameManager.Instance != null)
-                            {
-                                bool playerExists = GameManager.Instance.IsPlayerActive(fromClientId);
-                                
-                                var playerState = new GameManager.PlayerStateData
-                                {
-                                    playerId = fromClientId,
-                                    position = ParseVector3(stateData["position"]),
-                                    rotation = ParseQuaternion(stateData["rotation"]),
-                                    velocity = ParseVector3(stateData["velocity"]),
-                                    angularVelocity = ParseVector3(stateData["angularVelocity"]),
-                                    timestamp = Convert.ToSingle(stateData["timestamp"])
-                                };
-                                
-                                if (!playerExists)
-                                {
-                                    GameManager.Instance.SpawnRemotePlayer(
-                                        fromClientId, 
-                                        playerState.position, 
-                                        playerState.rotation
-                                    );
-                                }
-                                
-                                GameManager.Instance.ApplyPlayerState(playerState, !playerExists);
-                            }
-                        });
-                    }
-                    // Handle PLAYER_INPUT
-                    else if (dataType == "PLAYER_INPUT" && gameData.ContainsKey("input"))
-                    {
-                        var inputData = gameData["input"] as Dictionary<string, object>;
-                        if (inputData != null)
-                        {
-                            var playerInput = new GameManager.PlayerInputData
+                            bool playerExists = GameManager.Instance.IsPlayerActive(fromClientId);
+                            
+                            // Create player state from position and rotation
+                            Vector3 pos = new Vector3(
+                                Convert.ToSingle(position["x"]),
+                                Convert.ToSingle(position["y"]),
+                                Convert.ToSingle(position["z"])
+                            );
+                            
+                            Quaternion rot = new Quaternion(
+                                Convert.ToSingle(rotation["x"]),
+                                Convert.ToSingle(rotation["y"]),
+                                Convert.ToSingle(rotation["z"]),
+                                Convert.ToSingle(rotation["w"])
+                            );
+                            
+                            var playerState = new GameManager.PlayerStateData
                             {
                                 playerId = fromClientId,
-                                steering = Convert.ToSingle(inputData["steering"]),
-                                throttle = Convert.ToSingle(inputData["throttle"]),
-                                brake = Convert.ToSingle(inputData["brake"]),
-                                timestamp = Convert.ToSingle(inputData["timestamp"])
+                                position = pos,
+                                rotation = rot,
+                                velocity = Vector3.zero,  // Server doesn't provide velocity
+                                angularVelocity = Vector3.zero, // Server doesn't provide angular velocity
+                                timestamp = Time.time
                             };
                             
-                            UnityMainThreadDispatcher.Instance().Enqueue(() =>
+                            // If the player doesn't exist yet, spawn them
+                            if (!playerExists)
                             {
-                                if (GameManager.Instance != null)
-                                {
-                                    GameManager.Instance.ApplyPlayerInput(playerInput);
-                                }
-                            });
+                                GameManager.Instance.SpawnRemotePlayer(
+                                    fromClientId, 
+                                    playerState.position, 
+                                    playerState.rotation
+                                );
+                            }
+                            
+                            // Update the player's state
+                            GameManager.Instance.ApplyPlayerState(playerState, !playerExists);
                         }
-                    }
+                    });
                 }
             }
         }
@@ -726,6 +747,8 @@ public class NetworkManager : MonoBehaviour
     {
         if (!_isConnected || string.IsNullOrEmpty(_currentRoomId)) return;
         
+        // According to SERVER-README.md section 4.2, the UDP format must be:
+        // {"command":"UPDATE","sessionId":"id","position":{"x":0,"y":0,"z":0},"rotation":{"x":0,"y":0,"z":0,"w":1}}
         var message = new Dictionary<string, object>
         {
             ["command"] = "UPDATE",
@@ -745,6 +768,7 @@ public class NetworkManager : MonoBehaviour
             }
         };
         
+        Debug.Log($"Sending UDP state update: {JsonConvert.SerializeObject(message)}");
         SendUdpMessage(message);
     }
     
