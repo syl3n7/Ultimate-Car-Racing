@@ -1196,6 +1196,14 @@ public async void CreateRoom()
             
             Debug.Log($"Game started with spawn position: {spawnPosition}, index: {spawnIndex}");
             
+            // Check if we received all player spawn positions and process them if available
+            if (message.ContainsKey("all_spawn_positions") && GameManager.Instance != null)
+            {
+                var allSpawnPositions = message["all_spawn_positions"];
+                GameManager.Instance.SetAllPlayerSpawnPositions(allSpawnPositions as Dictionary<string, object>);
+                Debug.Log("Processed all player spawn positions");
+            }
+            
             // Request the player list before loading the scene
             if (NetworkManager.Instance != null && !string.IsNullOrEmpty(currentRoomId))
             {
