@@ -35,6 +35,7 @@ public class NetworkManager : MonoBehaviour
     private float _lastPingTime = 0f;
     private float _latency = 0f;
     private const float PING_INTERVAL = 2f;
+    private string _deviceName = "Unknown Device";
     
     // Events
     public event Action<string> OnConnected;
@@ -56,6 +57,10 @@ public class NetworkManager : MonoBehaviour
         {
             Instance = this;
             DontDestroyOnLoad(gameObject);
+            
+            // Capture device name on main thread
+            _deviceName = SystemInfo.deviceName;
+            
             Debug.Log("NetworkManager initialized as singleton");
             UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
         }
@@ -147,20 +152,17 @@ public class NetworkManager : MonoBehaviour
             _udpClient = new UdpClient();
             _udpClient.Connect(serverIP, udpPort);
             
-            _isConnected = true;
-            
-            // Start listening tasks
+            // Start listening tasks before sending any data
             _ = Task.Run(ListenForTcpMessages, _cts.Token);
             _ = Task.Run(ListenForUdpMessages, _cts.Token);
             
             // Reset buffer
             _messageBuffer.Clear();
             
-            // Send registration message
-            await SendRegistration();
+            // Note: Don't set _isConnected = true here
+            // It will be set when we receive the connection confirmation
             
-            OnConnected?.Invoke("Connected successfully");
-            LogDebug("Connected to server successfully");
+            LogDebug("Socket connection established, waiting for server confirmation");
         }
         catch (Exception e)
         {
@@ -174,13 +176,13 @@ public class NetworkManager : MonoBehaviour
         }
     }
     
+    // Fix SendRegistration to use NAME command
     private async Task SendRegistration()
     {
-        // Use lowercase "command" field as shown in the SERVER-README.md examples
         var registrationMessage = new Dictionary<string, object>
         {
             { "command", "NAME" },
-            { "name", SystemInfo.deviceName }
+            { "name", _deviceName }
         };
         
         await SendTcpMessage(registrationMessage);
@@ -198,16 +200,46 @@ public class NetworkManager : MonoBehaviour
                 if (bytesRead == 0) break; // Connection closed
                 
                 string data = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                Debug.Log($"Received raw data: {data}");
                 _messageBuffer.Append(data);
                 
-                // Process complete messages (newline-delimited)
                 string messages = _messageBuffer.ToString();
-                int newlineIndex;
                 
-                while ((newlineIndex = messages.IndexOf('\n')) != -1)
+                // Check for welcome message format: "CONNECTED|<sessionId>\n"
+                if (messages.StartsWith("CONNECTED|"))
                 {
-                    string message = messages.Substring(0, newlineIndex);
-                    messages = messages.Substring(newlineIndex + 1);
+                    int newlineIndex = messages.IndexOf('\n');
+                    if (newlineIndex != -1)
+                    {
+                        string welcomeMsg = messages.Substring(0, newlineIndex);
+                        string[] parts = welcomeMsg.Split('|');
+                        if (parts.Length == 2)
+                        {
+                            _clientId = parts[1];
+                            _isConnected = true;
+                            LogDebug($"Connected with session ID: {_clientId}");
+                            
+                            // Notify on the main thread that we're connected
+                            await UnityMainThreadDispatcher.Instance().EnqueueAsync(() => {
+                                // Now send the player name
+                                SendRegistration();
+                                OnConnected?.Invoke("Connected successfully");
+                            });
+                        }
+                        
+                        // Remove welcome message from buffer
+                        messages = messages.Substring(newlineIndex + 1);
+                        _messageBuffer.Clear();
+                        _messageBuffer.Append(messages);
+                    }
+                }
+                
+                // Process any remaining JSON messages
+                int newlineIndex2;
+                while ((newlineIndex2 = messages.IndexOf('\n')) != -1)
+                {
+                    string message = messages.Substring(0, newlineIndex2);
+                    messages = messages.Substring(newlineIndex2 + 1);
                     
                     ProcessServerMessage(message);
                 }
@@ -258,51 +290,6 @@ public class NetworkManager : MonoBehaviour
         {
             Debug.Log($"Received message from server: {message}");
             
-            // Check if the message contains a pipe character, which might indicate an error or command prefix
-            if (message.Contains("|"))
-            {
-                string[] parts = message.Split(new char[] { '|' }, 2);
-                string command = parts[0];
-                string jsonContent = parts.Length > 1 ? parts[1] : "{}";
-                
-                Debug.Log($"Detected pipe format: Command={command}, Content={jsonContent}");
-                
-                // Handle specific command types
-                if (command == "UNKNOWN_COMMAND")
-                {
-                    // Try to parse the JSON content
-                    try 
-                    {
-                        var jsonObj = JsonConvert.DeserializeObject<Dictionary<string, object>>(jsonContent);
-                        if (jsonObj != null && jsonObj.ContainsKey("TYPE"))
-                        {
-                            string originalCommand = jsonObj["TYPE"].ToString();
-                            Debug.LogWarning($"Server reported unknown command: {originalCommand}");
-                            
-                            // If this was a REGISTER command, try the proper format
-                            if (originalCommand == "REGISTER")
-                            {
-                                Debug.Log("Retrying registration with correct format");
-                                _ = SendRegistration();
-                            }
-                        }
-                    }
-                    catch (Exception jsonEx)
-                    {
-                        Debug.LogError($"Error parsing JSON content after pipe: {jsonEx.Message}");
-                    }
-                    return;
-                }
-                else
-                {
-                    // For other pipe-delimited messages, try to handle them based on your documentation
-                    Debug.LogWarning($"Received pipe-delimited message with command: {command}");
-                    // You could add special handling for other pipe-delimited messages here if needed
-                    return;
-                }
-            }
-            
-            // Standard JSON processing for non-pipe messages
             var messageObj = JsonConvert.DeserializeObject<Dictionary<string, object>>(message);
             if (messageObj == null)
             {
@@ -310,20 +297,17 @@ public class NetworkManager : MonoBehaviour
                 return;
             }
             
-            if (!messageObj.ContainsKey("command") && !messageObj.ContainsKey("type"))
+            // Server uses "command" as the key
+            if (!messageObj.ContainsKey("command"))
             {
-                Debug.LogError("Message missing both 'command' and 'type' properties");
+                Debug.LogError("Message missing 'command' property");
                 return;
             }
             
-            // Check for command field first (from SERVER-README.md)
-            string messageType = messageObj.ContainsKey("command") ? 
-                messageObj["command"].ToString() : 
-                messageObj["type"].ToString();
-                
+            string messageType = messageObj["command"].ToString();
             Debug.Log($"Processing JSON message of type: {messageType}");
             
-            // Handle messages based on command/type
+            // Handle messages based on command
             switch (messageType)
             {
                 case "CONNECTED":
@@ -334,14 +318,6 @@ public class NetworkManager : MonoBehaviour
                         LogDebug($"Connected with session ID: {_clientId}");
                         UnityMainThreadDispatcher.Instance().Enqueue(() => 
                             OnConnected?.Invoke("Connected successfully"));
-                    }
-                    break;
-                    
-                case "REGISTERED":
-                    if (messageObj.ContainsKey("client_id"))
-                    {
-                        _clientId = messageObj["client_id"].ToString();
-                        LogDebug($"Registered with server, client ID: {_clientId}");
                     }
                     break;
                     
@@ -391,7 +367,14 @@ public class NetworkManager : MonoBehaviour
                     _latency = (now - _lastPingTime);
                     break;
                 
-                // Add other JSON message types from your documentation as needed
+                // Handle errors properly 
+                case "UNKNOWN_COMMAND":
+                    Debug.LogError($"Server rejected command: {messageObj["originalCommand"]}");
+                    break;
+                    
+                case "ERROR":
+                    Debug.LogError($"Server error: {messageObj["message"]}");
+                    break;
                     
                 default:
                     LogDebug($"Unhandled message type: {messageType}");
@@ -431,7 +414,7 @@ public class NetworkManager : MonoBehaviour
             if (messageType == "GAME_DATA" && message.ContainsKey("data"))
             {
                 var gameData = message["data"] as Dictionary<string, object>;
-                if (gameData != null && gameData.containsKey("type"))
+                if (gameData != null && gameData.ContainsKey("type"))
                 {
                     string dataType = gameData["type"].ToString();
                     
@@ -592,18 +575,18 @@ public class NetworkManager : MonoBehaviour
     {
         var heartbeatMessage = new Dictionary<string, object>
         {
-            { "type", "HEARTBEAT" }
+            { "command", "HEARTBEAT" }
         };
         
         SendTcpMessage(heartbeatMessage);
     }
     
+    // Fix SendPing to use PING command
     private void SendPing()
     {
         var pingMessage = new Dictionary<string, object>
         {
-            { "type", "PING" },
-            { "timestamp", DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond }
+            { "command", "PING" }
         };
         
         SendTcpMessage(pingMessage);
@@ -657,26 +640,26 @@ public class NetworkManager : MonoBehaviour
             return;
         }
         
-        Debug.Log($"Sending HOST_GAME request for room: {roomName}, maxPlayers: {maxPlayers}");
+        Debug.Log($"Sending CREATE_ROOM request for room: {roomName}");
         
         var message = new Dictionary<string, object>
         {
-            { "type", "HOST_GAME" },
-            { "room_name", roomName },
-            { "max_players", maxPlayers }
+            { "command", "CREATE_ROOM" },
+            { "name", roomName }
         };
         
         SendTcpMessage(message);
     }
     
+    // Fix JoinGame to use JOIN_ROOM command
     public void JoinGame(string roomId)
     {
         if (!_isConnected) return;
         
         var message = new Dictionary<string, object>
         {
-            { "type", "JOIN_GAME" },
-            { "room_id", roomId }
+            { "command", "JOIN_ROOM" },
+            { "roomId", roomId }
         };
         
         SendTcpMessage(message);
