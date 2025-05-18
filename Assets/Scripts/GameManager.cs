@@ -10,6 +10,7 @@ public class GameManager : MonoBehaviour
     
     [Header("Player Setup")]
     public List<GameObject> playerCarPrefabs = new List<GameObject>();
+    public GameObject remoteCarPrefab; // Add reference to the custom remote car prefab
     public static int SelectedCarIndex = 0;
     public static int SelectedTrackIndex = 0;
     public List<SpawnPointData> spawnPoints = new List<SpawnPointData>(); 
@@ -431,38 +432,69 @@ public class GameManager : MonoBehaviour
         // Force-create a new player (always refresh)
         try 
         {
-            // Make sure we have prefabs
-            if (playerCarPrefabs == null || playerCarPrefabs.Count == 0)
+            // Check if we have the custom remote car prefab
+            if (remoteCarPrefab != null)
             {
-                Debug.LogError("Cannot spawn remote player: No car prefabs available!");
-                return;
-            }
-            
-            // Use the second car model if available
-            int carIndex = Mathf.Min(1, playerCarPrefabs.Count - 1);
-            
-            // Adjust position to prevent being stuck in ground
-            Vector3 spawnPosition = new Vector3(
-                position.x,
-                position.y + respawnHeight,
-                position.z
-            );
-            
-            // Create a display-only version of the car for remote players
-            GameObject carObject = CreateDisplayOnlyCar(playerCarPrefabs[carIndex], spawnPosition, rotation, playerId);
-            
-            // Set up the car controller
-            CarController carController = carObject.GetComponent<CarController>();
-            if (carController != null)
-            {
+                // Adjust position to prevent being stuck in ground
+                Vector3 spawnPosition = new Vector3(
+                    position.x,
+                    position.y + respawnHeight,
+                    position.z
+                );
+                
+                // Spawn the remote car using the custom prefab
+                GameObject carObject = Instantiate(remoteCarPrefab, spawnPosition, rotation);
+                carObject.name = $"RemotePlayer_{playerId}";
+                
+                // Add required CarController component if it's not on the prefab
+                CarController carController = carObject.GetComponent<CarController>();
+                if (carController == null)
+                {
+                    carController = carObject.AddComponent<CarController>();
+                    Debug.Log("Added CarController to remote car prefab");
+                }
+                
+                // Initialize the remote car
                 InitializeCarController(carController, playerId, false);
                 activePlayers[playerId] = carController;
-                Debug.Log($"SUCCESS - Remote player {playerId} added to active players dictionary");
+                Debug.Log($"SUCCESS - Remote player {playerId} added to active players dictionary using custom prefab");
+            }
+            // Fallback to the original method if custom prefab is not assigned
+            else if (playerCarPrefabs != null && playerCarPrefabs.Count > 0)
+            {
+                Debug.LogWarning("Custom remote car prefab not assigned! Using fallback method.");
+                
+                // Use the second car model if available
+                int carIndex = Mathf.Min(1, playerCarPrefabs.Count - 1);
+                
+                // Adjust position to prevent being stuck in ground
+                Vector3 spawnPosition = new Vector3(
+                    position.x,
+                    position.y + respawnHeight,
+                    position.z
+                );
+                
+                // Create a display-only version of the car for remote players
+                GameObject carObject = CreateDisplayOnlyCar(playerCarPrefabs[carIndex], spawnPosition, rotation, playerId);
+                
+                // Set up the car controller
+                CarController carController = carObject.GetComponent<CarController>();
+                if (carController != null)
+                {
+                    InitializeCarController(carController, playerId, false);
+                    activePlayers[playerId] = carController;
+                    Debug.Log($"SUCCESS - Remote player {playerId} added to active players dictionary");
+                }
+                else
+                {
+                    Debug.LogError($"Car controller not found on car prefab for player {playerId}!");
+                    Destroy(carObject);
+                }
             }
             else
             {
-                Debug.LogError($"Car controller not found on car prefab for player {playerId}!");
-                Destroy(carObject);
+                Debug.LogError("Cannot spawn remote player: No car prefabs available!");
+                return;
             }
         }
         catch (Exception e)
