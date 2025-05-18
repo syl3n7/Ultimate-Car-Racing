@@ -50,6 +50,13 @@ public class UIManager : MonoBehaviour
     [Header("Notification UI")]
     public GameObject notificationPanel;
     public TextMeshProUGUI notificationText;
+
+    [Header("Authentication UI")]
+    public GameObject authPanel;
+    public TMP_InputField usernameInput;
+    public TMP_InputField passwordInput;
+    public Button loginButton;
+    public TextMeshProUGUI authStatusText;
     
     // Player profile data
     private string playerName = "Player";
@@ -152,6 +159,13 @@ public class UIManager : MonoBehaviour
         }
 
         CheckPanelReferences();
+
+        // Connect auth panel buttons
+        if (loginButton != null)
+        {
+            loginButton.onClick.RemoveAllListeners();
+            loginButton.onClick.AddListener(OnLoginButtonClicked);
+        }
     }
     
     private void ConnectAllUIButtons()
@@ -396,6 +410,71 @@ public class UIManager : MonoBehaviour
         roomLobbyPanel.SetActive(false);
         connectionPanel.SetActive(false);
         notificationPanel.SetActive(false);
+        
+        // Also hide auth panel if it exists
+        if (authPanel != null)
+        {
+            authPanel.SetActive(false);
+        }
+    }
+
+    public void ShowAuthPanel(string message = "Please login to continue")
+    {
+        if (authPanel == null)
+        {
+            Debug.LogError("Auth panel is not assigned in the Inspector!");
+            return;
+        }
+        
+        HideAllPanels();
+        authPanel.SetActive(true);
+        
+        if (authStatusText != null)
+        {
+            authStatusText.text = message;
+        }
+        
+        // Pre-fill the username if we have a profile selected
+        if (usernameInput != null && !string.IsNullOrEmpty(playerName))
+        {
+            usernameInput.text = playerName;
+        }
+    }
+    
+    public void OnLoginButtonClicked()
+    {
+        string username = usernameInput.text;
+        string password = passwordInput.text;
+        
+        if (string.IsNullOrEmpty(username))
+        {
+            ShowNotification("Please enter a username");
+            return;
+        }
+        
+        if (string.IsNullOrEmpty(password))
+        {
+            ShowNotification("Please enter a password");
+            return;
+        }
+        
+        if (NetworkManager.Instance != null)
+        {
+            // Set the credentials in NetworkManager
+            NetworkManager.Instance.SetCredentials(username, password);
+            
+            // Update local player name and attempt to reconnect
+            playerName = username;
+            
+            // Show connection panel
+            ShowConnectionPanel("Authenticating...");
+            
+            // If not connected, connect
+            if (!NetworkManager.Instance.IsConnected())
+            {
+                _ = NetworkManager.Instance.Connect();
+            }
+        }
     }
     
     #endregion
@@ -1276,6 +1355,19 @@ public async void CreateRoom()
         {
             string serverMessage = message["message"].ToString();
             ShowNotification($"Server: {serverMessage}");
+        }
+        
+        // Handle AUTH_FAILED messages
+        if (message.ContainsKey("command") && message["command"].ToString() == "AUTH_FAILED")
+        {
+            string errorMessage = "Authentication failed";
+            if (message.ContainsKey("message"))
+            {
+                errorMessage = message["message"].ToString();
+            }
+            
+            HideConnectionPanel();
+            ShowAuthPanel(errorMessage);
         }
     }
     

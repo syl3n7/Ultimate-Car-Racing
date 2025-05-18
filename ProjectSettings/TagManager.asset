@@ -5,6 +5,7 @@ TagManager:
   serializedVersion: 3
   tags:
   - SpawnPoint
+  - RemotePlayer
   layers:
   - Default
   - TransparentFX

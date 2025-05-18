@@ -18,6 +18,11 @@ public class NetworkManager : MonoBehaviour
     public int udpPort = 7778;
     public float heartbeatInterval = 5f;
     
+    [Header("Authentication")]
+    public bool rememberCredentials = true;
+    public string defaultPlayerName = "Player";
+    private string playerPassword = ""; // Will be set during registration
+    
     [Header("Debug")]
     public bool showDebugMessages = false;
     
@@ -60,6 +65,9 @@ public class NetworkManager : MonoBehaviour
             
             // Capture device name on main thread
             _deviceName = SystemInfo.deviceName;
+            
+            // Load saved credentials if available
+            LoadSavedCredentials();
             
             Debug.Log("NetworkManager initialized as singleton");
             UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
@@ -181,15 +189,34 @@ public class NetworkManager : MonoBehaviour
     // Fix SendRegistration to use NAME command according to section 3.2 of SERVER-README.md
     private async Task SendRegistration()
     {
-        // According to SERVER-README.md section 3.2:
-        // {"command":"NAME","name":"playerName"} -> {"command":"NAME_OK","name":"playerName"}
+        // For clarity, let's check if we have a password first
+        bool hasPassword = !string.IsNullOrEmpty(playerPassword);
+        
+        // First attempt - send just the name to see if we need authentication
         var registrationMessage = new Dictionary<string, object>
         {
             { "command", "NAME" },
             { "name", _deviceName }
         };
         
-        Debug.Log($"Sending player registration with name: {_deviceName}");
+        // Only add password if we have one
+        if (hasPassword)
+        {
+            registrationMessage["password"] = playerPassword;
+            Debug.Log($"Sending player registration with name: {_deviceName} and password");
+        }
+        else
+        {
+            Debug.Log($"Sending player registration with name: {_deviceName} (no password)");
+            
+            // If we don't have a password, prepare to show auth panel after server response
+            UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                // Don't show auth panel immediately, wait for server response
+                // If name is new, server will accept without password
+                // If name exists, server will send AUTH_FAILED
+            });
+        }
+        
         await SendTcpMessage(registrationMessage);
     }
     
@@ -317,6 +344,69 @@ public class NetworkManager : MonoBehaviour
             {
                 case "NAME_OK":
                     LogDebug($"Name acknowledged by server");
+                    
+                    // Check if we're authenticated
+                    bool authenticated = false;
+                    if (messageObj.ContainsKey("authenticated"))
+                    {
+                        if (messageObj["authenticated"] is bool authBool)
+                        {
+                            authenticated = authBool;
+                        }
+                        else if (messageObj["authenticated"] is string authStr)
+                        {
+                            bool.TryParse(authStr, out authenticated);
+                        }
+                    }
+                    
+                    Debug.Log($"Authentication status: {(authenticated ? "Authenticated" : "Not authenticated")}");
+                    
+                    // Save credentials if successfully authenticated
+                    if (authenticated && rememberCredentials)
+                    {
+                        SaveCredentials(_deviceName, playerPassword);
+                        
+                        // Continue with normal flow
+                        UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                            if (UIManager.Instance != null)
+                            {
+                                UIManager.Instance.HideConnectionPanel();
+                                UIManager.Instance.ShowNotification("Successfully authenticated!");
+                            }
+                        });
+                    }
+                    else if (!authenticated)
+                    {
+                        // Show auth panel if authentication failed
+                        UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                            if (UIManager.Instance != null)
+                            {
+                                UIManager.Instance.HideConnectionPanel();
+                                UIManager.Instance.ShowAuthPanel("Please enter password for this username");
+                            }
+                        });
+                    }
+                    
+                    break;
+                    
+                case "AUTH_FAILED":
+                    string errorMessage = "Authentication failed";
+                    if (messageObj.ContainsKey("message"))
+                    {
+                        errorMessage = messageObj["message"].ToString();
+                    }
+                    
+                    Debug.LogError($"Authentication error: {errorMessage}");
+                    
+                    // Show auth panel with error message
+                    UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                        if (UIManager.Instance != null)
+                        {
+                            UIManager.Instance.HideConnectionPanel();
+                            UIManager.Instance.ShowAuthPanel(errorMessage);
+                        }
+                    });
+                    
                     break;
                     
                 case "ROOM_CREATED":
@@ -1080,5 +1170,80 @@ public class NetworkManager : MonoBehaviour
     {
         // Return the stored host ID, or default to client ID if none is available
         return _hostId ?? _clientId;
+    }
+
+    // New method to set auth credentials
+    public void SetCredentials(string playerName, string password)
+    {
+        _deviceName = playerName;
+        playerPassword = password;
+        
+        // If already connected, send updated credentials
+        if (_isConnected)
+        {
+            SendRegistration();
+        }
+        
+        if (rememberCredentials)
+        {
+            SaveCredentials(playerName, password);
+        }
+    }
+    
+    // New methods to manage credentials
+    private void SaveCredentials(string playerName, string password)
+    {
+        if (!rememberCredentials) return;
+        
+        try
+        {
+            PlayerPrefs.SetString("PlayerName", playerName);
+            PlayerPrefs.SetString("PlayerPassword", password);
+            PlayerPrefs.Save();
+            Debug.Log("Saved player credentials");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"Failed to save credentials: {e.Message}");
+        }
+    }
+    
+    private void LoadSavedCredentials()
+    {
+        if (!rememberCredentials) return;
+        
+        try
+        {
+            if (PlayerPrefs.HasKey("PlayerName"))
+            {
+                _deviceName = PlayerPrefs.GetString("PlayerName");
+            }
+            
+            if (PlayerPrefs.HasKey("PlayerPassword"))
+            {
+                playerPassword = PlayerPrefs.GetString("PlayerPassword");
+            }
+            
+            Debug.Log($"Loaded saved credentials for: {_deviceName}");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"Failed to load credentials: {e.Message}");
+        }
+    }
+    
+    // New method for explicit authentication (if needed separately)
+    public void Authenticate(string password)
+    {
+        if (!_isConnected) return;
+        
+        var authMessage = new Dictionary<string, object>
+        {
+            { "command", "AUTHENTICATE" },
+            { "password", password }
+        };
+        
+        playerPassword = password; // Store for future use
+        SendTcpMessage(authMessage);
     }
 }

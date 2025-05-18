@@ -1565,7 +1565,7 @@ GameObject:
   - component: {fileID: 9203691710431408469}
   m_Layer: 0
   m_Name: Remote_911 GT3
-  m_TagString: Untagged
+  m_TagString: RemotePlayer
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
