@@ -14,8 +14,8 @@ public class NetworkManager : MonoBehaviour
     
     [Header("Server Settings")]
     public string serverIP = "127.0.0.1";
-    public int tcpPort = 7777;
-    public int udpPort = 7778;
+    public int tcpPort = 8443;
+    public int udpPort = 8443;
     public float heartbeatInterval = 5f;
     
     [Header("Debug")]
