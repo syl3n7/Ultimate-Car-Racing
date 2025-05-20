@@ -49,6 +49,25 @@ public class CarController : MonoBehaviour
     [SerializeField] private float reverseSpeedLimit = 30f;
     [SerializeField] private float brakeToReverseThreshold = 1f; // Speed below which brake becomes reverse
 
+    [Header("Advanced Handling")]
+    public float corneringGrip = 1.0f;          // Higher values improve grip during cornering
+    public float oversteerFactor = 0.3f;        // Higher values make the car more prone to oversteer
+    public float driftRecoveryFactor = 0.7f;    // Higher values make it recover from drift faster
+    public float driftAngleThreshold = 5.0f;    // Angle in degrees before drift kicks in
+    public bool enableDriftControl = true;      // Allow player to control drifts with steering
+    public float maxBrakeBias = 0.7f;           // 0 = front brakes only, 1 = rear brakes only
+    public float tireGripFactor = 1.0f;         // Overall tire grip factor
+    public float lateralStiffness = 1.0f;       // Horizontal stiffness of suspension
+    
+    // Drift state
+    private bool isDrifting = false;
+    private float driftAngle = 0f;
+    private float lateralSlip = 0f;
+    
+    // Previous frame data for calculations
+    private Vector3 prevVelocity;
+    private Vector3 prevPosition;
+
     // Internal variables
     private Rigidbody rb;
     private float currentSteerAngle;
@@ -441,18 +460,38 @@ public class CarController : MonoBehaviour
         float speedFactor = 1f - (Mathf.Clamp01(speedKmh / maxSpeed) * speedSteeringFactor);
         float targetSteer = moveInput.x * maxSteer * speedFactor;
         
-        currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteer, steeringResponseSpeed * Time.fixedDeltaTime);
+        // Make steering more responsive at lower speeds
+        float speedBasedResponse = Mathf.Lerp(steeringResponseSpeed * 1.5f, steeringResponseSpeed, speedKmh / 50f);
+        currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteer, speedBasedResponse * Time.fixedDeltaTime);
         
-        // Ackermann steering
-        if (moveInput.x > 0) {
-            wheels[0].collider.steerAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / (trackwidth / 2 + Mathf.Tan(Mathf.Deg2Rad * currentSteerAngle) * wheelbase));
-            wheels[1].collider.steerAngle = currentSteerAngle;
-        } 
-        else if (moveInput.x < 0) {
-            wheels[0].collider.steerAngle = currentSteerAngle;
-            wheels[1].collider.steerAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / (-trackwidth / 2 + Mathf.Tan(Mathf.Deg2Rad * currentSteerAngle) * wheelbase));
+        // Improved Ackermann steering that works for both wheels equally
+        if (Mathf.Abs(moveInput.x) > 0.01f) {
+            // Calculate inner and outer wheel angles
+            float innerWheelAngle, outerWheelAngle;
+            
+            if (moveInput.x > 0) { // Turning right
+                // Right wheel is the inner wheel
+                innerWheelAngle = currentSteerAngle;
+                // Calculate the left wheel angle (outer) using Ackermann
+                outerWheelAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / (trackwidth + Mathf.Tan(Mathf.Deg2Rad * innerWheelAngle) * wheelbase));
+                
+                // Left wheel (index 0) gets outer angle, right wheel (index 1) gets inner angle
+                wheels[0].collider.steerAngle = outerWheelAngle;
+                wheels[1].collider.steerAngle = innerWheelAngle;
+            } 
+            else { // Turning left
+                // Left wheel is the inner wheel
+                innerWheelAngle = currentSteerAngle;
+                // Calculate the right wheel angle (outer) using Ackermann
+                outerWheelAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / (trackwidth + Mathf.Tan(Mathf.Deg2Rad * Mathf.Abs(innerWheelAngle)) * wheelbase));
+                
+                // Left wheel (index 0) gets inner angle, right wheel (index 1) gets outer angle
+                wheels[0].collider.steerAngle = innerWheelAngle;
+                wheels[1].collider.steerAngle = -outerWheelAngle; // Negative because we're turning left
+            }
         } 
         else {
+            // No steering input, set both wheels straight
             wheels[0].collider.steerAngle = wheels[1].collider.steerAngle = 0;
         }
     }
@@ -515,14 +554,61 @@ public class CarController : MonoBehaviour
     
     private void DriftPhysics()
     {
-        if (moveInput.x != 0 && speedKmh > 20f) 
+        // Calculate lateral slip (sideways movement)
+        float sidewaysSpeed = Vector3.Dot(rb.velocity, transform.right);
+        lateralSlip = Mathf.Abs(sidewaysSpeed);
+        
+        // Calculate angle between velocity and forward direction
+        float carAngle = 0;
+        if (rb.velocity.magnitude > 2f) // Only calculate when moving
         {
-            float sidewaysSpeed = Vector3.Dot(rb.linearVelocity, transform.right);
-            Vector3 driftForce = -transform.right * (sidewaysSpeed * driftFactor);
+            carAngle = Vector3.Angle(transform.forward, rb.velocity);
+            float dir = Mathf.Sign(Vector3.Dot(transform.right, rb.velocity));
+            carAngle *= dir; // Negative when sliding left, positive when sliding right
+        }
+        
+        // Determine if we're drifting based on angle threshold
+        isDrifting = Mathf.Abs(carAngle) > driftAngleThreshold && speedKmh > 25f;
+        driftAngle = carAngle;
+        
+        // Apply drift forces
+        if (speedKmh > 15f)
+        {
+            // Base grip force that counters sideways movement
+            float baseGripFactor = tireGripFactor * (1f - (Mathf.Abs(moveInput.x) * 0.3f));
+            float gripForce = baseGripFactor;
+            
+            // Reduce grip while drifting
+            if (isDrifting)
+            {
+                // Less grip during drift, especially when steering into the drift
+                float steeringIntoSlide = Mathf.Sign(moveInput.x) == Mathf.Sign(sidewaysSpeed);
+                gripForce *= steeringIntoSlide ? 0.6f : 0.8f;
+                
+                // Add some rotation based on steering input if drift control is enabled
+                if (enableDriftControl && Mathf.Abs(moveInput.x) > 0.2f)
+                {
+                    // This lets the player control the car's rotation while drifting
+                    rb.AddTorque(transform.up * moveInput.x * oversteerFactor * 
+                                  (speedKmh * 0.01f), ForceMode.Acceleration);
+                }
+            }
+            else
+            {
+                // Normal cornering - increase grip during cornering
+                gripForce *= 1f + (corneringGrip * Mathf.Abs(moveInput.x));
+            }
+            
+            // Apply counterforce to sideways movement based on grip
+            Vector3 driftForce = -transform.right * (sidewaysSpeed * driftFactor * gripForce);
             rb.AddForce(driftForce, ForceMode.Acceleration);
             
-            float turnDirection = moveInput.x > 0 ? 1f : -1f;
-            rb.AddTorque(transform.up * turnDirection * sidewaysSpeed * 0.1f * driftFactor);
+            // Apply recovery torque to help straighten out after drifts
+            if (Mathf.Abs(carAngle) > 5f && Mathf.Abs(moveInput.x) < 0.3f)
+            {
+                float recoveryTorque = -Mathf.Sign(carAngle) * driftRecoveryFactor * Mathf.Min(30f, Mathf.Abs(carAngle));
+                rb.AddTorque(transform.up * recoveryTorque, ForceMode.Acceleration);
+            }
         }
     }
 }
