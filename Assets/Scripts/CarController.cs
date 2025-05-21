@@ -98,6 +98,17 @@ public class CarController : MonoBehaviour
     public float dopplerLevel = 1f;
     public AudioRolloffMode rolloffMode = AudioRolloffMode.Linear;
 
+    [Header("Driver Assists")]
+    [Range(0f, 1f)]
+    public float tractionControlLevel = 0.8f; // Default high for keyboard users
+    [Range(0f, 1f)]
+    public float stabilityControlLevel = 0.7f; // Electronic stability program
+    [Range(0f, 1f)]
+    public float antiLockBrakeLevel = 0.8f;    // ABS
+    public bool tractionControlEnabled = true;
+    public bool stabilityControlEnabled = true;
+    public bool absEnabled = true;
+
     private void Awake()
     {
         rb = GetComponent<Rigidbody>();
@@ -656,6 +667,7 @@ public class CarController : MonoBehaviour
     {
         float wheelSlip = 0f;
         int poweredWheels = 0;
+        float maxSlip = 0f;
         
         foreach (var wheel in wheels)
         {
@@ -664,16 +676,45 @@ public class CarController : MonoBehaviour
                 WheelHit hit;
                 if (wheel.collider.GetGroundHit(out hit))
                 {
-                    wheelSlip += hit.forwardSlip;
+                    // Track the worst slip across all wheels
+                    float absSlip = Mathf.Abs(hit.forwardSlip);
+                    wheelSlip += absSlip;
+                    maxSlip = Mathf.Max(maxSlip, absSlip);
                     poweredWheels++;
+                    
+                    // Apply ABS to prevent wheel lock during braking
+                    if (absEnabled && moveInput.y < 0 && hit.forwardSlip < -0.2f)
+                    {
+                        // Reduce brake torque on wheels that are locking up
+                        float absStrength = antiLockBrakeLevel * Mathf.Clamp01(-hit.forwardSlip - 0.2f) * 2f;
+                        wheel.collider.brakeTorque *= (1f - absStrength);
+                    }
                 }
             }
         }
         
         if (poweredWheels > 0)
         {
-            wheelSlip /= poweredWheels;
-            tractionControl = Mathf.Lerp(tractionControl, 1f - Mathf.Clamp01(Mathf.Abs(wheelSlip)), Time.fixedDeltaTime * 5f);
+            wheelSlip /= poweredWheels;  // Average slip
+            
+            if (tractionControlEnabled)
+            {
+                // Apply stronger TC for keyboard users (more aggressive filtering)
+                float tcBaseEffect = 1f - Mathf.Clamp01(Mathf.Abs(wheelSlip));
+                float tcAdjustedEffect = Mathf.Lerp(tcBaseEffect, 1f, tractionControlLevel * 0.8f);
+                tractionControl = Mathf.Lerp(tractionControl, tcAdjustedEffect, Time.fixedDeltaTime * 10f);
+                
+                // Additional TC reduction when specific wheels have extreme slip
+                if (maxSlip > 0.5f)
+                {
+                    tractionControl *= Mathf.Lerp(1f, 0.7f, (maxSlip - 0.5f) * tractionControlLevel);
+                }
+            }
+            else
+            {
+                // Standard traction calculations when TC is disabled
+                tractionControl = Mathf.Lerp(tractionControl, 1f - Mathf.Clamp01(Mathf.Abs(wheelSlip) * 0.5f), Time.fixedDeltaTime * 5f);
+            }
         }
         else
         {
@@ -747,6 +788,31 @@ public class CarController : MonoBehaviour
             
             float gripForce = baseGripFactor;
             
+            // Apply stability control if enabled (simulates ESP/DSC)
+            if (stabilityControlEnabled && Mathf.Abs(carAngle) > 5f)
+            {
+                // Increase grip factor based on stability control setting
+                float stabilityFactor = Mathf.Lerp(1.0f, 2.0f, stabilityControlLevel);
+                gripForce *= stabilityFactor;
+                
+                // Apply selective braking to help correct the slide
+                if (Mathf.Abs(carAngle) > 10f && speedKmh > 20f)
+                {
+                    // Determine which wheels need braking to correct the slide
+                    bool slideLeft = carAngle < 0;
+                    
+                    foreach (var wheel in wheels)
+                    {
+                        if ((slideLeft && wheel == wheels[1]) || (!slideLeft && wheel == wheels[0]))
+                        {
+                            // Apply some brake to the outside front wheel to help rotate car
+                            float correctionBrake = brakeForce * 0.2f * stabilityControlLevel;
+                            wheel.collider.brakeTorque += correctionBrake;
+                        }
+                    }
+                }
+            }
+            
             // Reduce grip while drifting, but not as drastically
             if (isDrifting)
             {
@@ -785,6 +851,13 @@ public class CarController : MonoBehaviour
                 float inputReductionFactor = 1f - (Mathf.Abs(moveInput.x) * 0.3f);
                 float recoveryTorque = -Mathf.Sign(carAngle) * driftRecoveryFactor * 1.2f * 
                                       inputReductionFactor * Mathf.Min(25f, Mathf.Abs(carAngle));
+                
+                // Apply stronger recovery with stability control
+                if (stabilityControlEnabled)
+                {
+                    recoveryTorque *= (1f + stabilityControlLevel);
+                }
+                
                 rb.AddTorque(transform.up * recoveryTorque, ForceMode.Acceleration);
             }
         }
