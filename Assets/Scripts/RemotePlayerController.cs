@@ -173,7 +173,7 @@ public class RemotePlayerController : MonoBehaviour
             rb.rotation = Quaternion.Slerp(rb.rotation, smoothedRotation, rotationInterpolationSpeed * Time.fixedDeltaTime);
             
             // Velocity interpolation
-            rb.velocity = Vector3.Lerp(rb.velocity, smoothedVelocity, velocityInterpolationSpeed * Time.fixedDeltaTime);
+            rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, smoothedVelocity, velocityInterpolationSpeed * Time.fixedDeltaTime);
             
             // Angular velocity interpolation 
             rb.angularVelocity = Vector3.Lerp(rb.angularVelocity, smoothedAngularVelocity, velocityInterpolationSpeed * Time.fixedDeltaTime);
