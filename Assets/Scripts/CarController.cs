@@ -578,12 +578,15 @@ public class CarController : MonoBehaviour
     
     private void HandleSteering()
     {
+        // Reduced maximum steering angle to prevent wheel clipping (changed from maxSteer to maxSteer * 0.7f)
+        float maxSteerAngle = maxSteer * 0.7f;
+        
         // More gradual speed factor to prevent extreme steering at high speeds but still allow good turning
         float speedFactor = 1f - (Mathf.Clamp01(speedKmh / (maxSpeed * 0.8f)) * speedSteeringFactor * 0.8f);
         
         // Apply grip factor based on acceleration state - 911s have sharper turn-in but can understeer with throttle
         float accelerationFactor = moveInput.y > 0.5f ? 0.9f : (moveInput.y < -0.1f ? 1.1f : 1.0f);
-        float gripAdjustedSteer = maxSteer * speedFactor * accelerationFactor;
+        float gripAdjustedSteer = maxSteerAngle * speedFactor * accelerationFactor;
         
         // Calculate target steering angle with more stability
         float targetSteer = moveInput.x * gripAdjustedSteer;
@@ -603,14 +606,17 @@ public class CarController : MonoBehaviour
         // Apply Ackermann steering with improved stability and accuracy
         if (Mathf.Abs(moveInput.x) > 0.01f) {
             // Calculate inner and outer wheel angles with reduced sensitivity
-            float steeringAngle = currentSteerAngle * 0.9f; // Slightly reduce actual steering for stability
+            float steeringAngle = currentSteerAngle * 0.8f; // Further reduce actual steering angle to prevent clipping
             float innerWheelAngle, outerWheelAngle;
+            
+            // Limit maximum inner wheel angle to prevent clipping
+            float maxInnerAngle = 28f;
             
             if (moveInput.x > 0) { // Turning right
                 // Right wheel is the inner wheel
-                innerWheelAngle = steeringAngle;
+                innerWheelAngle = Mathf.Min(steeringAngle, maxInnerAngle);
                 // Calculate the left wheel angle (outer) using Ackermann with enhanced stability
-                outerWheelAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / (trackwidth + Mathf.Tan(Mathf.Deg2Rad * innerWheelAngle) * wheelbase));
+                outerWheelAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / (trackwidth * 1.2f + Mathf.Tan(Mathf.Deg2Rad * innerWheelAngle) * wheelbase));
                 
                 // Left wheel (index 0) gets outer angle, right wheel (index 1) gets inner angle
                 wheels[0].collider.steerAngle = outerWheelAngle;
@@ -618,9 +624,9 @@ public class CarController : MonoBehaviour
             } 
             else { // Turning left
                 // Left wheel is the inner wheel
-                innerWheelAngle = steeringAngle;
+                innerWheelAngle = Mathf.Min(Mathf.Abs(steeringAngle), maxInnerAngle) * Mathf.Sign(steeringAngle);
                 // Calculate the right wheel angle (outer) using Ackermann
-                outerWheelAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / (trackwidth + Mathf.Tan(Mathf.Deg2Rad * Mathf.Abs(innerWheelAngle)) * wheelbase));
+                outerWheelAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / (trackwidth * 1.2f + Mathf.Tan(Mathf.Deg2Rad * Mathf.Abs(innerWheelAngle)) * wheelbase));
                 
                 // Left wheel (index 0) gets inner angle, right wheel (index 1) gets outer angle
                 wheels[0].collider.steerAngle = innerWheelAngle;

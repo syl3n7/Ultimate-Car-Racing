@@ -1704,6 +1704,8 @@ MonoBehaviour:
   minPitch: 0.7
   maxPitch: 1.5
   pitchMultiplier: 1
+  drivetrainType: 2
+  frontPowerDistribution: 0.35
   maxSpeed: 200
   steeringResponseSpeed: 2
   speedSteeringFactor: 0.5
