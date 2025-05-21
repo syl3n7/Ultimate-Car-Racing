@@ -72,6 +72,11 @@ public class UIManager : MonoBehaviour
     private float lastLatencyUpdateTime = 0f;
     private const float LATENCY_UPDATE_INTERVAL = 1f; // Update latency every second
 
+    [Header("Race UI")]
+    public GameObject raceUIPanel;        // Panel containing car stats and network info
+    public GameObject networkStatsPanel;  // Panel specifically for network stats
+    private bool isRaceUIVisible = false;
+
     private CarController playerCarController;
     private bool carUIInitialized = false;
     
@@ -114,6 +119,9 @@ public class UIManager : MonoBehaviour
         {
             Instance = this;
             DontDestroyOnLoad(gameObject);
+            
+            // Register for scene load events to handle UI visibility
+            SceneManager.sceneLoaded += OnSceneLoaded;
         }
         else
         {
@@ -281,6 +289,9 @@ public class UIManager : MonoBehaviour
             networkManager.OnServerMessage -= OnServerMessage;
             networkManager.OnRoomPlayersReceived -= OnRoomPlayersReceived;
         }
+        
+        // Unregister scene loading event
+        SceneManager.sceneLoaded -= OnSceneLoaded;
     }
     
     #region UI Navigation
@@ -433,6 +444,8 @@ public class UIManager : MonoBehaviour
         {
             authPanel.SetActive(false);
         }
+        
+        // Don't hide race UI panels here - they're controlled by scene changes
     }
 
     public void ShowAuthPanel(string message = "Please login to continue")
@@ -1528,6 +1541,31 @@ public async void CreateRoom()
                 gearDisplay = "R";
             }
             gearText.text = gearDisplay;
+        }
+    }
+
+    // Method to handle scene changes
+    private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        bool isRaceScene = IsRaceScene();
+        
+        // Show/hide race UI based on scene
+        if (raceUIPanel != null)
+        {
+            raceUIPanel.SetActive(isRaceScene);
+            isRaceUIVisible = isRaceScene;
+        }
+        
+        // Show/hide network stats panel based on scene
+        if (networkStatsPanel != null)
+        {
+            networkStatsPanel.SetActive(isRaceScene);
+        }
+        
+        // Reset car UI connection when entering race scene
+        if (isRaceScene)
+        {
+            carUIInitialized = false;
         }
     }
 }
