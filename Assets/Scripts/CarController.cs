@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using System.Collections.Generic;
 
 [RequireComponent(typeof(AudioSource))]
 public class CarController : MonoBehaviour 
@@ -132,6 +133,9 @@ public class CarController : MonoBehaviour
         // Ensure all wheels have consistent friction settings
         EnsureEvenWheelFriction();
         
+        // Setup wheel colliders to ignore collision with car body
+        SetupWheelCollisionIgnore();
+        
         // Audio setup
         engineAudioSource = GetComponent<AudioSource>();
         if (engineAudioSource == null)
@@ -208,7 +212,83 @@ public class CarController : MonoBehaviour
         }
     }
     
-    
+    // Make wheel colliders ignore collisions with the car body
+    private void SetupWheelCollisionIgnore()
+    {
+        // Get all colliders attached to this car
+        Collider[] carColliders = GetComponentsInChildren<Collider>();
+        
+        // Get wheel colliders
+        List<WheelCollider> wheelColliders = new List<WheelCollider>();
+        foreach (var wheel in wheels)
+        {
+            if (wheel.collider != null)
+            {
+                wheelColliders.Add(wheel.collider);
+            }
+        }
+        
+        // For each wheel collider, ignore collision with all other car colliders
+        foreach (WheelCollider wheelCollider in wheelColliders)
+        {
+            // Get the wheel's collider component (which is a different component than WheelCollider)
+            Collider wheelPhysicsCollider = wheelCollider.GetComponent<Collider>();
+            
+            // If wheelCollider has a valid physics collider 
+            if (wheelPhysicsCollider != null)
+            {
+                foreach (Collider carCollider in carColliders)
+                {
+                    // Skip the wheel's own collider
+                    if (carCollider == wheelPhysicsCollider)
+                        continue;
+                    
+                    // Skip triggers
+                    if (carCollider.isTrigger)
+                        continue;
+                    
+                    // Ignore collision between this wheel and the car collider
+                    Physics.IgnoreCollision(wheelPhysicsCollider, carCollider, true);
+                    Debug.Log($"Ignored collision between {wheelPhysicsCollider.name} and {carCollider.name}");
+                }
+            }
+        }
+        
+        // Also setup layer-based collision ignoring
+        // Get the layer of the car (assuming it's consistent)
+        int carLayer = gameObject.layer;
+        
+        // Create a wheel layer if it doesn't exist
+        int wheelLayer = LayerMask.NameToLayer("Wheels");
+        if (wheelLayer < 0)
+        {
+            Debug.LogWarning("Wheel layer not found. Make sure to create a 'Wheels' layer in the Unity Editor.");
+            // Fall back to using car layer, but this won't help with ignoring collisions
+            wheelLayer = carLayer;
+        }
+        else
+        {
+            // Set all wheel colliders to the wheel layer
+            foreach (WheelCollider wheelCollider in wheelColliders)
+            {
+                if (wheelCollider.gameObject != null)
+                {
+                    wheelCollider.gameObject.layer = wheelLayer;
+                    
+                    // Also set all children of the wheel to the wheel layer
+                    foreach (Transform child in wheelCollider.transform)
+                    {
+                        child.gameObject.layer = wheelLayer;
+                    }
+                }
+            }
+            
+            // Disable collisions between wheel layer and car layer in the Physics settings
+            // Note: This requires the proper Physics layer collision matrix setup in the project settings
+            // This is just a reminder for the developer to set up the matrix
+            Debug.Log("Remember to set up the Physics layer collision matrix in Project Settings to ignore collisions between Wheels layer and Car/Player layers");
+        }
+    }
     
     private void CalculateGearSpeeds()
     {
@@ -657,63 +737,59 @@ public class CarController : MonoBehaviour
     
     private void HandleSteering()
     {
-        // Further reduce maximum steering angle to prevent wheel clipping and friction issues
-        float maxSteerAngle = maxSteer * 0.5f; // Reduced more aggressively to prevent clipping
+        // Direct calculation like in your original code, with some improvements
+        float steer = moveInput.x * maxSteer;
         
-        // Add a small deadzone for input to prevent tiny inadvertent steering
-        float steeringInput = Mathf.Abs(moveInput.x) < 0.05f ? 0f : moveInput.x;
-        
-        // Apply progressive steering - more gentle at center, increases as you turn more
-        float progressiveFactor = Mathf.Pow(Mathf.Abs(steeringInput), 1.5f); // Progressive curve
-        steeringInput = Mathf.Sign(steeringInput) * progressiveFactor;
-        
-        // More gradual speed factor to prevent extreme steering at high speeds
-        float speedFactor = 1f - (Mathf.Clamp01(speedKmh / (maxSpeed * 0.7f)) * speedSteeringFactor);
-        
-        // Apply grip factor based on acceleration state
-        float accelerationFactor = moveInput.y > 0.5f ? 0.9f : (moveInput.y < -0.1f ? 1.1f : 1.0f);
-        float gripAdjustedSteer = maxSteerAngle * speedFactor * accelerationFactor;
-        
-        // Calculate target steering angle
-        float targetSteer = steeringInput * gripAdjustedSteer;
-        
-        // Smoother steering response that varies with speed
-        float steeringResponse = Mathf.Lerp(0.2f, 0.1f, speedKmh / 100f); // Lower values = smoother response
-        currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteer, steeringResponse * 5f);
-        
-        // Apply identical steering angle to both wheels when nearly straight
-        if (Mathf.Abs(currentSteerAngle) < 0.5f) {
-            // Near-zero steering - both wheels perfectly straight and synchronized
-            wheels[0].collider.steerAngle = 0f;
-            wheels[1].collider.steerAngle = 0f;
-            return;
+        // Less reduction when accelerating to maintain stronger turning radius
+        if (moveInput.y > 0) {
+            steer *= 0.9f; // Only slight reduction (was reducing too much before)
         }
         
-        // Maximum angle allowed (prevent geometry issues)
-        float maxInnerAngle = 22f; // Further reduced to avoid clipping
+        // Keep track of current angle for UI/display purposes
+        currentSteerAngle = steer;
         
-        // Calculate wheel angles with proper Ackermann geometry
-        bool turningRight = currentSteerAngle > 0;
-        int innerWheelIndex = turningRight ? 1 : 0; // Right wheel is index 1, Left wheel is index 0
-        int outerWheelIndex = turningRight ? 0 : 1;
+        // Use the simpler and more direct approach from your original code
+        // but with improved Ackermann geometry calculation
+        if (moveInput.x > 0) { // Turning right
+            // Left wheel (index 0) gets the outer angle
+            wheels[0].collider.steerAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / 
+                (trackwidth + Mathf.Tan(Mathf.Deg2Rad * steer) * wheelbase));
+                
+            // Right wheel (index 1) gets the inner angle (full steer)
+            wheels[1].collider.steerAngle = steer;
+        } 
+        else if (moveInput.x < 0) { // Turning left
+            // Left wheel (index 0) gets the inner angle (full steer)
+            wheels[0].collider.steerAngle = steer;
+            
+            // Right wheel (index 1) gets the outer angle - we need to negate the result 
+            // to make the right wheel turn left properly (opposite of the left wheel)
+            float outerAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / 
+                (trackwidth + Mathf.Tan(Mathf.Deg2Rad * Mathf.Abs(steer)) * wheelbase));
+                
+            wheels[1].collider.steerAngle = -outerAngle; // Negative sign for left turn on right wheel
+        } 
+        else {
+            // No steering - both wheels straight
+            wheels[0].collider.steerAngle = 0;
+            wheels[1].collider.steerAngle = 0;
+        }
         
-        // Calculate inner wheel angle (limited to prevent clipping)
-        float innerAngle = Mathf.Min(Mathf.Abs(currentSteerAngle), maxInnerAngle);
-        innerAngle *= turningRight ? 1 : -1; // Apply correct direction
+        // Check for and correct extreme angles that could cause clipping
+        float maxAllowedAngle = 28f; // Maximum safe angle
         
-        // Calculate outer wheel using true Ackermann formula
-        float outerAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / 
-            (wheelbase / Mathf.Tan(Mathf.Deg2Rad * Mathf.Abs(innerAngle)) + trackwidth));
-        outerAngle *= turningRight ? 1 : -1; // Apply correct direction
+        if (Mathf.Abs(wheels[0].collider.steerAngle) > maxAllowedAngle) {
+            wheels[0].collider.steerAngle = maxAllowedAngle * Mathf.Sign(wheels[0].collider.steerAngle);
+        }
         
-        // Apply steering angles simultaneously to ensure they're perfectly in sync
-        wheels[innerWheelIndex].collider.steerAngle = innerAngle;
-        wheels[outerWheelIndex].collider.steerAngle = outerAngle;
+        if (Mathf.Abs(wheels[1].collider.steerAngle) > maxAllowedAngle) {
+            wheels[1].collider.steerAngle = maxAllowedAngle * Mathf.Sign(wheels[1].collider.steerAngle);
+        }
         
         // Log steering angles for debugging (only on significant changes)
-        if (Time.frameCount % 60 == 0 && Mathf.Abs(currentSteerAngle) > 5f) {
-            Debug.Log($"Steering angles - Inner wheel: {innerAngle:F1}°, Outer wheel: {outerAngle:F1}°, " +
-                     $"(L: {wheels[0].collider.steerAngle:F1}°, R: {wheels[1].collider.steerAngle:F1}°)");
+        if (Time.frameCount % 60 == 0 && Mathf.Abs(moveInput.x) > 0.3f) {
+            Debug.Log($"Steering inputs - Raw: {moveInput.x:F2}, Angle: {steer:F1}°, " +
+                     $"Wheels (L: {wheels[0].collider.steerAngle:F1}°, R: {wheels[1].collider.steerAngle:F1}°)");
         }
     }
     
@@ -798,16 +874,39 @@ public class CarController : MonoBehaviour
     
     private void UpdateWheelVisuals()
     {
-        foreach (var wheel in wheels) 
+        for (int i = 0; i < wheels.Length; i++) 
         {
             Quaternion rot;
             Vector3 pos;
-            wheel.collider.GetWorldPose(out pos, out rot);
+            wheels[i].collider.GetWorldPose(out pos, out rot);
 
-            foreach (Transform child in wheel.collider.transform)
+            // Find all child transforms of the wheel collider
+            Transform[] childTransforms = new Transform[wheels[i].collider.transform.childCount];
+            int index = 0;
+            foreach (Transform child in wheels[i].collider.transform)
             {
-                child.position = pos;
-                child.rotation = rot;
+                // Update position and rotation of visual wheel meshes
+                wheels[i].collider.transform.GetChild(index).position = pos;
+                wheels[i].collider.transform.GetChild(index).rotation = rot;
+                index++;
+            }
+            
+            // Apply a small offset to prevent wheel clipping with body if needed
+            if (i < 2 && wheels[i].wheelType == WheelType.front)
+            {
+                float steerAngle = wheels[i].collider.steerAngle;
+                if (Mathf.Abs(steerAngle) > 15f)
+                {
+                    // Calculate how much the wheel should move out based on steering angle
+                    float outwardOffset = Mathf.Abs(steerAngle) * 0.001f;
+                    Vector3 direction = i == 0 ? -transform.right : transform.right; // Left or right wheel
+                    
+                    // Apply a subtle outward push when wheel is turned significantly
+                    foreach (Transform child in wheels[i].collider.transform)
+                    {
+                        child.position += direction * outwardOffset;
+                    }
+                }
             }
         }
     }
