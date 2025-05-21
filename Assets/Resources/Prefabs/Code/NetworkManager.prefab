@@ -50,4 +50,4 @@ MonoBehaviour:
   heartbeatInterval: 5
   rememberCredentials: 1
   defaultPlayerName: Player
-  showDebugMessages: 1
+  showDebugMessages: 0
