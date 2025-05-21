@@ -40,12 +40,12 @@ public class CarController : MonoBehaviour
 
     // Driving physics
     [Header("Driving Physics")]
-    [SerializeField] private float maxSpeed = 200f;
-    [SerializeField] private float steeringResponseSpeed = 2f;
-    [SerializeField] private float speedSteeringFactor = 0.5f;
-    [SerializeField] private float driftFactor = 0.7f;
-    [SerializeField] private float downforce = 10f;
-    [SerializeField] private float brakeForce = 5000f;
+    [SerializeField] private float maxSpeed = 220f; // Porsche 911 is fast
+    [SerializeField] private float steeringResponseSpeed = 2.2f; // Responsive steering
+    [SerializeField] private float speedSteeringFactor = 0.45f; // Slightly more responsive at speed
+    [SerializeField] private float driftFactor = 0.8f; // More drift-prone like a 911
+    [SerializeField] private float downforce = 12f; // Better downforce with 911 aerodynamics
+    [SerializeField] private float brakeForce = 5500f; // Strong brakes
     [SerializeField] private float reverseSpeedLimit = 30f;
     [SerializeField] private float brakeToReverseThreshold = 1f; // Speed below which brake becomes reverse
 
@@ -249,22 +249,36 @@ public class CarController : MonoBehaviour
             float throttle = moveInput.y;
             float torque = CalculateTorque() * throttle;
             
-            // Apply torque to powered wheels
+            // Apply torque primarily to rear wheels (Porsche 911 RWD behavior)
+            int poweredWheels = 0;
             foreach (var wheel in wheels) 
             {
-                if (wheel.wheelType == WheelType.rear || wheel.wheelType == WheelType.front)
+                if (wheel.wheelType == WheelType.rear) // Apply power to rear wheels (Porsche 911)
                 {
                     wheel.collider.brakeTorque = 0;
-                    wheel.collider.motorTorque = torque / (wheels.Length / 2f);
+                    wheel.collider.motorTorque = torque * 1.0f; // 100% of power to rear wheels
+                    poweredWheels++;
+                }
+                else if (wheel.wheelType == WheelType.front) 
+                {
+                    wheel.collider.brakeTorque = 0;
+                    wheel.collider.motorTorque = 0f; // No power to front wheels for true RWD
                 }
             }
             
-            // Apply small amount of brake to non-powered wheels for stability
-            foreach (var wheel in wheels)
+            // Apply more torque during cornering to counteract understeer (helps FWD cars turn)
+            if (Mathf.Abs(moveInput.x) > 0.2f && poweredWheels >= 2)
             {
-                if (!(wheel.wheelType == WheelType.rear || wheel.wheelType == WheelType.front))
+                foreach (var wheel in wheels)
                 {
-                    wheel.collider.brakeTorque = engineBrakeTorque * 0.1f;
+                    if (wheel.wheelType == WheelType.front)
+                    {
+                        // Add extra torque to the outer wheel to help cornering (FWD pulls through corners)
+                        if ((moveInput.x > 0 && wheel == wheels[0]) || (moveInput.x < 0 && wheel == wheels[1]))
+                        {
+                            wheel.collider.motorTorque *= 1.1f; // More power to outer wheel
+                        }
+                    }
                 }
             }
         }
@@ -273,9 +287,23 @@ public class CarController : MonoBehaviour
         {
             if (moveInput.y < 0 || speedKmh > gearSpeeds[currentGear - 1] * 1.1f)
             {
-                // Full brake
-                float brake = (moveInput.y < 0) ? -moveInput.y * brakeForce : brakeForce * 0.3f;
-                ApplyBrakes(brake);
+                // Full brake - apply more braking to front wheels (realistic weight transfer)
+                float brakePower = (moveInput.y < 0) ? -moveInput.y * brakeForce : brakeForce * 0.3f;
+                
+                // Apply braking with proper front/rear bias
+                foreach (var wheel in wheels)
+                {
+                    if (wheel.wheelType == WheelType.front)
+                    {
+                        wheel.collider.brakeTorque = brakePower * (1.0f - maxBrakeBias);
+                    }
+                    else if (wheel.wheelType == WheelType.rear)
+                    {
+                        wheel.collider.brakeTorque = brakePower * maxBrakeBias;
+                    }
+                    
+                    wheel.collider.motorTorque = 0;
+                }
                 
                 // If nearly stopped while braking, prepare for potential reverse
                 if (speedKmh < brakeToReverseThreshold && moveInput.y < 0)
@@ -285,8 +313,21 @@ public class CarController : MonoBehaviour
             }
             else
             {
-                // Engine braking when off throttle
-                ApplyBrakes(engineBrakeTorque * (engineRPM / maxRPM) * 0.7f);
+                // Engine braking when off throttle - apply more to front wheels (FWD engine braking)
+                float engineBrake = engineBrakeTorque * (engineRPM / maxRPM) * 0.7f;
+                foreach (var wheel in wheels)
+                {
+                    if (wheel.wheelType == WheelType.front)
+                    {
+                        wheel.collider.brakeTorque = engineBrake * 0.7f;
+                    }
+                    else if (wheel.wheelType == WheelType.rear)
+                    {
+                        wheel.collider.brakeTorque = engineBrake * 0.3f;
+                    }
+                    
+                    wheel.collider.motorTorque = 0;
+                }
             }
         }
     }
@@ -457,22 +498,38 @@ public class CarController : MonoBehaviour
     
     private void HandleSteering()
     {
-        float speedFactor = 1f - (Mathf.Clamp01(speedKmh / maxSpeed) * speedSteeringFactor);
-        float targetSteer = moveInput.x * maxSteer * speedFactor;
+        // More gradual speed factor to prevent extreme steering at high speeds but still allow good turning
+        float speedFactor = 1f - (Mathf.Clamp01(speedKmh / (maxSpeed * 0.8f)) * speedSteeringFactor * 0.8f);
         
-        // Make steering more responsive at lower speeds
-        float speedBasedResponse = Mathf.Lerp(steeringResponseSpeed * 1.5f, steeringResponseSpeed, speedKmh / 50f);
-        currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteer, speedBasedResponse * Time.fixedDeltaTime);
+        // Apply grip factor based on acceleration state - 911s have sharper turn-in but can understeer with throttle
+        float accelerationFactor = moveInput.y > 0.5f ? 0.9f : (moveInput.y < -0.1f ? 1.1f : 1.0f);
+        float gripAdjustedSteer = maxSteer * speedFactor * accelerationFactor;
         
-        // Improved Ackermann steering that works for both wheels equally
+        // Calculate target steering angle with more stability
+        float targetSteer = moveInput.x * gripAdjustedSteer;
+        
+        // Slower steering response at high speeds, more responsive at low speeds
+        float speedBasedResponse = Mathf.Lerp(steeringResponseSpeed * 1.2f, steeringResponseSpeed * 0.8f, speedKmh / 60f);
+        
+        // Fast steering response for keyboard controls (GTA V-like)
+        if (Mathf.Abs(moveInput.x) > 0.1f) {
+            // When actively steering, respond very quickly
+            currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteer, 0.5f); // Very fast response with keyboard
+        } else {
+            // When not steering, also return to center more gradually but still quicker than before
+            currentSteerAngle = Mathf.MoveTowards(currentSteerAngle, 0, speedBasedResponse * Time.fixedDeltaTime * 120f);
+        }
+        
+        // Apply Ackermann steering with improved stability and accuracy
         if (Mathf.Abs(moveInput.x) > 0.01f) {
-            // Calculate inner and outer wheel angles
+            // Calculate inner and outer wheel angles with reduced sensitivity
+            float steeringAngle = currentSteerAngle * 0.9f; // Slightly reduce actual steering for stability
             float innerWheelAngle, outerWheelAngle;
             
             if (moveInput.x > 0) { // Turning right
                 // Right wheel is the inner wheel
-                innerWheelAngle = currentSteerAngle;
-                // Calculate the left wheel angle (outer) using Ackermann
+                innerWheelAngle = steeringAngle;
+                // Calculate the left wheel angle (outer) using Ackermann with enhanced stability
                 outerWheelAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / (trackwidth + Mathf.Tan(Mathf.Deg2Rad * innerWheelAngle) * wheelbase));
                 
                 // Left wheel (index 0) gets outer angle, right wheel (index 1) gets inner angle
@@ -481,7 +538,7 @@ public class CarController : MonoBehaviour
             } 
             else { // Turning left
                 // Left wheel is the inner wheel
-                innerWheelAngle = currentSteerAngle;
+                innerWheelAngle = steeringAngle;
                 // Calculate the right wheel angle (outer) using Ackermann
                 outerWheelAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / (trackwidth + Mathf.Tan(Mathf.Deg2Rad * Mathf.Abs(innerWheelAngle)) * wheelbase));
                 
@@ -491,14 +548,22 @@ public class CarController : MonoBehaviour
             }
         } 
         else {
-            // No steering input, set both wheels straight
-            wheels[0].collider.steerAngle = wheels[1].collider.steerAngle = 0;
+            // No steering input, quickly return wheels to center (GTA V-like keyboard responsiveness)
+            float returnSpeed = Mathf.Lerp(30f, 20f, speedKmh / 100f); // Much faster return for keyboard controls
+            wheels[0].collider.steerAngle = Mathf.MoveTowards(wheels[0].collider.steerAngle, 0, returnSpeed * Time.fixedDeltaTime * 60f);
+            wheels[1].collider.steerAngle = Mathf.MoveTowards(wheels[1].collider.steerAngle, 0, returnSpeed * Time.fixedDeltaTime * 60f);
         }
     }
     
     private void ApplyDownforce()
     {
-        rb.AddForce(-transform.up * downforce * rb.linearVelocity.sqrMagnitude * 0.001f);
+        // Apply progressive downforce that increases with speed (like a 911's aerodynamics)
+        float speedFactor = Mathf.Clamp01(speedKmh / maxSpeed);
+        float progressiveDownforce = downforce * (1 + speedFactor);
+        
+        // Apply more downforce to rear of car (where 911's engine is)
+        rb.AddForceAtPosition(-transform.up * progressiveDownforce * rb.linearVelocity.sqrMagnitude * 0.001f, 
+            transform.position - transform.forward * 0.5f, ForceMode.Acceleration);
     }
     
     private void ApplyTractionControl()
@@ -567,46 +632,70 @@ public class CarController : MonoBehaviour
             carAngle *= dir; // Negative when sliding left, positive when sliding right
         }
         
-        // Determine if we're drifting based on angle threshold
-        isDrifting = Mathf.Abs(carAngle) > driftAngleThreshold && speedKmh > 25f;
+        // Use a higher threshold for drift detection and add speed dependency
+        float adjustedThreshold = driftAngleThreshold * (1f + (speedKmh / 100f));
+        
+        // Determine if we're drifting based on adjusted angle threshold
+        isDrifting = Mathf.Abs(carAngle) > adjustedThreshold && speedKmh > 30f;
         driftAngle = carAngle;
         
-        // Apply drift forces
-        if (speedKmh > 15f)
+        // Apply drift forces with more stability
+        if (speedKmh > 10f)
         {
-            // Base grip force that counters sideways movement
-            float baseGripFactor = tireGripFactor * (1f - (Mathf.Abs(moveInput.x) * 0.3f));
+            // Calculate front/rear weight distribution based on acceleration state
+            float frontWeight = 0.5f + (moveInput.y < 0 ? 0.1f : (moveInput.y > 0 ? -0.05f : 0));
+            
+            // Porsche 911 has more weight on the rear, especially when accelerating
+            float rearWheelGrip = 1.1f + (Mathf.Abs(moveInput.y) * 0.3f); // More grip on rear wheels with acceleration
+            
+            // Base grip factor that counters sideways movement - tuned for 911 handling
+            float baseGripFactor = tireGripFactor * 1.0f;
+            
+            // Apply rear-wheel drive characteristics - decrease grip under hard acceleration (prone to wheelspin)
+            if (moveInput.y > 0.7f) {
+                baseGripFactor *= 0.9f; // Slight loss of grip when flooring it (Porsche 911 wheelspin)
+            }
+            
             float gripForce = baseGripFactor;
             
-            // Reduce grip while drifting
+            // Reduce grip while drifting, but not as drastically
             if (isDrifting)
             {
-                // Less grip during drift, especially when steering into the drift
+                // Less grip during drift, but maintain more front grip for FWD
                 bool isSameDirection = Mathf.Sign(moveInput.x) == Mathf.Sign(sidewaysSpeed);
-                gripForce *= isSameDirection ? 0.6f : 0.8f;
+                gripForce *= isSameDirection ? 0.8f : 0.9f;
                 
                 // Add some rotation based on steering input if drift control is enabled
                 if (enableDriftControl && Mathf.Abs(moveInput.x) > 0.2f)
                 {
-                    // This lets the player control the car's rotation while drifting
-                    rb.AddTorque(transform.up * moveInput.x * oversteerFactor * 
+                    // This lets the player control the car's rotation while drifting (reduced effect)
+                    rb.AddTorque(transform.up * moveInput.x * oversteerFactor * 0.7f * 
                                   (speedKmh * 0.01f), ForceMode.Acceleration);
                 }
             }
             else
             {
-                // Normal cornering - increase grip during cornering
-                gripForce *= 1f + (corneringGrip * Mathf.Abs(moveInput.x));
+                // Normal cornering - increase grip during cornering with Porsche 911 characteristics
+                // More oversteer in turns, especially during acceleration
+                float turnGrip = corneringGrip;
+                if (moveInput.y > 0.5f) {
+                    // Reduce grip when accelerating in corners (911 oversteer)
+                    turnGrip *= 0.85f;
+                }
+                gripForce *= 1f + (turnGrip * Mathf.Abs(moveInput.x) * 0.08f);
             }
             
-            // Apply counterforce to sideways movement based on grip
-            Vector3 driftForce = -transform.right * (sidewaysSpeed * driftFactor * gripForce);
+            // Apply stronger counterforce to sideways movement for stability
+            Vector3 driftForce = -transform.right * (sidewaysSpeed * driftFactor * gripForce * 1.2f);
             rb.AddForce(driftForce, ForceMode.Acceleration);
             
-            // Apply recovery torque to help straighten out after drifts
-            if (Mathf.Abs(carAngle) > 5f && Mathf.Abs(moveInput.x) < 0.3f)
+            // More aggressive recovery torque to prevent excessive spinning
+            if (Mathf.Abs(carAngle) > 3f)
             {
-                float recoveryTorque = -Mathf.Sign(carAngle) * driftRecoveryFactor * Mathf.Min(30f, Mathf.Abs(carAngle));
+                // Stronger recovery with less input, less recovery during intentional turning
+                float inputReductionFactor = 1f - (Mathf.Abs(moveInput.x) * 0.3f);
+                float recoveryTorque = -Mathf.Sign(carAngle) * driftRecoveryFactor * 1.2f * 
+                                      inputReductionFactor * Mathf.Min(25f, Mathf.Abs(carAngle));
                 rb.AddTorque(transform.up * recoveryTorque, ForceMode.Acceleration);
             }
         }
