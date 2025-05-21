@@ -12,16 +12,16 @@ public class CarController : MonoBehaviour
     
     // Engine properties
     [Header("Engine Settings")]
-    [SerializeField] private float maxTorque = 3000f;
-    [SerializeField] private float maxRPM = 7000f;
-    [SerializeField] private float idleRPM = 800f;
-    [SerializeField] private float[] gearRatios = { 3.5f, 2.5f, 1.8f, 1.3f, 1.0f }; // Gear ratios
+    [SerializeField] private float maxTorque = 4500f; // Higher torque for 911 Carrera S (450-500 Nm)
+    [SerializeField] private float maxRPM = 8800f; // Authentic 911 Carrera S redline
+    [SerializeField] private float idleRPM = 900f; // Slightly higher idle for racing engine
+    [SerializeField] private float[] gearRatios = { 3.82f, 2.26f, 1.64f, 1.29f, 1.06f, 0.84f, 0.62f }; // 911's 7-speed PDK gearbox ratios
     [SerializeField] private float[] gearSpeeds; // Max speed for each gear
-    [SerializeField] private float finalDriveRatio = 3.5f;
-    [SerializeField] private float reverseGearRatio = 3.0f;
-    [SerializeField] private float engineBrakeTorque = 500f;
-    [SerializeField] private float shiftUpRPM = 6500f;
-    [SerializeField] private float shiftDownRPM = 3000f;
+    [SerializeField] private float finalDriveRatio = 3.44f; // 911 Carrera S final drive
+    [SerializeField] private float reverseGearRatio = 3.67f; // Authentic reverse ratio
+    [SerializeField] private float engineBrakeTorque = 850f; // Increased engine braking
+    [SerializeField] private float shiftUpRPM = 8300f; // Shift near redline for performance
+    [SerializeField] private float shiftDownRPM = 3500f; // Keep revs up for better response
     [Header("Engine Sounds")]
     public AudioClip engineIdleClip;
     public AudioClip engineRunningClip;
@@ -30,7 +30,18 @@ public class CarController : MonoBehaviour
     public float pitchMultiplier = 1f;
     private AudioSource engineAudioSource;
 
-    
+    public enum DrivetrainType
+    {
+        RWD, // Rear-wheel drive (authentic 911)
+        FWD, // Front-wheel drive
+        AWD  // All-wheel drive
+    }
+
+    [Header("Drivetrain Configuration")]
+    public DrivetrainType drivetrainType = DrivetrainType.RWD;
+    [Range(0f, 1f)]
+    public float frontPowerDistribution = 0.35f; // For AWD: percentage of power to front wheels (35/65 for 911 AWD models)
+
     // Speed properties
     public float currentSpeed { get; private set; }
     public float speedKmh { get; private set; }
@@ -253,38 +264,13 @@ public class CarController : MonoBehaviour
             float throttle = moveInput.y;
             float torque = CalculateTorque() * throttle;
             
-            // Apply torque to rear wheels (Porsche 911 RWD behavior)
-            // This properly uses wheel rotation physics - the wheel colliders apply friction against the ground
-            int poweredWheels = 0;
-            foreach (var wheel in wheels) 
-            {
-                if (wheel.wheelType == WheelType.rear) // Apply power to rear wheels (Porsche 911)
-                {
-                    wheel.collider.brakeTorque = 0;
-                    wheel.collider.motorTorque = torque * 1.0f; // 100% of power to rear wheels
-                    poweredWheels++;
-                }
-                else if (wheel.wheelType == WheelType.front) 
-                {
-                    wheel.collider.brakeTorque = 0;
-                    wheel.collider.motorTorque = 0f; // No power to front wheels for true RWD
-                }
-            }
+            // Apply torque based on drivetrain type
+            ApplyDrivetrainTorque(torque);
             
             // Apply more torque during cornering to counteract understeer (helps FWD cars turn)
-            if (Mathf.Abs(moveInput.x) > 0.2f && poweredWheels >= 2)
+            if (Mathf.Abs(moveInput.x) > 0.2f)
             {
-                foreach (var wheel in wheels)
-                {
-                    if (wheel.wheelType == WheelType.front)
-                    {
-                        // Add extra torque to the outer wheel to help cornering (FWD pulls through corners)
-                        if ((moveInput.x > 0 && wheel == wheels[0]) || (moveInput.x < 0 && wheel == wheels[1]))
-                        {
-                            wheel.collider.motorTorque *= 1.1f; // More power to outer wheel
-                        }
-                    }
-                }
+                ApplyCorneringTorque();
             }
         }
         // Braking/coasting
@@ -318,22 +304,111 @@ public class CarController : MonoBehaviour
             }
             else
             {
-                // Engine braking when off throttle - apply more to front wheels (FWD engine braking)
-                float engineBrake = engineBrakeTorque * (engineRPM / maxRPM) * 0.7f;
-                foreach (var wheel in wheels)
+                // Engine braking when off throttle
+                ApplyEngineBraking();
+            }
+        }
+    }
+    
+    private void ApplyDrivetrainTorque(float totalTorque)
+    {
+        int frontPoweredWheels = 0;
+        int rearPoweredWheels = 0;
+        
+        // Count powered wheels by type
+        foreach (var wheel in wheels)
+        {
+            if (wheel.wheelType == WheelType.front && (drivetrainType == DrivetrainType.FWD || drivetrainType == DrivetrainType.AWD))
+                frontPoweredWheels++;
+            else if (wheel.wheelType == WheelType.rear && (drivetrainType == DrivetrainType.RWD || drivetrainType == DrivetrainType.AWD))
+                rearPoweredWheels++;
+        }
+        
+        // Calculate torque per wheel based on drivetrain type
+        float frontWheelTorque = 0f;
+        float rearWheelTorque = 0f;
+        
+        switch (drivetrainType)
+        {
+            case DrivetrainType.FWD:
+                frontWheelTorque = frontPoweredWheels > 0 ? totalTorque / frontPoweredWheels : 0;
+                break;
+            case DrivetrainType.RWD:
+                rearWheelTorque = rearPoweredWheels > 0 ? totalTorque / rearPoweredWheels : 0;
+                break;
+            case DrivetrainType.AWD:
+                // Distribute torque according to front/rear power distribution
+                float frontTorque = totalTorque * frontPowerDistribution;
+                float rearTorque = totalTorque * (1 - frontPowerDistribution);
+                
+                frontWheelTorque = frontPoweredWheels > 0 ? frontTorque / frontPoweredWheels : 0;
+                rearWheelTorque = rearPoweredWheels > 0 ? rearTorque / rearPoweredWheels : 0;
+                break;
+        }
+        
+        // Apply calculated torque to wheels
+        foreach (var wheel in wheels)
+        {
+            wheel.collider.brakeTorque = 0;
+            
+            if (wheel.wheelType == WheelType.front)
+                wheel.collider.motorTorque = frontWheelTorque;
+            else if (wheel.wheelType == WheelType.rear)
+                wheel.collider.motorTorque = rearWheelTorque;
+        }
+    }
+    
+    private void ApplyCorneringTorque()
+    {
+        // Apply more torque to outer wheels during cornering to help turn
+        // Works best for FWD cars but also helps with AWD
+        if (drivetrainType == DrivetrainType.FWD || drivetrainType == DrivetrainType.AWD)
+        {
+            foreach (var wheel in wheels)
+            {
+                if (wheel.wheelType == WheelType.front)
                 {
-                    if (wheel.wheelType == WheelType.front)
+                    // Add extra torque to the outer wheel to help cornering
+                    // Assuming wheels[0] is left front and wheels[1] is right front
+                    if ((moveInput.x > 0 && wheel == wheels[0]) || (moveInput.x < 0 && wheel == wheels[1]))
                     {
-                        wheel.collider.brakeTorque = engineBrake * 0.7f;
+                        wheel.collider.motorTorque *= 1.2f; // More power to outer wheel
                     }
-                    else if (wheel.wheelType == WheelType.rear)
-                    {
-                        wheel.collider.brakeTorque = engineBrake * 0.3f;
-                    }
-                    
-                    wheel.collider.motorTorque = 0;
                 }
             }
+        }
+    }
+    
+    private void ApplyEngineBraking()
+    {
+        float engineBrake = engineBrakeTorque * (engineRPM / maxRPM) * 0.7f;
+        
+        // Apply engine braking according to drivetrain type
+        foreach (var wheel in wheels)
+        {
+            switch (drivetrainType)
+            {
+                case DrivetrainType.FWD:
+                    if (wheel.wheelType == WheelType.front)
+                        wheel.collider.brakeTorque = engineBrake;
+                    else
+                        wheel.collider.brakeTorque = engineBrake * 0.3f;
+                    break;
+                    
+                case DrivetrainType.RWD:
+                    if (wheel.wheelType == WheelType.rear)
+                        wheel.collider.brakeTorque = engineBrake;
+                    else
+                        wheel.collider.brakeTorque = engineBrake * 0.3f;
+                    break;
+                    
+                case DrivetrainType.AWD:
+                    // More balanced engine braking for AWD
+                    wheel.collider.brakeTorque = engineBrake * 0.5f;
+                    break;
+            }
+            
+            wheel.collider.motorTorque = 0;
         }
     }
     
