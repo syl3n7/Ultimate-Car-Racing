@@ -129,6 +129,9 @@ public class CarController : MonoBehaviour
         engineRPM = idleRPM;
         currentGear = 0; // Start in neutral
         
+        // Ensure all wheels have consistent friction settings
+        EnsureEvenWheelFriction();
+        
         // Audio setup
         engineAudioSource = GetComponent<AudioSource>();
         if (engineAudioSource == null)
@@ -148,6 +151,44 @@ public class CarController : MonoBehaviour
     
         // Make sure we have an AudioListener in the scene
         EnsureAudioListenerExists();
+    }
+
+    // Ensure all wheels have consistent friction settings to prevent pulling to one side
+    private void EnsureEvenWheelFriction()
+    {
+        if (wheels.Length < 2) return;
+        
+        // Get reference values from the first wheel
+        WheelFrictionCurve referenceSideway = wheels[0].collider.sidewaysFriction;
+        WheelFrictionCurve referenceForward = wheels[0].collider.forwardFriction;
+        
+        // Apply consistent friction settings to all wheels
+        foreach (var wheel in wheels)
+        {
+            // Clone the friction curves to ensure they are independent
+            WheelFrictionCurve sidewaysFriction = new WheelFrictionCurve();
+            sidewaysFriction.stiffness = referenceSideway.stiffness;
+            sidewaysFriction.extremumSlip = referenceSideway.extremumSlip;
+            sidewaysFriction.extremumValue = referenceSideway.extremumValue;
+            sidewaysFriction.asymptoteSlip = referenceSideway.asymptoteSlip;
+            sidewaysFriction.asymptoteValue = referenceSideway.asymptoteValue;
+            
+            WheelFrictionCurve forwardFriction = new WheelFrictionCurve();
+            forwardFriction.stiffness = referenceForward.stiffness;
+            forwardFriction.extremumSlip = referenceForward.extremumSlip;
+            forwardFriction.extremumValue = referenceForward.extremumValue;
+            forwardFriction.asymptoteSlip = referenceForward.asymptoteSlip;
+            forwardFriction.asymptoteValue = referenceForward.asymptoteValue;
+            
+            // Apply the consistent settings
+            wheel.collider.sidewaysFriction = sidewaysFriction;
+            wheel.collider.forwardFriction = forwardFriction;
+            
+            // Ensure wheel damping is also consistent
+            wheel.collider.wheelDampingRate = 1.0f;
+        }
+        
+        Debug.Log("Applied consistent friction settings to all wheels");
     }
 
     private void EnsureAudioListenerExists()
@@ -246,6 +287,9 @@ public class CarController : MonoBehaviour
         HandleGearChanges();
         CalculateRPM();
         
+        // Check for wheel bias and correct it
+        CorrectWheelBias();
+        
         // Apply driving forces based on current gear state
         if (currentGear > 0) // Forward gears
         {
@@ -265,6 +309,27 @@ public class CarController : MonoBehaviour
         
         UpdateWheelVisuals();
         DriftPhysics();
+    }
+    
+    // Method to detect and correct any wheel bias that might cause pulling to one side
+    private void CorrectWheelBias()
+    {
+        // If no steering input and we're moving forward at reasonable speed
+        if (Mathf.Abs(moveInput.x) < 0.05f && speedKmh > 5f)
+        {
+            // Ensure wheels are perfectly straight
+            wheels[0].collider.steerAngle = 0f;
+            wheels[1].collider.steerAngle = 0f;
+            
+            // If we detect the car is veering right or left without input, add a corrective force
+            float veering = Vector3.Dot(rb.linearVelocity, transform.right);
+            
+            if (Mathf.Abs(veering) > 0.5f)
+            {
+                // Apply a counter force to straighten the car
+                rb.AddForce(-transform.right * veering * 0.5f, ForceMode.Acceleration);
+            }
+        }
     }
     
     private void HandleForwardDrive()
@@ -589,8 +654,11 @@ public class CarController : MonoBehaviour
     
     private void HandleSteering()
     {
-        // Reduced maximum steering angle to prevent wheel clipping (changed from maxSteer to maxSteer * 0.7f)
-        float maxSteerAngle = maxSteer * 0.7f;
+        // Reduced maximum steering angle to prevent wheel clipping and friction issues
+        float maxSteerAngle = maxSteer * 0.6f; // Further reduced from 0.7f to 0.6f
+        
+        // Add a small deadzone for input to prevent tiny inadvertent steering
+        float steeringInput = Mathf.Abs(moveInput.x) < 0.05f ? 0f : moveInput.x;
         
         // More gradual speed factor to prevent extreme steering at high speeds but still allow good turning
         float speedFactor = 1f - (Mathf.Clamp01(speedKmh / (maxSpeed * 0.8f)) * speedSteeringFactor * 0.8f);
@@ -600,55 +668,67 @@ public class CarController : MonoBehaviour
         float gripAdjustedSteer = maxSteerAngle * speedFactor * accelerationFactor;
         
         // Calculate target steering angle with more stability
-        float targetSteer = moveInput.x * gripAdjustedSteer;
+        float targetSteer = steeringInput * gripAdjustedSteer;
         
         // Slower steering response at high speeds, more responsive at low speeds
         float speedBasedResponse = Mathf.Lerp(steeringResponseSpeed * 1.2f, steeringResponseSpeed * 0.8f, speedKmh / 60f);
         
-        // Fast steering response for keyboard controls (GTA V-like)
-        if (Mathf.Abs(moveInput.x) > 0.1f) {
-            // When actively steering, respond very quickly
-            currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteer, 0.5f); // Very fast response with keyboard
+        // Apply steering angle with smoother response
+        if (Mathf.Abs(steeringInput) > 0.1f) {
+            // When actively steering, use smoother response
+            currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteer, 0.3f); // Reduced from 0.5f for smoother steering
         } else {
-            // When not steering, also return to center more gradually but still quicker than before
-            currentSteerAngle = Mathf.MoveTowards(currentSteerAngle, 0, speedBasedResponse * Time.fixedDeltaTime * 120f);
+            // Center steering when no input
+            currentSteerAngle = Mathf.MoveTowards(currentSteerAngle, 0, speedBasedResponse * Time.fixedDeltaTime * 80f);
         }
         
-        // Apply Ackermann steering with improved stability and accuracy
-        if (Mathf.Abs(moveInput.x) > 0.01f) {
-            // Calculate inner and outer wheel angles with reduced sensitivity
-            float steeringAngle = currentSteerAngle * 0.8f; // Further reduce actual steering angle to prevent clipping
-            float innerWheelAngle, outerWheelAngle;
+        // Apply synchronized steering to both wheels with proper adjustment for Ackermann
+        if (Mathf.Abs(currentSteerAngle) > 0.01f) {
+            // Use lower steering sensitivity to fix clipping issues
+            float steeringAngle = currentSteerAngle * 0.7f; // Further reduced from 0.8f to 0.7f
             
-            // Limit maximum inner wheel angle to prevent clipping
-            float maxInnerAngle = 28f;
+            // Ensure wheels are perfectly straight when neutral
+            if (Mathf.Abs(steeringAngle) < 0.1f) {
+                wheels[0].collider.steerAngle = 0f;
+                wheels[1].collider.steerAngle = 0f;
+                return;
+            }
             
-            if (moveInput.x > 0) { // Turning right
+            // Lower maximum angle to prevent wheels hitting car body
+            float maxInnerAngle = 25f; // Reduced from 28f
+            
+            // Calculate Ackermann steering - ensuring proper geometry
+            if (steeringAngle > 0) { // Turning right
                 // Right wheel is the inner wheel
-                innerWheelAngle = Mathf.Min(steeringAngle, maxInnerAngle);
-                // Calculate the left wheel angle (outer) using Ackermann with enhanced stability
-                outerWheelAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / (trackwidth * 1.2f + Mathf.Tan(Mathf.Deg2Rad * innerWheelAngle) * wheelbase));
+                float innerWheelAngle = Mathf.Min(steeringAngle, maxInnerAngle);
+                // Calculate the left wheel angle (outer)
+                float outerWheelAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / (trackwidth * 1.3f + Mathf.Tan(Mathf.Deg2Rad * innerWheelAngle) * wheelbase));
                 
-                // Left wheel (index 0) gets outer angle, right wheel (index 1) gets inner angle
+                // Apply angles with exact precision - NOTE order of wheels might need adjustment
                 wheels[0].collider.steerAngle = outerWheelAngle;
                 wheels[1].collider.steerAngle = innerWheelAngle;
             } 
             else { // Turning left
                 // Left wheel is the inner wheel
-                innerWheelAngle = Mathf.Min(Mathf.Abs(steeringAngle), maxInnerAngle) * Mathf.Sign(steeringAngle);
-                // Calculate the right wheel angle (outer) using Ackermann
-                outerWheelAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / (trackwidth * 1.2f + Mathf.Tan(Mathf.Deg2Rad * Mathf.Abs(innerWheelAngle)) * wheelbase));
+                float innerWheelAngle = Mathf.Min(Mathf.Abs(steeringAngle), maxInnerAngle) * -1f; // Always negative for left turn
+                // Calculate the right wheel angle (outer)
+                float outerWheelAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / (trackwidth * 1.3f + Mathf.Tan(Mathf.Deg2Rad * Mathf.Abs(innerWheelAngle)) * wheelbase));
                 
-                // Left wheel (index 0) gets inner angle, right wheel (index 1) gets outer angle
+                // Apply angles with proper signs
                 wheels[0].collider.steerAngle = innerWheelAngle;
-                wheels[1].collider.steerAngle = -outerWheelAngle; // Negative because we're turning left
+                wheels[1].collider.steerAngle = outerWheelAngle;
+            }
+            
+            // Debug check for steering angle synchronization
+            if (Mathf.Abs(wheels[0].collider.steerAngle) > maxInnerAngle || 
+                Mathf.Abs(wheels[1].collider.steerAngle) > maxInnerAngle) {
+                Debug.LogWarning($"Excessive steering angle detected: L={wheels[0].collider.steerAngle}, R={wheels[1].collider.steerAngle}");
             }
         } 
         else {
-            // No steering input, quickly return wheels to center (GTA V-like keyboard responsiveness)
-            float returnSpeed = Mathf.Lerp(30f, 20f, speedKmh / 100f); // Much faster return for keyboard controls
-            wheels[0].collider.steerAngle = Mathf.MoveTowards(wheels[0].collider.steerAngle, 0, returnSpeed * Time.fixedDeltaTime * 60f);
-            wheels[1].collider.steerAngle = Mathf.MoveTowards(wheels[1].collider.steerAngle, 0, returnSpeed * Time.fixedDeltaTime * 60f);
+            // Perfect neutral position when no steering
+            wheels[0].collider.steerAngle = 0f;
+            wheels[1].collider.steerAngle = 0f;
         }
     }
     
