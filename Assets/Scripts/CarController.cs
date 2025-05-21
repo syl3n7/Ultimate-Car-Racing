@@ -555,15 +555,15 @@ public class CarController : MonoBehaviour
     private void DriftPhysics()
     {
         // Calculate lateral slip (sideways movement)
-        float sidewaysSpeed = Vector3.Dot(rb.velocity, transform.right);
+        float sidewaysSpeed = Vector3.Dot(rb.linearVelocity, transform.right);
         lateralSlip = Mathf.Abs(sidewaysSpeed);
         
         // Calculate angle between velocity and forward direction
         float carAngle = 0;
-        if (rb.velocity.magnitude > 2f) // Only calculate when moving
+        if (rb.linearVelocity.magnitude > 2f) // Only calculate when moving
         {
-            carAngle = Vector3.Angle(transform.forward, rb.velocity);
-            float dir = Mathf.Sign(Vector3.Dot(transform.right, rb.velocity));
+            carAngle = Vector3.Angle(transform.forward, rb.linearVelocity);
+            float dir = Mathf.Sign(Vector3.Dot(transform.right, rb.linearVelocity));
             carAngle *= dir; // Negative when sliding left, positive when sliding right
         }
         
@@ -582,8 +582,8 @@ public class CarController : MonoBehaviour
             if (isDrifting)
             {
                 // Less grip during drift, especially when steering into the drift
-                float steeringIntoSlide = Mathf.Sign(moveInput.x) == Mathf.Sign(sidewaysSpeed);
-                gripForce *= steeringIntoSlide ? 0.6f : 0.8f;
+                bool isSameDirection = Mathf.Sign(moveInput.x) == Mathf.Sign(sidewaysSpeed);
+                gripForce *= isSameDirection ? 0.6f : 0.8f;
                 
                 // Add some rotation based on steering input if drift control is enabled
                 if (enableDriftControl && Mathf.Abs(moveInput.x) > 0.2f)
