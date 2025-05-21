@@ -37,6 +37,10 @@ public class CarController : MonoBehaviour
     public float engineRPM { get; private set; }
     public int currentGear { get; private set; } // 0 = neutral, -1 = reverse, 1+ = forward gears
     public bool isReversing { get; private set; }
+    
+    // Event for UI updates
+    public delegate void CarStatsUpdated(float speed, float rpm, int gear);
+    public event CarStatsUpdated OnCarStatsUpdated;
 
     // Driving physics
     [Header("Driving Physics")]
@@ -249,7 +253,8 @@ public class CarController : MonoBehaviour
             float throttle = moveInput.y;
             float torque = CalculateTorque() * throttle;
             
-            // Apply torque primarily to rear wheels (Porsche 911 RWD behavior)
+            // Apply torque to rear wheels (Porsche 911 RWD behavior)
+            // This properly uses wheel rotation physics - the wheel colliders apply friction against the ground
             int poweredWheels = 0;
             foreach (var wheel in wheels) 
             {
@@ -599,6 +604,9 @@ public class CarController : MonoBehaviour
     {
         currentSpeed = Vector3.Dot(rb.linearVelocity, transform.forward);
         speedKmh = Mathf.Abs(currentSpeed * 3.6f);
+        
+        // Trigger the UI update event
+        OnCarStatsUpdated?.Invoke(speedKmh, engineRPM, currentGear);
     }
     
     private void UpdateWheelVisuals()
