@@ -67,6 +67,11 @@ public class UIManager : MonoBehaviour
     public string speedFormat = "0";
     public string rpmFormat = "0";
     
+    [Header("Network Stats")]
+    public TextMeshProUGUI latencyText;
+    private float lastLatencyUpdateTime = 0f;
+    private const float LATENCY_UPDATE_INTERVAL = 1f; // Update latency every second
+
     private CarController playerCarController;
     private bool carUIInitialized = false;
     
@@ -824,7 +829,8 @@ public async void CreateRoom()
     
     private void UpdateRoomInfo()
     {
-        Debug.Log($"UpdateRoomInfo called - Room: {currentRoomName}, Players: {playersInRoom.Count}, isHost: {isHost}");
+        // Debug log commented for cleaner console
+        // Debug.Log($"UpdateRoomInfo called - Room: {currentRoomName}, Players: {playersInRoom.Count}, isHost: {isHost}");
     
         // Check references
         if (roomInfoText == null)
@@ -863,7 +869,7 @@ public async void CreateRoom()
     
         // Show/hide start game button based on host status
         startGameButton.gameObject.SetActive(isHost);
-        Debug.Log($"Start game button visibility set to {isHost} (isHost={isHost})");
+        // Debug.Log($"Start game button visibility set to {isHost} (isHost={isHost})");
         
         // Make sure button is properly interactive
         if (isHost)
@@ -883,10 +889,10 @@ public async void CreateRoom()
         }
     
         // Populate player list
-        Debug.Log($"Adding {playersInRoom.Count} players to player list UI");
+        // Debug.Log($"Adding {playersInRoom.Count} players to player list UI");
         foreach (string playerId in playersInRoom)
         {
-            Debug.Log($"Creating player item for: {playerId}");
+            // Debug.Log($"Creating player item for: {playerId}");
             GameObject playerItem = Instantiate(playerListItemPrefab, playerListContent);
             TextMeshProUGUI playerText = playerItem.GetComponentInChildren<TextMeshProUGUI>();
     
@@ -901,10 +907,10 @@ public async void CreateRoom()
                 playerDisplayName += " (You)";
     
             playerText.text = playerDisplayName;
-            Debug.Log($"Added player to UI: {playerDisplayName}");
+            // Debug.Log($"Added player to UI: {playerDisplayName}");
         }
     
-        Debug.Log("Room info updated successfully");
+        // Debug.Log("Room info updated successfully");
     }
     
     #endregion
@@ -1108,7 +1114,8 @@ public async void CreateRoom()
     
     private void OnRoomPlayersReceived(Dictionary<string, object> message)
     {
-        Debug.Log($"OnRoomPlayersReceived: {JsonConvert.SerializeObject(message)}");
+        // Debug log commented for cleaner console
+        // Debug.Log($"OnRoomPlayersReceived: {JsonConvert.SerializeObject(message)}");
         
         // Clear the current player list to get fresh data
         playersInRoom.Clear();
@@ -1150,7 +1157,7 @@ public async void CreateRoom()
                             if (!string.IsNullOrEmpty(playerId))
                             {
                                 playersInRoom.Add(playerId);
-                                Debug.Log($"Added player ID: {playerId}");
+                                // Debug.Log($"Added player ID: {playerId}");
                             }
                         }
                         else if (playerToken.Type == Newtonsoft.Json.Linq.JTokenType.Object)
@@ -1163,7 +1170,7 @@ public async void CreateRoom()
                                 if (!string.IsNullOrEmpty(playerId))
                                 {
                                     playersInRoom.Add(playerId);
-                                    Debug.Log($"Added player ID from object: {playerId}");
+                                    // Debug.Log($"Added player ID from object: {playerId}");
                                 }
                             }
                         }
@@ -1412,6 +1419,15 @@ public async void CreateRoom()
                 RefreshPlayerList();
                 lastPlayerListRefreshTime = Time.time;
             }
+        }
+        
+        // Update network latency display
+        if (latencyText != null && NetworkManager.Instance != null && Time.time - lastLatencyUpdateTime > LATENCY_UPDATE_INTERVAL)
+        {
+            float latency = NetworkManager.Instance.GetLatency();
+            latencyText.text = $"Ping: {(latency * 1000):0}ms";
+            latencyText.color = latency < 0.1f ? Color.green : (latency < 0.3f ? Color.yellow : Color.red);
+            lastLatencyUpdateTime = Time.time;
         }
         
         // Check if we need to find the player car for UI updates
