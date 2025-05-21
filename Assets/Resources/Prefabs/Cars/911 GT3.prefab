@@ -1568,7 +1568,7 @@ GameObject:
   - component: {fileID: 1825832816261373692}
   m_Layer: 0
   m_Name: 911 GT3
-  m_TagString: Untagged
+  m_TagString: Player
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -1712,6 +1712,18 @@ MonoBehaviour:
   brakeForce: 5000
   reverseSpeedLimit: 30
   brakeToReverseThreshold: 1
+  corneringGrip: 1
+  oversteerFactor: 0.3
+  driftRecoveryFactor: 0.7
+  driftAngleThreshold: 5
+  enableDriftControl: 1
+  maxBrakeBias: 0.7
+  tireGripFactor: 1
+  lateralStiffness: 1
+  maxSoundDistance: 30
+  minSoundDistance: 5
+  dopplerLevel: 1
+  rolloffMode: 1
 --- !u!82 &1825832816261373692
 AudioSource:
   m_ObjectHideFlags: 0

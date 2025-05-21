@@ -58,6 +58,18 @@ public class UIManager : MonoBehaviour
     public Button loginButton;
     public TextMeshProUGUI authStatusText;
     
+    [Header("Car UI")]
+    public TextMeshProUGUI speedText;
+    public TextMeshProUGUI rpmText;
+    public TextMeshProUGUI gearText;
+    public bool showKMH = true;
+    public bool showGear = true;
+    public string speedFormat = "0";
+    public string rpmFormat = "0";
+    
+    private CarController playerCarController;
+    private bool carUIInitialized = false;
+    
     // Player profile data
     private string playerName = "Player";
     private string playerId;
@@ -1401,6 +1413,13 @@ public async void CreateRoom()
                 lastPlayerListRefreshTime = Time.time;
             }
         }
+        
+        // Check if we need to find the player car for UI updates
+        if (IsRaceScene() && !carUIInitialized)
+        {
+            // Try to find player car every frame until we connect
+            FindPlayerCarController();
+        }
     }
 
     private void RefreshPlayerList()
@@ -1426,5 +1445,73 @@ public async void CreateRoom()
             }
         }
         return false;
+    }
+
+    // Find and connect to the player car controller when it spawns
+    private void FindPlayerCarController()
+    {
+        // Only search for car controller in race scenes
+        if (IsRaceScene())
+        {
+            GameObject playerCar = GameObject.FindGameObjectWithTag("Player");
+            if (playerCar != null)
+            {
+                playerCarController = playerCar.GetComponent<CarController>();
+                if (playerCarController != null)
+                {
+                    // Subscribe to the car stats update event
+                    playerCarController.OnCarStatsUpdated += UpdateCarUI;
+                    carUIInitialized = true;
+                    Debug.Log("Connected to player car for UI updates");
+                }
+            }
+        }
+    }
+    
+    // Check if we're in a race scene
+    private bool IsRaceScene()
+    {
+        string currentScene = SceneManager.GetActiveScene().name;
+        return currentScene.Contains("Track") || currentScene.Contains("Race");
+    }
+    
+    // Update car UI elements with latest car stats
+    private void UpdateCarUI(float speed, float rpm, int gear)
+    {
+        // Update speed display
+        if (speedText != null)
+        {
+            float speedValue = speed;
+            if (!showKMH)
+            {
+                speedValue = speedValue * 0.6213712f; // Convert to MPH
+            }
+            speedText.text = speedValue.ToString(speedFormat) + (showKMH ? " km/h" : " mph");
+        }
+
+        // Update RPM display
+        if (rpmText != null)
+        {
+            rpmText.text = rpm.ToString(rpmFormat) + " RPM";
+        }
+
+        // Update gear display if enabled
+        if (gearText != null && showGear)
+        {
+            string gearDisplay;
+            if (gear > 0)
+            {
+                gearDisplay = gear.ToString();
+            }
+            else if (gear == 0)
+            {
+                gearDisplay = "N";
+            }
+            else
+            {
+                gearDisplay = "R";
+            }
+            gearText.text = gearDisplay;
+        }
     }
 }
