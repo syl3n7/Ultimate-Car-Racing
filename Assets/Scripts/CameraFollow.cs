@@ -13,6 +13,7 @@ public class CameraFollow : MonoBehaviour
     public float mouseControlTimeout = 5f;
     public float maxVerticalAngle = 80f;
     public float minVerticalAngle = -20f;
+    public bool invertMouseY = false; // Option to invert Y axis
     
     [Header("Advanced Follow")]
     public float distanceDamping = 0.2f;
@@ -28,6 +29,10 @@ public class CameraFollow : MonoBehaviour
     
     [Header("Stabilization")]
     public float maxCameraTiltAngle = 5f;
+    
+    [Header("Mouse Cursor")]
+    public bool lockCursorInGame = true;
+    public KeyCode unlockCursorKey = KeyCode.Escape;
 
     private float lastMouseInputTime;
     private float currentRotationX;
@@ -37,6 +42,8 @@ public class CameraFollow : MonoBehaviour
     private Vector3 lastTargetPosition;
     private Quaternion lastTargetRotation;
     private bool useMouseControl;
+    private bool cursorLocked = false;
+    private CarController targetCarController;
     
     void Start()
     {
@@ -51,6 +58,12 @@ public class CameraFollow : MonoBehaviour
         
         // At start, make sure we're following the local player
         FindAndSetLocalPlayerTarget();
+        
+        // Lock cursor at start if option is enabled
+        if (lockCursorInGame)
+        {
+            LockCursor();
+        }
     }
     
     // Find and set the local player as the camera target
@@ -63,6 +76,9 @@ public class CameraFollow : MonoBehaviour
             target = localPlayerObj.transform;
             Debug.Log($"Camera set to follow local player: {localPlayerObj.name}");
             
+            // Cache reference to car controller
+            targetCarController = localPlayerObj.GetComponent<CarController>();
+            
             // Initialize last positions after finding target
             if (target != null)
             {
@@ -73,6 +89,31 @@ public class CameraFollow : MonoBehaviour
         else
         {
             Debug.LogWarning("Cannot find a GameObject tagged as 'Player'!");
+        }
+    }
+    
+    void Update()
+    {
+        // Handle cursor locking/unlocking
+        if (Input.GetKeyDown(unlockCursorKey))
+        {
+            if (cursorLocked)
+                UnlockCursor();
+            else
+                LockCursor();
+        }
+        
+        // Check for active input fields before processing mouse input
+        if (UnityEngine.EventSystems.EventSystem.current != null && 
+            UnityEngine.EventSystems.EventSystem.current.currentSelectedGameObject != null)
+        {
+            // Check if selected object has an input field component
+            if (UnityEngine.EventSystems.EventSystem.current.currentSelectedGameObject.GetComponent<UnityEngine.UI.InputField>() != null ||
+                UnityEngine.EventSystems.EventSystem.current.currentSelectedGameObject.GetComponent<TMPro.TMP_InputField>() != null)
+            {
+                // If an input field is active, don't process mouse input for camera
+                return;
+            }
         }
     }
     
@@ -114,8 +155,14 @@ public class CameraFollow : MonoBehaviour
     void MouseControlCamera()
     {
         float mouseX = Input.GetAxis("Mouse X") * mouseSensitivity;
-        float mouseY = -Input.GetAxis("Mouse Y") * mouseSensitivity;
+        float mouseY = Input.GetAxis("Mouse Y") * mouseSensitivity;
         
+        // Apply inversion if enabled
+        if (invertMouseY)
+            mouseY = -mouseY;
+        else
+            mouseY = -mouseY; // Default behavior is already inverted
+            
         currentRotationX += mouseX;
         currentRotationY += mouseY;
         currentRotationY = Mathf.Clamp(currentRotationY, minVerticalAngle, maxVerticalAngle);
@@ -184,7 +231,13 @@ public class CameraFollow : MonoBehaviour
     
     public void SetTarget(Transform newTarget)
     {
+        if (newTarget == null) return;
+        
         target = newTarget;
+        
+        // Cache reference to car controller
+        targetCarController = target.GetComponent<CarController>();
+        
         if (target != null)
         {
             // Initialize camera position based on target's current orientation
@@ -202,6 +255,38 @@ public class CameraFollow : MonoBehaviour
             lastTargetPosition = target.position;
             lastTargetRotation = target.rotation;
             velocity = Vector3.zero;
+            
+            // Reset camera control values
+            currentRotationX = transform.eulerAngles.y;
+            currentRotationY = transform.eulerAngles.x;
         }
+    }
+    
+    // Lock cursor to game window
+    private void LockCursor()
+    {
+        Cursor.lockState = CursorLockMode.Locked;
+        Cursor.visible = false;
+        cursorLocked = true;
+    }
+    
+    // Unlock cursor
+    private void UnlockCursor()
+    {
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
+        cursorLocked = false;
+    }
+    
+    // Call this when exiting game or returning to menu
+    public void RestoreCursor()
+    {
+        UnlockCursor();
+    }
+    
+    void OnDestroy()
+    {
+        // Ensure cursor is restored when component is destroyed
+        RestoreCursor();
     }
 }

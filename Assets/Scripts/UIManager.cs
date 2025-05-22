@@ -1422,6 +1422,16 @@ public async void CreateRoom()
     private float lastPlayerListRefreshTime = 0f;
     private const float PLAYER_LIST_REFRESH_INTERVAL = 3f; // Refresh player list every 3 seconds
 
+    [Header("FPS Counter")]
+    public TextMeshProUGUI fpsText;
+    public float fpsUpdateInterval = 0.5f; // How often to update the FPS display
+    public int fpsAverageSamples = 20; // How many frames to average
+    private float[] fpsSamples;
+    private int fpsSampleIndex = 0;
+    private float fpsAccumulator = 0f;
+    private float fpsNextUpdateTime = 0f;
+    private int fpsFrameCount = 0;
+
     private void Update()
     {
         // Periodically refresh the player list when in room lobby
@@ -1449,6 +1459,9 @@ public async void CreateRoom()
             // Try to find player car every frame until we connect
             FindPlayerCarController();
         }
+
+        // FPS Counter update
+        UpdateFPSCounter();
     }
 
     private void RefreshPlayerList()
@@ -1566,6 +1579,70 @@ public async void CreateRoom()
         if (isRaceScene)
         {
             carUIInitialized = false;
+        }
+    }
+
+    private void UpdateFPSCounter()
+    {
+        if (fpsText == null) return;
+
+        // Initialize FPS samples array if not already done
+        if (fpsSamples == null || fpsSamples.Length != fpsAverageSamples)
+        {
+            fpsSamples = new float[fpsAverageSamples];
+            for (int i = 0; i < fpsSamples.Length; i++)
+            {
+                fpsSamples[i] = 0;
+            }
+        }
+
+        // Accumulate frame time
+        fpsAccumulator += Time.unscaledDeltaTime;
+        fpsFrameCount++;
+
+        // Check if it's time to update the FPS display
+        if (Time.unscaledTime > fpsNextUpdateTime)
+        {
+            // Calculate average FPS
+            float averageFrameTime = fpsAccumulator / fpsFrameCount;
+            float fps = 1.0f / averageFrameTime;
+
+            // Store the FPS sample
+            fpsSamples[fpsSampleIndex] = fps;
+            fpsSampleIndex = (fpsSampleIndex + 1) % fpsAverageSamples;
+
+            // Calculate the average FPS over the samples
+            float averageFPS = 0f;
+            int validSamples = 0;
+            foreach (float sample in fpsSamples)
+            {
+                if (sample > 0)
+                {
+                    averageFPS += sample;
+                    validSamples++;
+                }
+            }
+            averageFPS = validSamples > 0 ? averageFPS / validSamples : 0;
+
+            // Update the FPS display with color coding
+            string fpsText = $"FPS: {averageFPS:F1}";
+            
+            // Color code based on performance
+            Color textColor = Color.green;
+            if (averageFPS < 30)
+                textColor = Color.red;
+            else if (averageFPS < 60)
+                textColor = Color.yellow;
+                
+            this.fpsText.text = fpsText;
+            this.fpsText.color = textColor;
+
+            // Reset the accumulator and frame count
+            fpsAccumulator = 0f;
+            fpsFrameCount = 0;
+
+            // Set the next update time
+            fpsNextUpdateTime = Time.unscaledTime + fpsUpdateInterval;
         }
     }
 }

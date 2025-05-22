@@ -1,253 +1,107 @@
-using System.Collections.Generic;
 using UnityEngine;
+using System.Collections;
 
-/// <summary>
-/// Handles the interpolation and movement of remote player vehicles.
-/// This script should be attached to the remoteCarPrefab in GameManager.
-/// </summary>
+[RequireComponent(typeof(Rigidbody))]
 public class RemotePlayerController : MonoBehaviour
 {
     [Header("Interpolation Settings")]
-    public int positionHistorySize = 5;           // Number of position updates to store for interpolation
-    public float interpolationSpeed = 10f;        // Speed of interpolation between positions
-    public float rotationInterpolationSpeed = 8f; // Speed of rotation interpolation 
-    public float velocityInterpolationSpeed = 5f; // Speed of velocity interpolation
+    public float positionLerpSpeed = 10f;
+    public float rotationLerpSpeed = 8f;
+    public float velocityLerpSpeed = 5f;
     
-    [Header("Debug Settings")]
-    public bool showDebugInfo = false;
+    [Header("Optimization")]
+    public float updateDistanceThreshold = 0.05f; // Minimum distance to apply update
+    public float maxInterpolationTime = 1f; // Maximum time to interpolate
     
-    // State information
     private string playerId;
+    private Rigidbody rb;
     private Vector3 targetPosition;
     private Quaternion targetRotation;
     private Vector3 targetVelocity;
     private Vector3 targetAngularVelocity;
-    
-    // Position history for smooth interpolation
-    private readonly Queue<PositionData> positionHistory = new Queue<PositionData>();
-    
-    // Last time we received a position update
     private float lastUpdateTime;
-    
-    // Reference to the rigidbody
-    private Rigidbody rb;
-    
-    // Wheel references for visual rotation
-    private Transform[] wheelTransforms;
-    private WheelCollider[] wheelColliders;
-    
-    // Struct to store position data with timestamps
-    private struct PositionData
-    {
-        public Vector3 position;
-        public Quaternion rotation;
-        public Vector3 velocity;
-        public Vector3 angularVelocity;
-        public float timestamp;
-    }
+    private bool hasInitialPosition = false;
     
     void Awake()
     {
-        // Get rigidbody component
         rb = GetComponent<Rigidbody>();
-        if (rb == null)
-        {
-            rb = gameObject.AddComponent<Rigidbody>();
-            Debug.Log($"Added Rigidbody to RemotePlayerController {gameObject.name}");
-        }
-        
-        // Configure rigidbody for network replication
-        rb.interpolation = RigidbodyInterpolation.Interpolate;
-        rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
-        rb.isKinematic = false;
-        
-        // Initialize position history with current position
-        PositionData initialData = new PositionData
-        {
-            position = transform.position,
-            rotation = transform.rotation,
-            velocity = Vector3.zero,
-            angularVelocity = Vector3.zero,
-            timestamp = Time.time
-        };
-        
-        for (int i = 0; i < positionHistorySize; i++)
-        {
-            positionHistory.Enqueue(initialData);
-        }
-        
-        // Find wheel colliders and transforms
-        FindWheels();
-    }
-    
-    private void FindWheels()
-    {
-        // Try to find wheel colliders in children
-        wheelColliders = GetComponentsInChildren<WheelCollider>();
-        
-        // Find matching wheel transforms (visual meshes)
-        if (wheelColliders != null && wheelColliders.Length > 0)
-        {
-            wheelTransforms = new Transform[wheelColliders.Length];
-            
-            // For each wheel collider, try to find the visual mesh
-            for (int i = 0; i < wheelColliders.Length; i++)
-            {
-                // Try to find a renderer in the children of the wheel collider
-                foreach (Transform child in wheelColliders[i].transform)
-                {
-                    if (child.GetComponent<MeshRenderer>() != null || child.GetComponent<SkinnedMeshRenderer>() != null)
-                    {
-                        wheelTransforms[i] = child;
-                        break;
-                    }
-                }
-                
-                if (wheelTransforms[i] == null)
-                {
-                    Debug.LogWarning($"Could not find visual mesh for wheel collider {wheelColliders[i].name}");
-                }
-            }
-        }
-    }
-    
-    void FixedUpdate()
-    {
-        if (positionHistory.Count == 0) return;
-        
-        // Calculate smoothed position from position history
-        CalculateInterpolatedPosition();
-        
-        // Update wheel visuals
-        UpdateWheelVisuals();
-    }
-    
-    private void CalculateInterpolatedPosition()
-    {
-        // Convert history to array for easier manipulation
-        PositionData[] historyArray = positionHistory.ToArray();
-        
-        // Use weighted average of recent positions, with more weight on newer positions
-        Vector3 smoothedPosition = Vector3.zero;
-        Quaternion smoothedRotation = Quaternion.identity;
-        Vector3 smoothedVelocity = Vector3.zero;
-        Vector3 smoothedAngularVelocity = Vector3.zero;
-        float totalWeight = 0f;
-        
-        for (int i = 0; i < historyArray.Length; i++)
-        {
-            // More recent positions have higher weight
-            float weight = (i + 1f) / historyArray.Length;
-            
-            smoothedPosition += historyArray[i].position * weight;
-            smoothedVelocity += historyArray[i].velocity * weight;
-            smoothedAngularVelocity += historyArray[i].angularVelocity * weight;
-            totalWeight += weight;
-        }
-        
-        // Normalize by total weight
-        if (totalWeight > 0)
-        {
-            smoothedPosition /= totalWeight;
-            smoothedVelocity /= totalWeight;
-            smoothedAngularVelocity /= totalWeight;
-        }
-        
-        // Rotation needs special handling - use the most recent rotation as a base
-        smoothedRotation = historyArray[historyArray.Length - 1].rotation;
-        
-        // Apply interpolated values
-        ApplyInterpolation(smoothedPosition, smoothedRotation, smoothedVelocity, smoothedAngularVelocity);
-    }
-    
-    private void ApplyInterpolation(Vector3 smoothedPosition, Quaternion smoothedRotation, 
-                                   Vector3 smoothedVelocity, Vector3 smoothedAngularVelocity)
-    {
-        // Smoothly move toward the target position and rotation
-        if (rb != null)
-        {
-            // Position interpolation
-            rb.position = Vector3.Lerp(rb.position, smoothedPosition, interpolationSpeed * Time.fixedDeltaTime);
-            
-            // Rotation interpolation
-            rb.rotation = Quaternion.Slerp(rb.rotation, smoothedRotation, rotationInterpolationSpeed * Time.fixedDeltaTime);
-            
-            // Velocity interpolation
-            rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, smoothedVelocity, velocityInterpolationSpeed * Time.fixedDeltaTime);
-            
-            // Angular velocity interpolation 
-            rb.angularVelocity = Vector3.Lerp(rb.angularVelocity, smoothedAngularVelocity, velocityInterpolationSpeed * Time.fixedDeltaTime);
-        }
-        else
-        {
-            // Fallback if no rigidbody
-            transform.position = Vector3.Lerp(transform.position, smoothedPosition, interpolationSpeed * Time.fixedDeltaTime);
-            transform.rotation = Quaternion.Slerp(transform.rotation, smoothedRotation, rotationInterpolationSpeed * Time.fixedDeltaTime);
-        }
-    }
-    
-    /// <summary>
-    /// Update the remote player's position based on network data
-    /// </summary>
-    public void UpdatePosition(Vector3 position, Quaternion rotation, Vector3 velocity, Vector3 angularVelocity)
-    {
-        // Add to position history
-        PositionData newData = new PositionData
-        {
-            position = position,
-            rotation = rotation,
-            velocity = velocity,
-            angularVelocity = angularVelocity,
-            timestamp = Time.time
-        };
-        
-        // Add to history and maintain size limit
-        positionHistory.Enqueue(newData);
-        if (positionHistory.Count > positionHistorySize)
-        {
-            positionHistory.Dequeue();
-        }
-        
-        // Store the receipt time
+        targetPosition = transform.position;
+        targetRotation = transform.rotation;
         lastUpdateTime = Time.time;
-    }
-    
-    private void UpdateWheelVisuals()
-    {
-        // Update wheel visuals if we have wheel colliders
-        if (wheelColliders == null || wheelTransforms == null) return;
-        
-        for (int i = 0; i < wheelColliders.Length; i++)
-        {
-            if (wheelTransforms[i] != null)
-            {
-                // Get wheel position and rotation from collider
-                wheelColliders[i].GetWorldPose(out Vector3 pos, out Quaternion rot);
-                
-                // Apply to visual wheel
-                wheelTransforms[i].position = pos;
-                wheelTransforms[i].rotation = rot;
-            }
-        }
     }
     
     public void SetPlayerId(string id)
     {
         playerId = id;
-        gameObject.name = $"RemotePlayer_{id}";
+        
+        // Also tag this object appropriately
+        gameObject.tag = "RemotePlayer";
+        
+        // Ensure this object won't interfere with camera following the local player
+        foreach (Transform child in transform)
+        {
+            if (child.GetComponent<Camera>() != null)
+            {
+                child.gameObject.SetActive(false);
+            }
+        }
     }
     
-    // For debugging
-    void OnGUI()
+    public void UpdatePosition(Vector3 position, Quaternion rotation, Vector3 velocity, Vector3 angularVelocity)
     {
-        if (showDebugInfo)
+        // For the first update, just teleport to avoid large jumps
+        if (!hasInitialPosition)
         {
-            GUILayout.BeginArea(new Rect(10, 40, 300, 300));
-            GUILayout.Label($"Player ID: {playerId}");
-            GUILayout.Label($"Position: {transform.position}");
-            GUILayout.Label($"Last update: {Time.time - lastUpdateTime:F2}s ago");
-            GUILayout.Label($"History size: {positionHistory.Count}");
-            GUILayout.EndArea();
+            transform.position = position;
+            transform.rotation = rotation;
+            rb.linearVelocity = velocity;
+            rb.angularVelocity = angularVelocity;
+            
+            targetPosition = position;
+            targetRotation = rotation;
+            targetVelocity = velocity;
+            targetAngularVelocity = angularVelocity;
+            
+            hasInitialPosition = true;
+            return;
         }
+        
+        // Only update if the position has changed significantly
+        float distanceChange = Vector3.Distance(position, targetPosition);
+        if (distanceChange > updateDistanceThreshold)
+        {
+            targetPosition = position;
+            targetRotation = rotation;
+            targetVelocity = velocity;
+            targetAngularVelocity = angularVelocity;
+            lastUpdateTime = Time.time;
+        }
+    }
+    
+    void FixedUpdate()
+    {
+        // Skip interpolation if we don't have an initial position yet
+        if (!hasInitialPosition)
+            return;
+        
+        // Calculate interpolation factor based on time since last update
+        float timeSinceUpdate = Time.time - lastUpdateTime;
+        
+        // If we haven't received an update in a while, slow down interpolation
+        float timeScaleFactor = Mathf.Clamp01(1f - (timeSinceUpdate / maxInterpolationTime));
+        
+        // Apply smooth interpolation to position and rotation
+        transform.position = Vector3.Lerp(transform.position, targetPosition, 
+            positionLerpSpeed * timeScaleFactor * Time.fixedDeltaTime);
+            
+        transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, 
+            rotationLerpSpeed * timeScaleFactor * Time.fixedDeltaTime);
+        
+        // Apply smooth interpolation to velocities
+        rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, targetVelocity, 
+            velocityLerpSpeed * timeScaleFactor * Time.fixedDeltaTime);
+            
+        rb.angularVelocity = Vector3.Lerp(rb.angularVelocity, targetAngularVelocity, 
+            velocityLerpSpeed * timeScaleFactor * Time.fixedDeltaTime);
     }
 }

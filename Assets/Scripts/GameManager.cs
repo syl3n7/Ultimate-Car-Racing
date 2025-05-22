@@ -131,8 +131,33 @@ public class GameManager : MonoBehaviour
     public void LoadMainMenu()
     {
         Debug.Log("Loading main menu scene");
+        
+        // Restore cursor when going back to menu
+        RestoreCursorState();
+        
         UnityEngine.SceneManagement.SceneManager.LoadScene("MainMenu");
     }
+    
+    // Restore cursor to visible and unlocked
+    private void RestoreCursorState()
+    {
+        // Find any CameraFollow components and restore their cursor state
+        CameraFollow[] cameraFollowers = FindObjectsOfType<CameraFollow>();
+        if (cameraFollowers.Length > 0)
+        {
+            foreach (CameraFollow cameraFollow in cameraFollowers)
+            {
+                cameraFollow.RestoreCursor();
+            }
+        }
+        else
+        {
+            // If no CameraFollow component found, restore cursor directly
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+        }
+    }
+
     private void OnSceneLoaded(UnityEngine.SceneManagement.Scene scene, UnityEngine.SceneManagement.LoadSceneMode mode)
     {
         string sceneName = scene.name;

@@ -11,18 +11,21 @@ public class CarController : MonoBehaviour
     public string playerId { get; set; }
     public bool isLocalPlayer { get; set; }
     
+    // Simple driving parameters
+    [Header("Driving Settings")]
+    public float powerMultiplier = 2500f;
+    public float brakeForce = 5000f;
+    public float steeringSpeed = 10f; // How quickly steering responds
+    public float returnToZeroSpeed = 15f; // How quickly steering returns to center
+    
     // Engine properties
     [Header("Engine Settings")]
-    [SerializeField] private float maxTorque = 4500f; // Higher torque for 911 Carrera S (450-500 Nm)
-    [SerializeField] private float maxRPM = 8800f; // Authentic 911 Carrera S redline
-    [SerializeField] private float idleRPM = 900f; // Slightly higher idle for racing engine
-    [SerializeField] private float[] gearRatios = { 3.82f, 2.26f, 1.64f, 1.29f, 1.06f, 0.84f, 0.62f }; // 911's 7-speed PDK gearbox ratios
-    [SerializeField] private float[] gearSpeeds; // Max speed for each gear
-    [SerializeField] private float finalDriveRatio = 3.44f; // 911 Carrera S final drive
-    [SerializeField] private float reverseGearRatio = 3.67f; // Authentic reverse ratio
-    [SerializeField] private float engineBrakeTorque = 850f; // Increased engine braking
-    [SerializeField] private float shiftUpRPM = 8300f; // Shift near redline for performance
-    [SerializeField] private float shiftDownRPM = 3500f; // Keep revs up for better response
+    [SerializeField] private float maxRPM = 8800f;
+    [SerializeField] private float idleRPM = 800f;
+    [SerializeField] private float[] gearRatios = { 3.82f, 2.26f, 1.64f, 1.29f, 1.06f, 0.84f, 0.62f };
+    [SerializeField] private float finalDriveRatio = 3.44f;
+    [SerializeField] private float reverseGearRatio = 3.67f;
+    
     [Header("Engine Sounds")]
     public AudioClip engineIdleClip;
     public AudioClip engineRunningClip;
@@ -30,86 +33,24 @@ public class CarController : MonoBehaviour
     public float maxPitch = 1.5f;
     public float pitchMultiplier = 1f;
     private AudioSource engineAudioSource;
-
-    public enum DrivetrainType
-    {
-        RWD, // Rear-wheel drive (authentic 911)
-        FWD, // Front-wheel drive
-        AWD  // All-wheel drive
-    }
-
-    [Header("Drivetrain Configuration")]
-    public DrivetrainType drivetrainType = DrivetrainType.RWD;
-    [Range(0f, 1f)]
-    public float frontPowerDistribution = 0.35f; // For AWD: percentage of power to front wheels (35/65 for 911 AWD models)
-
+    
     // Speed properties
     public float currentSpeed { get; private set; }
     public float speedKmh { get; private set; }
     public float engineRPM { get; private set; }
-    public int currentGear { get; private set; } // 0 = neutral, -1 = reverse, 1+ = forward gears
-    public bool isReversing { get; private set; }
+    public int currentGear { get; private set; } = 1; // Start in first gear
     
     // Event for UI updates
     public delegate void CarStatsUpdated(float speed, float rpm, int gear);
     public event CarStatsUpdated OnCarStatsUpdated;
-
-    // Driving physics
-    [Header("Driving Physics")]
-    [SerializeField] private float maxSpeed = 220f; // Porsche 911 is fast
-    [SerializeField] private float steeringResponseSpeed = 2.2f; // Responsive steering
-    [SerializeField] private float speedSteeringFactor = 0.45f; // Slightly more responsive at speed
-    [SerializeField] private float driftFactor = 0.8f; // More drift-prone like a 911
-    [SerializeField] private float downforce = 12f; // Better downforce with 911 aerodynamics
-    [SerializeField] private float brakeForce = 5500f; // Strong brakes
-    [SerializeField] private float reverseSpeedLimit = 30f;
-    [SerializeField] private float brakeToReverseThreshold = 1f; // Speed below which brake becomes reverse
-
-    [Header("Advanced Handling")]
-    public float corneringGrip = 1.0f;          // Higher values improve grip during cornering
-    public float oversteerFactor = 0.3f;        // Higher values make the car more prone to oversteer
-    public float driftRecoveryFactor = 0.7f;    // Higher values make it recover from drift faster
-    public float driftAngleThreshold = 5.0f;    // Angle in degrees before drift kicks in
-    public bool enableDriftControl = true;      // Allow player to control drifts with steering
-    public float maxBrakeBias = 0.7f;           // 0 = front brakes only, 1 = rear brakes only
-    public float tireGripFactor = 1.0f;         // Overall tire grip factor
-    public float lateralStiffness = 1.0f;       // Horizontal stiffness of suspension
     
-    // Drift state
-    private bool isDrifting = false;
-    private float driftAngle = 0f;
-    private float lateralSlip = 0f;
-    
-    // Previous frame data for calculations
-    private Vector3 prevVelocity;
-    private Vector3 prevPosition;
-
     // Internal variables
     private Rigidbody rb;
-    private float currentSteerAngle;
-    private float tractionControl = 1f;
+    private float currentSteerAngle = 0f;
     private float wheelCircumference;
-    private bool wasBraking;
     private float lastShiftTime;
     private float shiftDelay = 0.5f;
     
-    [Header("Audio Settings")]
-    public float maxSoundDistance = 30f;
-    public float minSoundDistance = 5f;
-    public float dopplerLevel = 1f;
-    public AudioRolloffMode rolloffMode = AudioRolloffMode.Linear;
-
-    [Header("Driver Assists")]
-    [Range(0f, 1f)]
-    public float tractionControlLevel = 0.8f; // Default high for keyboard users
-    [Range(0f, 1f)]
-    public float stabilityControlLevel = 0.7f; // Electronic stability program
-    [Range(0f, 1f)]
-    public float antiLockBrakeLevel = 0.8f;    // ABS
-    public bool tractionControlEnabled = true;
-    public bool stabilityControlEnabled = true;
-    public bool absEnabled = true;
-
     private void Awake()
     {
         rb = GetComponent<Rigidbody>();
@@ -124,17 +65,7 @@ public class CarController : MonoBehaviour
             wheelCircumference = 2 * Mathf.PI * wheels[0].collider.radius;
         }
         
-        rb.linearDamping = 0.1f;
-        rb.angularDamping = 2f;
-        CalculateGearSpeeds();
         engineRPM = idleRPM;
-        currentGear = 0; // Start in neutral
-        
-        // Ensure all wheels have consistent friction settings
-        EnsureEvenWheelFriction();
-        
-        // Setup wheel colliders to ignore collision with car body
-        SetupWheelCollisionIgnore();
         
         // Audio setup
         engineAudioSource = GetComponent<AudioSource>();
@@ -143,167 +74,33 @@ public class CarController : MonoBehaviour
             engineAudioSource = gameObject.AddComponent<AudioSource>();
         }
         
-        // Configure spatial audio settings
         engineAudioSource.spatialBlend = 1f; // Full 3D sound
-        engineAudioSource.rolloffMode = rolloffMode;
-        engineAudioSource.minDistance = minSoundDistance;
-        engineAudioSource.maxDistance = maxSoundDistance;
-        engineAudioSource.dopplerLevel = dopplerLevel;
+        engineAudioSource.rolloffMode = AudioRolloffMode.Linear;
+        engineAudioSource.minDistance = 5f;
+        engineAudioSource.maxDistance = 30f;
+        engineAudioSource.dopplerLevel = 0.5f;
         engineAudioSource.loop = true;
         engineAudioSource.clip = engineRunningClip;
         engineAudioSource.Play();
-    
-        // Make sure we have an AudioListener in the scene
-        EnsureAudioListenerExists();
-    }
-
-    // Ensure all wheels have consistent friction settings to prevent pulling to one side
-    private void EnsureEvenWheelFriction()
-    {
-        if (wheels.Length < 2) return;
-        
-        // Get reference values from the first wheel
-        WheelFrictionCurve referenceSideway = wheels[0].collider.sidewaysFriction;
-        WheelFrictionCurve referenceForward = wheels[0].collider.forwardFriction;
-        
-        // Apply consistent friction settings to all wheels
-        foreach (var wheel in wheels)
-        {
-            // Clone the friction curves to ensure they are independent
-            WheelFrictionCurve sidewaysFriction = new WheelFrictionCurve();
-            sidewaysFriction.stiffness = referenceSideway.stiffness;
-            sidewaysFriction.extremumSlip = referenceSideway.extremumSlip;
-            sidewaysFriction.extremumValue = referenceSideway.extremumValue;
-            sidewaysFriction.asymptoteSlip = referenceSideway.asymptoteSlip;
-            sidewaysFriction.asymptoteValue = referenceSideway.asymptoteValue;
-            
-            WheelFrictionCurve forwardFriction = new WheelFrictionCurve();
-            forwardFriction.stiffness = referenceForward.stiffness;
-            forwardFriction.extremumSlip = referenceForward.extremumSlip;
-            forwardFriction.extremumValue = referenceForward.extremumValue;
-            forwardFriction.asymptoteSlip = referenceForward.asymptoteSlip;
-            forwardFriction.asymptoteValue = referenceForward.asymptoteValue;
-            
-            // Apply the consistent settings
-            wheel.collider.sidewaysFriction = sidewaysFriction;
-            wheel.collider.forwardFriction = forwardFriction;
-            
-            // Ensure wheel damping is also consistent
-            wheel.collider.wheelDampingRate = 1.0f;
-        }
-        
-        Debug.Log("Applied consistent friction settings to all wheels");
-    }
-
-    private void EnsureAudioListenerExists()
-    {
-        // Find main camera or create one if none exists
-        if (Camera.main == null)
-        {
-            GameObject cameraObj = new GameObject("Main Camera");
-            cameraObj.AddComponent<Camera>();
-            cameraObj.tag = "MainCamera";
-        }
-    
-        // Add AudioListener if none exists
-        if (Camera.main.GetComponent<AudioListener>() == null)
-        {
-            Camera.main.gameObject.AddComponent<AudioListener>();
-        }
-    }
-    
-    // Make wheel colliders ignore collisions with the car body
-    private void SetupWheelCollisionIgnore()
-    {
-        // Get all colliders attached to this car
-        Collider[] carColliders = GetComponentsInChildren<Collider>();
-        
-        // Get wheel colliders
-        List<WheelCollider> wheelColliders = new List<WheelCollider>();
-        foreach (var wheel in wheels)
-        {
-            if (wheel.collider != null)
-            {
-                wheelColliders.Add(wheel.collider);
-            }
-        }
-        
-        // For each wheel collider, ignore collision with all other car colliders
-        foreach (WheelCollider wheelCollider in wheelColliders)
-        {
-            // Get the wheel's collider component (which is a different component than WheelCollider)
-            Collider wheelPhysicsCollider = wheelCollider.GetComponent<Collider>();
-            
-            // If wheelCollider has a valid physics collider 
-            if (wheelPhysicsCollider != null)
-            {
-                foreach (Collider carCollider in carColliders)
-                {
-                    // Skip the wheel's own collider
-                    if (carCollider == wheelPhysicsCollider)
-                        continue;
-                    
-                    // Skip triggers
-                    if (carCollider.isTrigger)
-                        continue;
-                    
-                    // Ignore collision between this wheel and the car collider
-                    Physics.IgnoreCollision(wheelPhysicsCollider, carCollider, true);
-                    Debug.Log($"Ignored collision between {wheelPhysicsCollider.name} and {carCollider.name}");
-                }
-            }
-        }
-        
-        // Also setup layer-based collision ignoring
-        // Get the layer of the car (assuming it's consistent)
-        int carLayer = gameObject.layer;
-        
-        // Create a wheel layer if it doesn't exist
-        int wheelLayer = LayerMask.NameToLayer("Wheels");
-        if (wheelLayer < 0)
-        {
-            Debug.LogWarning("Wheel layer not found. Make sure to create a 'Wheels' layer in the Unity Editor.");
-            // Fall back to using car layer, but this won't help with ignoring collisions
-            wheelLayer = carLayer;
-        }
-        else
-        {
-            // Set all wheel colliders to the wheel layer
-            foreach (WheelCollider wheelCollider in wheelColliders)
-            {
-                if (wheelCollider.gameObject != null)
-                {
-                    wheelCollider.gameObject.layer = wheelLayer;
-                    
-                    // Also set all children of the wheel to the wheel layer
-                    foreach (Transform child in wheelCollider.transform)
-                    {
-                        child.gameObject.layer = wheelLayer;
-                    }
-                }
-            }
-            
-            // Disable collisions between wheel layer and car layer in the Physics settings
-            // Note: This requires the proper Physics layer collision matrix setup in the project settings
-            // This is just a reminder for the developer to set up the matrix
-            Debug.Log("Remember to set up the Physics layer collision matrix in Project Settings to ignore collisions between Wheels layer and Car/Player layers");
-        }
-    }
-    
-    private void CalculateGearSpeeds()
-    {
-        gearSpeeds = new float[gearRatios.Length];
-        for (int i = 0; i < gearRatios.Length; i++)
-        {
-            // Theoretical max speed for each gear in km/h
-            gearSpeeds[i] = (maxRPM * wheelCircumference * 3.6f) / 
-                            (gearRatios[i] * finalDriveRatio * 60f);
-        }
     }
     
     public void OnMove(InputValue value)
     {
         moveInput = value.Get<Vector2>();
+    }
+
+    public void EnableControls(bool enabled)
+    {
+        if (!enabled)
+        {
+            moveInput = Vector2.zero;
+        }
+        
+        PlayerInput playerInput = GetComponent<PlayerInput>();
+        if (playerInput != null)
+        {
+            playerInput.enabled = enabled;
+        }
     }
 
     void Update()
@@ -323,325 +120,129 @@ public class CarController : MonoBehaviour
     
         // Adjust volume based on throttle input
         engineAudioSource.volume = 0.3f + (Mathf.Abs(moveInput.y) * 0.7f);
-    
-        // Update spatial position (automatically handles 3D audio)
-        engineAudioSource.transform.position = transform.position;
-    }
-
-    public void EnableControls(bool enabled)
-    {
-        if (!enabled)
-        {
-            moveInput = Vector2.zero;
-        }
-        
-        PlayerInput playerInput = GetComponent<PlayerInput>();
-        if (playerInput != null)
-        {
-            playerInput.enabled = enabled;
-        }
-        
-        // For remote players, disable additional components that might interfere with inputs
-        if (!enabled)
-        {
-            // Disable any input-related components
-            var inputComponents = GetComponentsInChildren<MonoBehaviour>();
-            foreach (var component in inputComponents)
-            {
-                if (component.GetType().Name.Contains("Input") && component != this)
-                {
-                    component.enabled = false;
-                }
-            }
-            
-            // Set a layer that ignores raycasts to prevent UI interaction
-            gameObject.layer = LayerMask.NameToLayer("Ignore Raycast");
-        }
     }
 
     void FixedUpdate() 
     {
+        // Update speed metrics
         CalculateSpeed();
-        ApplyDownforce();
-        ApplyTractionControl();
+        
+        // Handle automatic gear changes
         HandleGearChanges();
+        
+        // Calculate RPM for audio and UI
         CalculateRPM();
         
-        // Check for wheel bias and correct it
-        CorrectWheelBias();
+        // Apply motor forces to drive wheels
+        ApplyDrivingForces();
         
-        // Apply driving forces based on current gear state
-        if (currentGear > 0) // Forward gears
-        {
-            HandleForwardDrive();
-        }
-        else if (currentGear == -1) // Reverse
-        {
-            HandleReverseDrive();
-        }
-        else // Neutral
-        {
-            HandleNeutral();
-        }
+        // Handle steering with smooth interpolation
+        HandleSmoothSteering();
         
-        // Steering (works the same in all gears)
-        HandleSteering();
-        
+        // Update wheel visuals
         UpdateWheelVisuals();
-        DriftPhysics();
     }
     
-    // Method to detect and correct any wheel bias that might cause pulling to one side
-    private void CorrectWheelBias()
+    private void ApplyDrivingForces()
     {
-        // If no steering input and we're moving forward at reasonable speed
-        if (Mathf.Abs(moveInput.x) < 0.05f && speedKmh > 5f)
+        // Get throttle input and clamp it
+        float throttle = moveInput.y;
+        
+        if (throttle > 0) // Accelerating
         {
-            // Ensure wheels are perfectly straight and exactly the same
-            wheels[0].collider.steerAngle = 0f;
-            wheels[1].collider.steerAngle = 0f;
-            
-            // If we detect the car is veering right or left without input, apply a stronger corrective force
-            float veering = Vector3.Dot(rb.linearVelocity, transform.right);
-            
-            if (Mathf.Abs(veering) > 0.3f) // More sensitive detection (reduced from 0.5f)
+            // Apply driving force to appropriate wheels
+            foreach (var wheel in wheels)
             {
-                // Apply a stronger counter force to straighten the car
-                rb.AddForce(-transform.right * veering * 0.8f, ForceMode.Acceleration);
-                
-                // Also apply a tiny corrective torque to prevent rotation drift
-                rb.AddTorque(transform.up * -veering * 0.1f, ForceMode.Acceleration);
-            }
-        }
-    }
-    
-    private void HandleForwardDrive()
-    {
-        // Accelerating
-        if (moveInput.y > 0)
-        {
-            float throttle = moveInput.y;
-            float torque = CalculateTorque() * throttle;
-            
-            // Apply torque based on drivetrain type
-            ApplyDrivetrainTorque(torque);
-            
-            // Apply more torque during cornering to counteract understeer (helps FWD cars turn)
-            if (Mathf.Abs(moveInput.x) > 0.2f)
-            {
-                ApplyCorneringTorque();
-            }
-        }
-        // Braking/coasting
-        else
-        {
-            if (moveInput.y < 0 || speedKmh > gearSpeeds[currentGear - 1] * 1.1f)
-            {
-                // Full brake - apply more braking to front wheels (realistic weight transfer)
-                float brakePower = (moveInput.y < 0) ? -moveInput.y * brakeForce : brakeForce * 0.3f;
-                
-                // Apply braking with proper front/rear bias
-                foreach (var wheel in wheels)
+                // Handle FWD, RWD, or AWD configurations
+                if ((wheel.wheelType == WheelType.front) || (wheel.wheelType == WheelType.rear))
                 {
-                    if (wheel.wheelType == WheelType.front)
-                    {
-                        wheel.collider.brakeTorque = brakePower * (1.0f - maxBrakeBias);
-                    }
-                    else if (wheel.wheelType == WheelType.rear)
-                    {
-                        wheel.collider.brakeTorque = brakePower * maxBrakeBias;
-                    }
-                    
-                    wheel.collider.motorTorque = 0;
-                }
-                
-                // If nearly stopped while braking, prepare for potential reverse
-                if (speedKmh < brakeToReverseThreshold && moveInput.y < 0)
-                {
-                    wasBraking = true;
+                    wheel.collider.motorTorque = throttle * powerMultiplier / 2.0f; // Divide power between wheels
+                    wheel.collider.brakeTorque = 0; // Release brakes when accelerating
                 }
             }
-            else
+        }
+        else if (throttle < 0) // Braking or reversing
+        {
+            // Apply brakes to all wheels
+            foreach (var wheel in wheels)
             {
-                // Engine braking when off throttle
-                ApplyEngineBraking();
+                // Higher brake force on front wheels (realistic weight transfer)
+                float brakePower = -throttle * brakeForce;
+                if (wheel.wheelType == WheelType.front)
+                {
+                    brakePower *= 0.7f; // 70% braking on front
+                }
+                else
+                {
+                    brakePower *= 0.3f; // 30% braking on rear
+                }
+                
+                wheel.collider.brakeTorque = brakePower;
+                wheel.collider.motorTorque = 0; // No motor force when braking
+            }
+            
+            // If we're almost stopped and still pressing brake, switch to reverse
+            if (speedKmh < 1.0f && throttle < -0.5f && currentGear > 0)
+            {
+                currentGear = -1; // Reverse gear
             }
         }
-    }
-    
-    private void ApplyDrivetrainTorque(float totalTorque)
-    {
-        int frontPoweredWheels = 0;
-        int rearPoweredWheels = 0;
-        
-        // Count powered wheels by type
-        foreach (var wheel in wheels)
-        {
-            if (wheel.wheelType == WheelType.front && (drivetrainType == DrivetrainType.FWD || drivetrainType == DrivetrainType.AWD))
-                frontPoweredWheels++;
-            else if (wheel.wheelType == WheelType.rear && (drivetrainType == DrivetrainType.RWD || drivetrainType == DrivetrainType.AWD))
-                rearPoweredWheels++;
-        }
-        
-        // Calculate torque per wheel based on drivetrain type
-        float frontWheelTorque = 0f;
-        float rearWheelTorque = 0f;
-        
-        switch (drivetrainType)
-        {
-            case DrivetrainType.FWD:
-                frontWheelTorque = frontPoweredWheels > 0 ? totalTorque / frontPoweredWheels : 0;
-                break;
-            case DrivetrainType.RWD:
-                rearWheelTorque = rearPoweredWheels > 0 ? totalTorque / rearPoweredWheels : 0;
-                break;
-            case DrivetrainType.AWD:
-                // Distribute torque according to front/rear power distribution
-                float frontTorque = totalTorque * frontPowerDistribution;
-                float rearTorque = totalTorque * (1 - frontPowerDistribution);
-                
-                frontWheelTorque = frontPoweredWheels > 0 ? frontTorque / frontPoweredWheels : 0;
-                rearWheelTorque = rearPoweredWheels > 0 ? rearTorque / rearPoweredWheels : 0;
-                break;
-        }
-        
-        // Apply calculated torque to wheels
-        foreach (var wheel in wheels)
-        {
-            wheel.collider.brakeTorque = 0;
-            
-            if (wheel.wheelType == WheelType.front)
-                wheel.collider.motorTorque = frontWheelTorque;
-            else if (wheel.wheelType == WheelType.rear)
-                wheel.collider.motorTorque = rearWheelTorque;
-        }
-    }
-    
-    private void ApplyCorneringTorque()
-    {
-        // Apply more torque to outer wheels during cornering to help turn
-        // Works best for FWD cars but also helps with AWD
-        if (drivetrainType == DrivetrainType.FWD || drivetrainType == DrivetrainType.AWD)
+        else // No input - let the car coast
         {
             foreach (var wheel in wheels)
             {
-                if (wheel.wheelType == WheelType.front)
-                {
-                    // Add extra torque to the outer wheel to help cornering
-                    // Assuming wheels[0] is left front and wheels[1] is right front
-                    if ((moveInput.x > 0 && wheel == wheels[0]) || (moveInput.x < 0 && wheel == wheels[1]))
-                    {
-                        wheel.collider.motorTorque *= 1.2f; // More power to outer wheel
-                    }
-                }
+                wheel.collider.motorTorque = 0;
+                wheel.collider.brakeTorque = 10f; // Light braking for natural slowdown
             }
         }
-    }
-    
-    private void ApplyEngineBraking()
-    {
-        float engineBrake = engineBrakeTorque * (engineRPM / maxRPM) * 0.7f;
         
-        // Apply engine braking according to drivetrain type
-        foreach (var wheel in wheels)
+        // If in reverse gear but pressing accelerator, switch back to first gear when stopped
+        if (currentGear == -1 && throttle > 0.5f && speedKmh < 1.0f)
         {
-            switch (drivetrainType)
-            {
-                case DrivetrainType.FWD:
-                    if (wheel.wheelType == WheelType.front)
-                        wheel.collider.brakeTorque = engineBrake;
-                    else
-                        wheel.collider.brakeTorque = engineBrake * 0.3f;
-                    break;
-                    
-                case DrivetrainType.RWD:
-                    if (wheel.wheelType == WheelType.rear)
-                        wheel.collider.brakeTorque = engineBrake;
-                    else
-                        wheel.collider.brakeTorque = engineBrake * 0.3f;
-                    break;
-                    
-                case DrivetrainType.AWD:
-                    // More balanced engine braking for AWD
-                    wheel.collider.brakeTorque = engineBrake * 0.5f;
-                    break;
-            }
-            
-            wheel.collider.motorTorque = 0;
+            currentGear = 1;
         }
     }
     
-    private void HandleReverseDrive()
+    private void HandleSmoothSteering()
     {
-        // Accelerating in reverse
-        if (moveInput.y < 0)
+        // Calculate target steering angle based on input
+        float targetSteerAngle = moveInput.x * maxSteer;
+        
+        // Smoothly interpolate current steering angle toward target
+        if (Mathf.Abs(moveInput.x) > 0.01f)
         {
-            float throttle = -moveInput.y;
-            float torque = CalculateTorque() * throttle * 0.6f; // Reduced power in reverse
-            
-            foreach (var wheel in wheels) 
-            {
-                if (wheel.wheelType == WheelType.rear || wheel.wheelType == WheelType.front)
-                {
-                    wheel.collider.brakeTorque = 0;
-                    wheel.collider.motorTorque = -torque / (wheels.Length / 2f); // Negative torque for reverse
-                }
-            }
-            
-            // Limit reverse speed
-            if (speedKmh > reverseSpeedLimit)
-            {
-                ApplyBrakes(brakeForce * 0.5f);
-            }
+            // Moving toward the target steering angle
+            currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteerAngle, Time.fixedDeltaTime * steeringSpeed);
         }
-        // Braking (which becomes forward acceleration when stopped)
         else
         {
-            if (moveInput.y > 0 || speedKmh > 5f)
-            {
-                // Brake in reverse
-                float brake = (moveInput.y > 0) ? moveInput.y * brakeForce : brakeForce * 0.3f;
-                ApplyBrakes(brake);
+            // Returning to center faster when no input
+            currentSteerAngle = Mathf.Lerp(currentSteerAngle, 0, Time.fixedDeltaTime * returnToZeroSpeed);
+        }
+        
+        // Apply Ackermann steering geometry for realistic turning
+        if (currentSteerAngle > 0) { // Turning right
+            // Left wheel (index 0) gets the outer angle
+            wheels[0].collider.steerAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / 
+                (trackwidth + Mathf.Tan(Mathf.Deg2Rad * currentSteerAngle) * wheelbase));
                 
-                // If nearly stopped while pressing forward, prepare to shift to drive
-                if (speedKmh < brakeToReverseThreshold && moveInput.y > 0)
-                {
-                    wasBraking = true;
-                }
-            }
-            else
-            {
-                // Engine braking when off throttle in reverse
-                ApplyBrakes(engineBrakeTorque * (engineRPM / maxRPM) * 0.5f);
-            }
-        }
-    }
-    
-    private void HandleNeutral()
-    {
-        // In neutral, just apply brakes based on input
-        if (Mathf.Abs(moveInput.y) > 0.1f)
-        {
-            ApplyBrakes(Mathf.Abs(moveInput.y) * brakeForce * 0.7f);
-        }
-        else
-        {
-            ApplyBrakes(engineBrakeTorque * 0.2f);
-        }
-        
-        // If getting input in neutral and nearly stopped, prepare to shift
-        if (speedKmh < brakeToReverseThreshold && Mathf.Abs(moveInput.y) > 0.1f)
-        {
-            wasBraking = true;
-        }
-    }
-    
-    private void ApplyBrakes(float brakeAmount)
-    {
-        foreach (var wheel in wheels)
-        {
-            wheel.collider.brakeTorque = brakeAmount;
-            wheel.collider.motorTorque = 0;
+            // Right wheel (index 1) gets the inner angle (full steer)
+            wheels[1].collider.steerAngle = currentSteerAngle;
+        } 
+        else if (currentSteerAngle < 0) { // Turning left
+            // Left wheel (index 0) gets the inner angle (full steer)
+            wheels[0].collider.steerAngle = currentSteerAngle;
+            
+            // Right wheel (index 1) gets the outer angle
+            float outerAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / 
+                (trackwidth + Mathf.Tan(Mathf.Deg2Rad * Mathf.Abs(currentSteerAngle)) * wheelbase));
+                
+            wheels[1].collider.steerAngle = -outerAngle; // Negative sign for left turn on right wheel
+        } 
+        else {
+            // No steering - both wheels straight
+            wheels[0].collider.steerAngle = 0;
+            wheels[1].collider.steerAngle = 0;
         }
     }
     
@@ -650,29 +251,13 @@ public class CarController : MonoBehaviour
         // Don't shift too frequently
         if (Time.time - lastShiftTime < shiftDelay) return;
         
-        // If we were braking and now have input, change gear appropriately
-        if (wasBraking && Mathf.Abs(moveInput.y) > 0.1f)
-        {
-            if (moveInput.y > 0 && speedKmh < brakeToReverseThreshold)
-            {
-                // Shift to first gear if pressing forward
-                currentGear = 1;
-                isReversing = false;
-                lastShiftTime = Time.time;
-            }
-            else if (moveInput.y < 0 && speedKmh < brakeToReverseThreshold)
-            {
-                // Shift to reverse if pressing backward
-                currentGear = -1;
-                isReversing = true;
-                lastShiftTime = Time.time;
-            }
-            wasBraking = false;
-        }
-        
         // Automatic gear shifting when in forward gears
         if (currentGear > 0)
         {
+            // Calculate RPM thresholds for shifting
+            float shiftUpRPM = maxRPM * 0.85f;
+            float shiftDownRPM = maxRPM * 0.4f;
+            
             // Shift up if RPM too high
             if (engineRPM > shiftUpRPM && currentGear < gearRatios.Length)
             {
@@ -686,17 +271,11 @@ public class CarController : MonoBehaviour
                 lastShiftTime = Time.time;
             }
         }
-        
-        // Automatic shift to neutral when stopped
-        if (speedKmh < 0.5f && Mathf.Abs(moveInput.y) < 0.1f)
-        {
-            currentGear = 0;
-            isReversing = false;
-        }
     }
     
     private void CalculateRPM()
     {
+        // Calculate RPM from wheel speed
         float averageWheelRPM = 0f;
         int poweredWheels = 0;
         
@@ -715,156 +294,33 @@ public class CarController : MonoBehaviour
             
             // Convert wheel RPM to engine RPM based on current gear
             float gearRatio = (currentGear == -1) ? reverseGearRatio : gearRatios[currentGear - 1];
-            float newRPM = averageWheelRPM * gearRatio * finalDriveRatio;
+            float targetRPM = averageWheelRPM * gearRatio * finalDriveRatio;
+            
+            // Idle RPM floor
+            targetRPM = Mathf.Max(targetRPM, idleRPM);
             
             // Smooth RPM changes
-            engineRPM = Mathf.Lerp(engineRPM, Mathf.Clamp(newRPM, idleRPM * 0.8f, maxRPM * 1.1f), Time.fixedDeltaTime * 5f);
+            engineRPM = Mathf.Lerp(engineRPM, targetRPM, Time.fixedDeltaTime * 5f);
+            
+            // Add a small RPM boost when accelerating
+            if (moveInput.y > 0.1f)
+            {
+                engineRPM += moveInput.y * 100f;
+            }
+            
+            // Clamp RPM to avoid exceeding redline
+            engineRPM = Mathf.Clamp(engineRPM, idleRPM, maxRPM * 1.1f);
         }
         else
         {
-            // Engine idle when in neutral or no powered wheels
-            engineRPM = Mathf.Lerp(engineRPM, idleRPM, Time.fixedDeltaTime * 2f);
-        }
-    }
-    
-    private float CalculateTorque()
-    {
-        // Simple torque curve - peaks around mid-RPM range
-        float rpmNormalized = Mathf.Clamp01((engineRPM - idleRPM) / (maxRPM - idleRPM));
-        float torqueCurve = Mathf.Sin(rpmNormalized * Mathf.PI * 0.7f); // Peaks around 70% of RPM range
-        return Mathf.Lerp(maxTorque * 0.3f, maxTorque, torqueCurve) * tractionControl;
-    }
-    
-    private void HandleSteering()
-    {
-        // Direct calculation like in your original code, with some improvements
-        float steer = moveInput.x * maxSteer;
-        
-        // Less reduction when accelerating to maintain stronger turning radius
-        if (moveInput.y > 0) {
-            steer *= 0.9f; // Only slight reduction (was reducing too much before)
-        }
-        
-        // Keep track of current angle for UI/display purposes
-        currentSteerAngle = steer;
-        
-        // Use the simpler and more direct approach from your original code
-        // but with improved Ackermann geometry calculation
-        if (moveInput.x > 0) { // Turning right
-            // Left wheel (index 0) gets the outer angle
-            wheels[0].collider.steerAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / 
-                (trackwidth + Mathf.Tan(Mathf.Deg2Rad * steer) * wheelbase));
-                
-            // Right wheel (index 1) gets the inner angle (full steer)
-            wheels[1].collider.steerAngle = steer;
-        } 
-        else if (moveInput.x < 0) { // Turning left
-            // Left wheel (index 0) gets the inner angle (full steer)
-            wheels[0].collider.steerAngle = steer;
-            
-            // Right wheel (index 1) gets the outer angle - we need to negate the result 
-            // to make the right wheel turn left properly (opposite of the left wheel)
-            float outerAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / 
-                (trackwidth + Mathf.Tan(Mathf.Deg2Rad * Mathf.Abs(steer)) * wheelbase));
-                
-            wheels[1].collider.steerAngle = -outerAngle; // Negative sign for left turn on right wheel
-        } 
-        else {
-            // No steering - both wheels straight
-            wheels[0].collider.steerAngle = 0;
-            wheels[1].collider.steerAngle = 0;
-        }
-        
-        // Check for and correct extreme angles that could cause clipping
-        float maxAllowedAngle = 28f; // Maximum safe angle
-        
-        if (Mathf.Abs(wheels[0].collider.steerAngle) > maxAllowedAngle) {
-            wheels[0].collider.steerAngle = maxAllowedAngle * Mathf.Sign(wheels[0].collider.steerAngle);
-        }
-        
-        if (Mathf.Abs(wheels[1].collider.steerAngle) > maxAllowedAngle) {
-            wheels[1].collider.steerAngle = maxAllowedAngle * Mathf.Sign(wheels[1].collider.steerAngle);
-        }
-        
-        // Log steering angles for debugging (only on significant changes)
-        if (Time.frameCount % 60 == 0 && Mathf.Abs(moveInput.x) > 0.3f) {
-            Debug.Log($"Steering inputs - Raw: {moveInput.x:F2}, Angle: {steer:F1}°, " +
-                     $"Wheels (L: {wheels[0].collider.steerAngle:F1}°, R: {wheels[1].collider.steerAngle:F1}°)");
-        }
-    }
-    
-    private void ApplyDownforce()
-    {
-        // Apply progressive downforce that increases with speed (like a 911's aerodynamics)
-        float speedFactor = Mathf.Clamp01(speedKmh / maxSpeed);
-        float progressiveDownforce = downforce * (1 + speedFactor);
-        
-        // Apply more downforce to rear of car (where 911's engine is)
-        rb.AddForceAtPosition(-transform.up * progressiveDownforce * rb.linearVelocity.sqrMagnitude * 0.001f, 
-            transform.position - transform.forward * 0.5f, ForceMode.Acceleration);
-    }
-    
-    private void ApplyTractionControl()
-    {
-        float wheelSlip = 0f;
-        int poweredWheels = 0;
-        float maxSlip = 0f;
-        
-        foreach (var wheel in wheels)
-        {
-            if (wheel.wheelType == WheelType.rear || wheel.wheelType == WheelType.front)
-            {
-                WheelHit hit;
-                if (wheel.collider.GetGroundHit(out hit))
-                {
-                    // Track the worst slip across all wheels
-                    float absSlip = Mathf.Abs(hit.forwardSlip);
-                    wheelSlip += absSlip;
-                    maxSlip = Mathf.Max(maxSlip, absSlip);
-                    poweredWheels++;
-                    
-                    // Apply ABS to prevent wheel lock during braking
-                    if (absEnabled && moveInput.y < 0 && hit.forwardSlip < -0.2f)
-                    {
-                        // Reduce brake torque on wheels that are locking up
-                        float absStrength = antiLockBrakeLevel * Mathf.Clamp01(-hit.forwardSlip - 0.2f) * 2f;
-                        wheel.collider.brakeTorque *= (1f - absStrength);
-                    }
-                }
-            }
-        }
-        
-        if (poweredWheels > 0)
-        {
-            wheelSlip /= poweredWheels;  // Average slip
-            
-            if (tractionControlEnabled)
-            {
-                // Apply stronger TC for keyboard users (more aggressive filtering)
-                float tcBaseEffect = 1f - Mathf.Clamp01(Mathf.Abs(wheelSlip));
-                float tcAdjustedEffect = Mathf.Lerp(tcBaseEffect, 1f, tractionControlLevel * 0.8f);
-                tractionControl = Mathf.Lerp(tractionControl, tcAdjustedEffect, Time.fixedDeltaTime * 10f);
-                
-                // Additional TC reduction when specific wheels have extreme slip
-                if (maxSlip > 0.5f)
-                {
-                    tractionControl *= Mathf.Lerp(1f, 0.7f, (maxSlip - 0.5f) * tractionControlLevel);
-                }
-            }
-            else
-            {
-                // Standard traction calculations when TC is disabled
-                tractionControl = Mathf.Lerp(tractionControl, 1f - Mathf.Clamp01(Mathf.Abs(wheelSlip) * 0.5f), Time.fixedDeltaTime * 5f);
-            }
-        }
-        else
-        {
-            tractionControl = 1f;
+            // Engine idle
+            engineRPM = Mathf.Lerp(engineRPM, idleRPM, Time.fixedDeltaTime * 3f);
         }
     }
     
     private void CalculateSpeed()
     {
+        // Calculate speed in the direction the car is facing
         currentSpeed = Vector3.Dot(rb.linearVelocity, transform.forward);
         speedKmh = Mathf.Abs(currentSpeed * 3.6f);
         
@@ -889,140 +345,6 @@ public class CarController : MonoBehaviour
                 wheels[i].collider.transform.GetChild(index).position = pos;
                 wheels[i].collider.transform.GetChild(index).rotation = rot;
                 index++;
-            }
-            
-            // Apply a small offset to prevent wheel clipping with body if needed
-            if (i < 2 && wheels[i].wheelType == WheelType.front)
-            {
-                float steerAngle = wheels[i].collider.steerAngle;
-                if (Mathf.Abs(steerAngle) > 15f)
-                {
-                    // Calculate how much the wheel should move out based on steering angle
-                    float outwardOffset = Mathf.Abs(steerAngle) * 0.001f;
-                    Vector3 direction = i == 0 ? -transform.right : transform.right; // Left or right wheel
-                    
-                    // Apply a subtle outward push when wheel is turned significantly
-                    foreach (Transform child in wheels[i].collider.transform)
-                    {
-                        child.position += direction * outwardOffset;
-                    }
-                }
-            }
-        }
-    }
-    
-    private void DriftPhysics()
-    {
-        // Calculate lateral slip (sideways movement)
-        float sidewaysSpeed = Vector3.Dot(rb.linearVelocity, transform.right);
-        lateralSlip = Mathf.Abs(sidewaysSpeed);
-        
-        // Calculate angle between velocity and forward direction
-        float carAngle = 0;
-        if (rb.linearVelocity.magnitude > 2f) // Only calculate when moving
-        {
-            carAngle = Vector3.Angle(transform.forward, rb.linearVelocity);
-            float dir = Mathf.Sign(Vector3.Dot(transform.right, rb.linearVelocity));
-            carAngle *= dir; // Negative when sliding left, positive when sliding right
-        }
-        
-        // Use a higher threshold for drift detection and add speed dependency
-        float adjustedThreshold = driftAngleThreshold * (1f + (speedKmh / 100f));
-        
-        // Determine if we're drifting based on adjusted angle threshold
-        isDrifting = Mathf.Abs(carAngle) > adjustedThreshold && speedKmh > 30f;
-        driftAngle = carAngle;
-        
-        // Apply drift forces with more stability
-        if (speedKmh > 10f)
-        {
-            // Calculate front/rear weight distribution based on acceleration state
-            float frontWeight = 0.5f + (moveInput.y < 0 ? 0.1f : (moveInput.y > 0 ? -0.05f : 0));
-            
-            // Porsche 911 has more weight on the rear, especially when accelerating
-            float rearWheelGrip = 1.1f + (Mathf.Abs(moveInput.y) * 0.3f); // More grip on rear wheels with acceleration
-            
-            // Base grip factor that counters sideways movement - tuned for 911 handling
-            float baseGripFactor = tireGripFactor * 1.0f;
-            
-            // Apply rear-wheel drive characteristics - decrease grip under hard acceleration (prone to wheelspin)
-            if (moveInput.y > 0.7f) {
-                baseGripFactor *= 0.9f; // Slight loss of grip when flooring it (Porsche 911 wheelspin)
-            }
-            
-            float gripForce = baseGripFactor;
-            
-            // Apply stability control if enabled (simulates ESP/DSC)
-            if (stabilityControlEnabled && Mathf.Abs(carAngle) > 5f)
-            {
-                // Increase grip factor based on stability control setting
-                float stabilityFactor = Mathf.Lerp(1.0f, 2.0f, stabilityControlLevel);
-                gripForce *= stabilityFactor;
-                
-                // Apply selective braking to help correct the slide
-                if (Mathf.Abs(carAngle) > 10f && speedKmh > 20f)
-                {
-                    // Determine which wheels need braking to correct the slide
-                    bool slideLeft = carAngle < 0;
-                    
-                    foreach (var wheel in wheels)
-                    {
-                        if ((slideLeft && wheel == wheels[1]) || (!slideLeft && wheel == wheels[0]))
-                        {
-                            // Apply some brake to the outside front wheel to help rotate car
-                            float correctionBrake = brakeForce * 0.2f * stabilityControlLevel;
-                            wheel.collider.brakeTorque += correctionBrake;
-                        }
-                    }
-                }
-            }
-            
-            // Reduce grip while drifting, but not as drastically
-            if (isDrifting)
-            {
-                // Less grip during drift, but maintain more front grip for FWD
-                bool isSameDirection = Mathf.Sign(moveInput.x) == Mathf.Sign(sidewaysSpeed);
-                gripForce *= isSameDirection ? 0.8f : 0.9f;
-                
-                // Add some rotation based on steering input if drift control is enabled
-                if (enableDriftControl && Mathf.Abs(moveInput.x) > 0.2f)
-                {
-                    // This lets the player control the car's rotation while drifting (reduced effect)
-                    rb.AddTorque(transform.up * moveInput.x * oversteerFactor * 0.7f * 
-                                  (speedKmh * 0.01f), ForceMode.Acceleration);
-                }
-            }
-            else
-            {
-                // Normal cornering - increase grip during cornering with Porsche 911 characteristics
-                // More oversteer in turns, especially during acceleration
-                float turnGrip = corneringGrip;
-                if (moveInput.y > 0.5f) {
-                    // Reduce grip when accelerating in corners (911 oversteer)
-                    turnGrip *= 0.85f;
-                }
-                gripForce *= 1f + (turnGrip * Mathf.Abs(moveInput.x) * 0.08f);
-            }
-            
-            // Apply stronger counterforce to sideways movement for stability
-            Vector3 driftForce = -transform.right * (sidewaysSpeed * driftFactor * gripForce * 1.2f);
-            rb.AddForce(driftForce, ForceMode.Acceleration);
-            
-            // More aggressive recovery torque to prevent excessive spinning
-            if (Mathf.Abs(carAngle) > 3f)
-            {
-                // Stronger recovery with less input, less recovery during intentional turning
-                float inputReductionFactor = 1f - (Mathf.Abs(moveInput.x) * 0.3f);
-                float recoveryTorque = -Mathf.Sign(carAngle) * driftRecoveryFactor * 1.2f * 
-                                      inputReductionFactor * Mathf.Min(25f, Mathf.Abs(carAngle));
-                
-                // Apply stronger recovery with stability control
-                if (stabilityControlEnabled)
-                {
-                    recoveryTorque *= (1f + stabilityControlLevel);
-                }
-                
-                rb.AddTorque(transform.up * recoveryTorque, ForceMode.Acceleration);
             }
         }
     }
