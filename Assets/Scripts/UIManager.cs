@@ -58,6 +58,28 @@ public class UIManager : MonoBehaviour
     public Button loginButton;
     public TextMeshProUGUI authStatusText;
     
+    [Header("Car UI")]
+    public TextMeshProUGUI speedText;
+    public TextMeshProUGUI rpmText;
+    public TextMeshProUGUI gearText;
+    public bool showKMH = true;
+    public bool showGear = true;
+    public string speedFormat = "0";
+    public string rpmFormat = "0";
+    
+    [Header("Network Stats")]
+    public TextMeshProUGUI latencyText;
+    private float lastLatencyUpdateTime = 0f;
+    private const float LATENCY_UPDATE_INTERVAL = 1f; // Update latency every second
+
+    [Header("Race UI")]
+    public GameObject raceUIPanel;        // Panel containing car stats and network info
+    public GameObject networkStatsPanel;  // Panel specifically for network stats
+    private bool isRaceUIVisible = false;
+
+    private CarController playerCarController;
+    private bool carUIInitialized = false;
+    
     // Player profile data
     private string playerName = "Player";
     private string playerId;
@@ -97,6 +119,9 @@ public class UIManager : MonoBehaviour
         {
             Instance = this;
             DontDestroyOnLoad(gameObject);
+            
+            // Register for scene load events to handle UI visibility
+            SceneManager.sceneLoaded += OnSceneLoaded;
         }
         else
         {
@@ -264,6 +289,9 @@ public class UIManager : MonoBehaviour
             networkManager.OnServerMessage -= OnServerMessage;
             networkManager.OnRoomPlayersReceived -= OnRoomPlayersReceived;
         }
+        
+        // Unregister scene loading event
+        SceneManager.sceneLoaded -= OnSceneLoaded;
     }
     
     #region UI Navigation
@@ -416,6 +444,8 @@ public class UIManager : MonoBehaviour
         {
             authPanel.SetActive(false);
         }
+        
+        // Don't hide race UI panels here - they're controlled by scene changes
     }
 
     public void ShowAuthPanel(string message = "Please login to continue")
@@ -812,7 +842,8 @@ public async void CreateRoom()
     
     private void UpdateRoomInfo()
     {
-        Debug.Log($"UpdateRoomInfo called - Room: {currentRoomName}, Players: {playersInRoom.Count}, isHost: {isHost}");
+        // Debug log commented for cleaner console
+        // Debug.Log($"UpdateRoomInfo called - Room: {currentRoomName}, Players: {playersInRoom.Count}, isHost: {isHost}");
     
         // Check references
         if (roomInfoText == null)
@@ -851,7 +882,7 @@ public async void CreateRoom()
     
         // Show/hide start game button based on host status
         startGameButton.gameObject.SetActive(isHost);
-        Debug.Log($"Start game button visibility set to {isHost} (isHost={isHost})");
+        // Debug.Log($"Start game button visibility set to {isHost} (isHost={isHost})");
         
         // Make sure button is properly interactive
         if (isHost)
@@ -871,10 +902,10 @@ public async void CreateRoom()
         }
     
         // Populate player list
-        Debug.Log($"Adding {playersInRoom.Count} players to player list UI");
+        // Debug.Log($"Adding {playersInRoom.Count} players to player list UI");
         foreach (string playerId in playersInRoom)
         {
-            Debug.Log($"Creating player item for: {playerId}");
+            // Debug.Log($"Creating player item for: {playerId}");
             GameObject playerItem = Instantiate(playerListItemPrefab, playerListContent);
             TextMeshProUGUI playerText = playerItem.GetComponentInChildren<TextMeshProUGUI>();
     
@@ -889,10 +920,10 @@ public async void CreateRoom()
                 playerDisplayName += " (You)";
     
             playerText.text = playerDisplayName;
-            Debug.Log($"Added player to UI: {playerDisplayName}");
+            // Debug.Log($"Added player to UI: {playerDisplayName}");
         }
     
-        Debug.Log("Room info updated successfully");
+        // Debug.Log("Room info updated successfully");
     }
     
     #endregion
@@ -1096,7 +1127,8 @@ public async void CreateRoom()
     
     private void OnRoomPlayersReceived(Dictionary<string, object> message)
     {
-        Debug.Log($"OnRoomPlayersReceived: {JsonConvert.SerializeObject(message)}");
+        // Debug log commented for cleaner console
+        // Debug.Log($"OnRoomPlayersReceived: {JsonConvert.SerializeObject(message)}");
         
         // Clear the current player list to get fresh data
         playersInRoom.Clear();
@@ -1138,7 +1170,7 @@ public async void CreateRoom()
                             if (!string.IsNullOrEmpty(playerId))
                             {
                                 playersInRoom.Add(playerId);
-                                Debug.Log($"Added player ID: {playerId}");
+                                // Debug.Log($"Added player ID: {playerId}");
                             }
                         }
                         else if (playerToken.Type == Newtonsoft.Json.Linq.JTokenType.Object)
@@ -1151,7 +1183,7 @@ public async void CreateRoom()
                                 if (!string.IsNullOrEmpty(playerId))
                                 {
                                     playersInRoom.Add(playerId);
-                                    Debug.Log($"Added player ID from object: {playerId}");
+                                    // Debug.Log($"Added player ID from object: {playerId}");
                                 }
                             }
                         }
@@ -1401,6 +1433,22 @@ public async void CreateRoom()
                 lastPlayerListRefreshTime = Time.time;
             }
         }
+        
+        // Update network latency display
+        if (latencyText != null && NetworkManager.Instance != null && Time.time - lastLatencyUpdateTime > LATENCY_UPDATE_INTERVAL)
+        {
+            float latency = NetworkManager.Instance.GetLatency();
+            latencyText.text = $"Ping: {(latency * 1000):0}ms";
+            latencyText.color = latency < 0.1f ? Color.green : (latency < 0.3f ? Color.yellow : Color.red);
+            lastLatencyUpdateTime = Time.time;
+        }
+        
+        // Check if we need to find the player car for UI updates
+        if (IsRaceScene() && !carUIInitialized)
+        {
+            // Try to find player car every frame until we connect
+            FindPlayerCarController();
+        }
     }
 
     private void RefreshPlayerList()
@@ -1426,5 +1474,98 @@ public async void CreateRoom()
             }
         }
         return false;
+    }
+
+    // Find and connect to the player car controller when it spawns
+    private void FindPlayerCarController()
+    {
+        // Only search for car controller in race scenes
+        if (IsRaceScene())
+        {
+            GameObject playerCar = GameObject.FindGameObjectWithTag("Player");
+            if (playerCar != null)
+            {
+                playerCarController = playerCar.GetComponent<CarController>();
+                if (playerCarController != null)
+                {
+                    // Subscribe to the car stats update event
+                    playerCarController.OnCarStatsUpdated += UpdateCarUI;
+                    carUIInitialized = true;
+                    Debug.Log("Connected to player car for UI updates");
+                }
+            }
+        }
+    }
+    
+    // Check if we're in a race scene
+    private bool IsRaceScene()
+    {
+        string currentScene = SceneManager.GetActiveScene().name;
+        return currentScene.Contains("Track") || currentScene.Contains("Race");
+    }
+    
+    // Update car UI elements with latest car stats
+    private void UpdateCarUI(float speed, float rpm, int gear)
+    {
+        // Update speed display
+        if (speedText != null)
+        {
+            float speedValue = speed;
+            if (!showKMH)
+            {
+                speedValue = speedValue * 0.6213712f; // Convert to MPH
+            }
+            speedText.text = speedValue.ToString(speedFormat) + (showKMH ? " km/h" : " mph");
+        }
+
+        // Update RPM display
+        if (rpmText != null)
+        {
+            rpmText.text = rpm.ToString(rpmFormat) + " RPM";
+        }
+
+        // Update gear display if enabled
+        if (gearText != null && showGear)
+        {
+            string gearDisplay;
+            if (gear > 0)
+            {
+                gearDisplay = gear.ToString();
+            }
+            else if (gear == 0)
+            {
+                gearDisplay = "N";
+            }
+            else
+            {
+                gearDisplay = "R";
+            }
+            gearText.text = gearDisplay;
+        }
+    }
+
+    // Method to handle scene changes
+    private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        bool isRaceScene = IsRaceScene();
+        
+        // Show/hide race UI based on scene
+        if (raceUIPanel != null)
+        {
+            raceUIPanel.SetActive(isRaceScene);
+            isRaceUIVisible = isRaceScene;
+        }
+        
+        // Show/hide network stats panel based on scene
+        if (networkStatsPanel != null)
+        {
+            networkStatsPanel.SetActive(isRaceScene);
+        }
+        
+        // Reset car UI connection when entering race scene
+        if (isRaceScene)
+        {
+            carUIInitialized = false;
+        }
     }
 }

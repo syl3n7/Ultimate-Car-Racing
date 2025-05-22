@@ -446,7 +446,20 @@ public class GameManager : MonoBehaviour
                 GameObject carObject = Instantiate(remoteCarPrefab, spawnPosition, rotation);
                 carObject.name = $"RemotePlayer_{playerId}";
                 
-                // Add required CarController component if it's not on the prefab
+                // Get or add the RemotePlayerController component
+                RemotePlayerController remoteController = carObject.GetComponent<RemotePlayerController>();
+                if (remoteController != null)
+                {
+                    remoteController.SetPlayerId(playerId);
+                }
+                else
+                {
+                    remoteController = carObject.AddComponent<RemotePlayerController>();
+                    remoteController.SetPlayerId(playerId);
+                    Debug.Log("Added RemotePlayerController to remote car prefab");
+                }
+                
+                // Also add or get CarController for compatibility
                 CarController carController = carObject.GetComponent<CarController>();
                 if (carController == null)
                 {
@@ -751,7 +764,6 @@ public class GameManager : MonoBehaviour
     public void ApplyPlayerState(PlayerStateData stateData, bool teleport = false)
     {
         string playerId = stateData.playerId;
-        Debug.Log($"ApplyPlayerState called for player {playerId} at position {stateData.position}, teleport={teleport}");
         
         // If we don't have this player yet, spawn them
         if (!activePlayers.ContainsKey(playerId) || activePlayers[playerId] == null || activePlayers[playerId].gameObject == null)
@@ -772,25 +784,36 @@ public class GameManager : MonoBehaviour
                 SpawnRemotePlayer(playerId, stateData.position, stateData.rotation);
                 return;
             }
-            
-            Rigidbody rb = controller.GetComponent<Rigidbody>();
-            if (rb != null)
+
+            // Check if this is a remote player with RemotePlayerController
+            RemotePlayerController remoteController = controller.gameObject.GetComponent<RemotePlayerController>();
+            if (remoteController != null)
             {
-                if (teleport)
+                // Use the specialized RemotePlayerController for interpolation
+                remoteController.UpdatePosition(stateData.position, stateData.rotation, stateData.velocity, stateData.angularVelocity);
+            }
+            else
+            {
+                // Fallback to the original method if no RemotePlayerController is found
+                Rigidbody rb = controller.GetComponent<Rigidbody>();
+                if (rb != null)
                 {
-                    Debug.Log($"Teleporting player {playerId} to {stateData.position}");
-                    controller.transform.position = stateData.position;
-                    controller.transform.rotation = stateData.rotation;
-                    rb.linearVelocity = stateData.velocity;
-                    rb.angularVelocity = stateData.angularVelocity;
-                }
-                else
-                {
-                    // Smoothly interpolate position and rotation
-                    controller.transform.position = Vector3.Lerp(controller.transform.position, stateData.position, 0.25f);
-                    controller.transform.rotation = Quaternion.Slerp(controller.transform.rotation, stateData.rotation, 0.25f);
-                    rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, stateData.velocity, 0.25f);
-                    rb.angularVelocity = Vector3.Lerp(rb.angularVelocity, stateData.angularVelocity, 0.25f);
+                    if (teleport)
+                    {
+                        Debug.Log($"Teleporting player {playerId} to {stateData.position}");
+                        controller.transform.position = stateData.position;
+                        controller.transform.rotation = stateData.rotation;
+                        rb.linearVelocity = stateData.velocity;
+                        rb.angularVelocity = stateData.angularVelocity;
+                    }
+                    else
+                    {
+                        // Simple position lerping as fallback
+                        controller.transform.position = Vector3.Lerp(controller.transform.position, stateData.position, 0.25f);
+                        controller.transform.rotation = Quaternion.Slerp(controller.transform.rotation, stateData.rotation, 0.25f);
+                        rb.linearVelocity = Vector3.Lerp(rb.linearVelocity, stateData.velocity, 0.25f);
+                        rb.angularVelocity = Vector3.Lerp(rb.angularVelocity, stateData.angularVelocity, 0.25f);
+                    }
                 }
             }
         }
