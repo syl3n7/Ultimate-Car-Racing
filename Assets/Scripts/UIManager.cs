@@ -145,11 +145,11 @@ public class UIManager : MonoBehaviour
         NetworkManager networkManager = NetworkManager.Instance;
         if (networkManager != null)
         {
-            networkManager.OnConnected += (msg) => OnConnected();
+            networkManager.OnConnected += OnConnected;
             networkManager.OnDisconnected += (msg) => OnDisconnected();
             networkManager.OnConnectionFailed += (msg) => OnConnectionFailed();
             networkManager.OnRoomListReceived += OnRoomListReceived;
-            networkManager.OnGameHosted += OnGameHosted;
+            networkManager.OnServerStarted += OnGameHosted;
             networkManager.OnRoomJoined += OnJoinedGame;
             networkManager.OnPlayerJoined += OnPlayerJoined;
             networkManager.OnPlayerDisconnected += OnPlayerDisconnected;
@@ -281,7 +281,7 @@ public class UIManager : MonoBehaviour
             networkManager.OnDisconnected -= (msg) => OnDisconnected();
             networkManager.OnConnectionFailed -= (msg) => OnConnectionFailed();
             networkManager.OnRoomListReceived -= OnRoomListReceived;
-            networkManager.OnGameHosted -= OnGameHosted;
+            networkManager.OnServerStarted -= OnGameHosted;
             networkManager.OnRoomJoined -= OnJoinedGame;
             networkManager.OnPlayerJoined -= OnPlayerJoined;
             networkManager.OnPlayerDisconnected -= OnPlayerDisconnected;
@@ -1025,21 +1025,6 @@ public async void CreateRoom()
         isAuthenticated = false;
         ShowMainMenu();
         ShowNotification("Failed to connect to server");
-    }
-    
-    // Add proper certificate validation for secure connections
-    // This follows SERVER-README.md section 3.1 security recommendation
-    public bool ValidateServerCertificate(object sender, System.Security.Cryptography.X509Certificates.X509Certificate certificate, 
-        System.Security.Cryptography.X509Certificates.X509Chain chain, System.Net.Security.SslPolicyErrors sslPolicyErrors)
-    {
-        // For development/LAN use, we accept self-signed certificates
-        if (sslPolicyErrors == System.Net.Security.SslPolicyErrors.RemoteCertificateChainErrors)
-            return true; // Accept self-signed certificates for LAN/development
-            
-        // For production, this should be modified to only accept valid certificates
-        // TODO: For production, implement proper certificate validation or pinning
-        
-        return sslPolicyErrors == System.Net.Security.SslPolicyErrors.None;
     }
     
     private void OnRoomListReceived(Dictionary<string, object> message)
