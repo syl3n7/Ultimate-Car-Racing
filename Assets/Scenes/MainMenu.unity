@@ -1108,7 +1108,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: -0.00004863739, y: 100.000114}
+  m_AnchoredPosition: {x: -0.00004863739, y: 99.999985}
   m_SizeDelta: {x: 0, y: 300}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &240730155
@@ -4083,8 +4083,8 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 1995559424}
   m_HandleRect: {fileID: 1995559423}
   m_Direction: 2
-  m_Value: 1.0000004
-  m_Size: 0.750117
+  m_Value: 0.9999996
+  m_Size: 0.7501299
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
@@ -7896,7 +7896,7 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 2140066877}
   m_HandleRect: {fileID: 2140066876}
   m_Direction: 2
-  m_Value: 1
+  m_Value: 0.9999997
   m_Size: 0.6666667
   m_NumberOfSteps: 0
   m_OnValueChanged:
@@ -8920,6 +8920,18 @@ PrefabInstance:
     serializedVersion: 3
     m_TransformParent: {fileID: 0}
     m_Modifications:
+    - target: {fileID: 625864769487328849, guid: 31303a106cb5f40c29beef94406698a6, type: 3}
+      propertyPath: tcpPort
+      value: 443
+      objectReference: {fileID: 0}
+    - target: {fileID: 625864769487328849, guid: 31303a106cb5f40c29beef94406698a6, type: 3}
+      propertyPath: udpPort
+      value: 443
+      objectReference: {fileID: 0}
+    - target: {fileID: 625864769487328849, guid: 31303a106cb5f40c29beef94406698a6, type: 3}
+      propertyPath: serverIP
+      value: localhost
+      objectReference: {fileID: 0}
     - target: {fileID: 719347544748194510, guid: 31303a106cb5f40c29beef94406698a6, type: 3}
       propertyPath: serverIP
       value: 127.0.0.1
@@ -9609,8 +9621,8 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 2116467349}
   m_HandleRect: {fileID: 2116467348}
   m_Direction: 2
-  m_Value: -0.0000010681152
-  m_Size: 0.665673
+  m_Value: -0.00000030517577
+  m_Size: 0.6666352
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
