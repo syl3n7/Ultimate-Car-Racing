@@ -1,227 +1,195 @@
 using System;
-using System.Collections.Generic;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
-using UnityEngine;
 using Newtonsoft.Json;
+using UnityEngine;
 
-namespace CarRacing.Networking
+/// <summary>
+/// Handles UDP packet encryption and decryption using AES-256-CBC as specified in the server documentation
+/// </summary>
+public class NetworkSecurity
 {
+    private readonly bool _encryptionEnabled;
+    private readonly byte[] _encryptionKey;
+    private readonly byte[] _encryptionIV;
+
     /// <summary>
-    /// Handles security functions for network communications including UDP encryption
-    /// as specified in the SERVER-README.md documentation (sections 4.2 and 13.2)
+    /// Creates a new instance of NetworkSecurity with encryption disabled
     /// </summary>
-    public class NetworkSecurity
+    public NetworkSecurity()
     {
-        // Encryption constants
-        private const int AES_KEY_SIZE = 256;  // AES-256 as required by docs
-        private const int AES_BLOCK_SIZE = 128;  // AES block size in bits
-        private const int IV_SIZE = 16;  // 128 bits = 16 bytes
-        
-        // Cryptographic objects
-        private Aes aesAlgorithm;
-        private byte[] encryptionKey;
-        private bool isEncryptionEnabled = false;
-        
-        // Encryption configuration
-        public bool IsEncryptionEnabled => isEncryptionEnabled;
-        
-        /// <summary>
-        /// Initialize the security system with default settings
-        /// </summary>
-        public NetworkSecurity()
+        _encryptionEnabled = false;
+        _encryptionKey = null;
+        _encryptionIV = null;
+    }
+
+    /// <summary>
+    /// Creates a new instance of NetworkSecurity with encryption enabled
+    /// </summary>
+    /// <param name="sessionId">The session ID from the server</param>
+    /// <param name="password">The player's password</param>
+    public NetworkSecurity(string sessionId, string password)
+    {
+        if (string.IsNullOrEmpty(sessionId) || string.IsNullOrEmpty(password))
         {
-            // Create AES provider
-            aesAlgorithm = Aes.Create();
-            aesAlgorithm.KeySize = AES_KEY_SIZE;
-            aesAlgorithm.BlockSize = AES_BLOCK_SIZE;
-            aesAlgorithm.Mode = CipherMode.CBC;  // CBC mode as required by docs
-            aesAlgorithm.Padding = PaddingMode.PKCS7;
+            Debug.LogError("Cannot initialize encryption with empty sessionId or password");
+            _encryptionEnabled = false;
+            return;
         }
-        
-        /// <summary>
-        /// Set up encryption using the session ID as a seed for key generation
-        /// </summary>
-        /// <param name="sessionId">The unique session ID for this client</param>
-        public void SetupEncryption(string sessionId)
+
+        try
         {
-            if (string.IsNullOrEmpty(sessionId))
+            // Derive encryption key from session ID and password (as described in 13.2)
+            // This is a simplified implementation - in a production environment, use a proper KDF
+            string combinedSecret = sessionId + "|" + password;
+            
+            // Generate the encryption key using SHA-256
+            using (var sha256 = SHA256.Create())
             {
-                Debug.LogError("Cannot set up encryption with empty session ID");
-                isEncryptionEnabled = false;
-                return;
+                _encryptionKey = sha256.ComputeHash(Encoding.UTF8.GetBytes(combinedSecret));
+            }
+
+            // Generate a fixed IV based on the session ID
+            // In a production environment, use a unique IV for each message
+            _encryptionIV = new byte[16]; // AES requires a 16-byte IV
+            byte[] sessionBytes = Encoding.UTF8.GetBytes(sessionId);
+            for (int i = 0; i < Math.Min(sessionBytes.Length, 16); i++)
+            {
+                _encryptionIV[i] = sessionBytes[i];
+            }
+
+            _encryptionEnabled = true;
+            Debug.Log("UDP encryption initialized successfully");
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Failed to initialize encryption: {ex.Message}");
+            _encryptionEnabled = false;
+        }
+    }
+
+    /// <summary>
+    /// Indicates whether encryption is enabled for this instance
+    /// </summary>
+    public bool IsEncryptionEnabled => _encryptionEnabled;
+
+    /// <summary>
+    /// Creates a packet from the given data, encrypting it if encryption is enabled
+    /// </summary>
+    /// <typeparam name="T">The type of data to send</typeparam>
+    /// <param name="data">The data to send</param>
+    /// <returns>The formatted packet data ready to send</returns>
+    public byte[] CreatePacket<T>(T data)
+    {
+        if (data == null)
+            throw new ArgumentNullException(nameof(data));
+
+        // Convert to JSON
+        string jsonData = JsonConvert.SerializeObject(data);
+        byte[] jsonBytes = Encoding.UTF8.GetBytes(jsonData);
+
+        // If encryption is not enabled, return plain text
+        if (!_encryptionEnabled)
+            return jsonBytes;
+
+        try
+        {
+            // Encrypt the data using AES-256-CBC
+            byte[] encryptedData;
+            using (var aes = Aes.Create())
+            {
+                aes.Key = _encryptionKey;
+                aes.IV = _encryptionIV;
+                aes.Mode = CipherMode.CBC;
+                aes.Padding = PaddingMode.PKCS7;
+
+                using (var encryptor = aes.CreateEncryptor())
+                using (var memoryStream = new MemoryStream())
+                {
+                    using (var cryptoStream = new CryptoStream(memoryStream, encryptor, CryptoStreamMode.Write))
+                    {
+                        cryptoStream.Write(jsonBytes, 0, jsonBytes.Length);
+                        cryptoStream.FlushFinalBlock();
+                    }
+
+                    encryptedData = memoryStream.ToArray();
+                }
+            }
+
+            // Format the packet as described in 13.2: [4-byte length][encrypted data]
+            byte[] lengthBytes = BitConverter.GetBytes(encryptedData.Length);
+            byte[] packet = new byte[4 + encryptedData.Length];
+            Buffer.BlockCopy(lengthBytes, 0, packet, 0, 4);
+            Buffer.BlockCopy(encryptedData, 0, packet, 4, encryptedData.Length);
+
+            return packet;
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Failed to encrypt packet: {ex.Message}");
+            return jsonBytes; // Fall back to plain text if encryption fails
+        }
+    }
+
+    /// <summary>
+    /// Parses a packet, decrypting it if necessary
+    /// </summary>
+    /// <typeparam name="T">The expected type of data</typeparam>
+    /// <param name="packetData">The received packet data</param>
+    /// <returns>The parsed data</returns>
+    public T ParsePacket<T>(byte[] packetData)
+    {
+        if (packetData == null || packetData.Length == 0)
+            throw new ArgumentException("Packet data cannot be null or empty", nameof(packetData));
+            
+        try
+        {
+            // Check if this looks like an encrypted packet (has length header)
+            if (_encryptionEnabled && packetData.Length >= 4)
+            {
+                // Extract the length from the first 4 bytes
+                int dataLength = BitConverter.ToInt32(packetData, 0);
+                
+                // Ensure the packet is valid
+                if (dataLength > 0 && dataLength <= packetData.Length - 4)
+                {
+                    // Extract and decrypt the data
+                    byte[] encryptedData = new byte[dataLength];
+                    Buffer.BlockCopy(packetData, 4, encryptedData, 0, dataLength);
+                    
+                    byte[] decryptedData;
+                    using (var aes = Aes.Create())
+                    {
+                        aes.Key = _encryptionKey;
+                        aes.IV = _encryptionIV;
+                        aes.Mode = CipherMode.CBC;
+                        aes.Padding = PaddingMode.PKCS7;
+
+                        using (var decryptor = aes.CreateDecryptor())
+                        using (var memoryStream = new MemoryStream(encryptedData))
+                        using (var cryptoStream = new CryptoStream(memoryStream, decryptor, CryptoStreamMode.Read))
+                        using (var resultStream = new MemoryStream())
+                        {
+                            cryptoStream.CopyTo(resultStream);
+                            decryptedData = resultStream.ToArray();
+                        }
+                    }
+
+                    // Parse the decrypted JSON
+                    string jsonStr = Encoding.UTF8.GetString(decryptedData);
+                    return JsonConvert.DeserializeObject<T>(jsonStr);
+                }
             }
             
-            try
-            {
-                // Generate encryption key based on session ID
-                // In a real implementation, you would get this key from the server
-                // via secure channel, but for this example we derive it from the sessionId
-                using (var keyDerivation = new Rfc2898DeriveBytes(
-                    sessionId,
-                    Encoding.UTF8.GetBytes("CarRacingUDP-Salt"),  // Fixed salt, should come from server
-                    10000))  // 10000 iterations for key derivation
-                {
-                    // Generate a 256-bit (32-byte) key
-                    encryptionKey = keyDerivation.GetBytes(32);
-                    isEncryptionEnabled = true;
-                    
-                    Debug.Log("UDP encryption has been enabled");
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error setting up encryption: {ex.Message}");
-                isEncryptionEnabled = false;
-            }
+            // Fall back to plain text parsing
+            string plainText = Encoding.UTF8.GetString(packetData).TrimEnd('\n');
+            return JsonConvert.DeserializeObject<T>(plainText);
         }
-        
-        /// <summary>
-        /// Create an encrypted UDP packet from game data
-        /// </summary>
-        /// <param name="data">The game data to encrypt and send</param>
-        /// <returns>Encrypted packet bytes ready to send over UDP</returns>
-        public byte[] CreatePacket(Dictionary<string, object> data)
+        catch (Exception ex)
         {
-            try
-            {
-                // Convert data to JSON
-                string json = JsonConvert.SerializeObject(data);
-                byte[] jsonBytes = Encoding.UTF8.GetBytes(json);
-                
-                // If encryption is not enabled, return plain text with a terminator
-                if (!isEncryptionEnabled)
-                {
-                    byte[] packet = new byte[jsonBytes.Length + 1];
-                    Buffer.BlockCopy(jsonBytes, 0, packet, 0, jsonBytes.Length);
-                    packet[jsonBytes.Length] = (byte)'\n';  // Add line terminator
-                    return packet;
-                }
-                
-                // Generate a random IV for each packet (security best practice)
-                aesAlgorithm.GenerateIV();
-                byte[] iv = aesAlgorithm.IV;  // 16 bytes for AES
-                
-                // Set the encryption key
-                aesAlgorithm.Key = encryptionKey;
-                
-                // Encrypt the JSON data
-                byte[] encryptedData;
-                using (ICryptoTransform encryptor = aesAlgorithm.CreateEncryptor())
-                {
-                    encryptedData = encryptor.TransformFinalBlock(jsonBytes, 0, jsonBytes.Length);
-                }
-                
-                // Create the final packet: [IV (16 bytes)][Encrypted Data]
-                byte[] packet = new byte[IV_SIZE + encryptedData.Length];
-                Buffer.BlockCopy(iv, 0, packet, 0, IV_SIZE);
-                Buffer.BlockCopy(encryptedData, 0, packet, IV_SIZE, encryptedData.Length);
-                
-                return packet;
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error creating encrypted packet: {ex.Message}");
-                return null;
-            }
-        }
-        
-        /// <summary>
-        /// Decrypt a received UDP packet
-        /// </summary>
-        /// <param name="encryptedPacket">The encrypted packet received from the network</param>
-        /// <returns>Decrypted game data or null if decryption fails</returns>
-        public Dictionary<string, object> DecryptPacket(byte[] encryptedPacket)
-        {
-            try
-            {
-                // Check if the packet is large enough to contain an IV
-                if (!isEncryptionEnabled || encryptedPacket.Length <= IV_SIZE)
-                {
-                    // Try to parse as plain text JSON
-                    string json = Encoding.UTF8.GetString(encryptedPacket).TrimEnd('\n', '\0');
-                    return JsonConvert.DeserializeObject<Dictionary<string, object>>(json);
-                }
-                
-                // Extract the IV from the beginning of the packet
-                byte[] iv = new byte[IV_SIZE];
-                Buffer.BlockCopy(encryptedPacket, 0, iv, 0, IV_SIZE);
-                
-                // Set up decryption parameters
-                aesAlgorithm.Key = encryptionKey;
-                aesAlgorithm.IV = iv;
-                
-                // Extract and decrypt the data portion
-                byte[] encryptedData = new byte[encryptedPacket.Length - IV_SIZE];
-                Buffer.BlockCopy(encryptedPacket, IV_SIZE, encryptedData, 0, encryptedData.Length);
-                
-                // Decrypt the data
-                byte[] decryptedData;
-                using (ICryptoTransform decryptor = aesAlgorithm.CreateDecryptor())
-                {
-                    decryptedData = decryptor.TransformFinalBlock(encryptedData, 0, encryptedData.Length);
-                }
-                
-                // Convert from JSON to dictionary
-                string json = Encoding.UTF8.GetString(decryptedData);
-                return JsonConvert.DeserializeObject<Dictionary<string, object>>(json);
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error decrypting packet: {ex.Message}");
-                return null;
-            }
-        }
-        
-        /// <summary>
-        /// Hash a password using SHA-256 for secure authentication
-        /// </summary>
-        /// <param name="password">The password to hash</param>
-        /// <returns>Base64-encoded hash of the password</returns>
-        public string HashPassword(string password)
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(password))
-                    return string.Empty;
-                
-                using (SHA256 sha256 = SHA256.Create())
-                {
-                    // Compute hash
-                    byte[] hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
-                    
-                    // Convert to Base64 string for transmission
-                    return Convert.ToBase64String(hashBytes);
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error hashing password: {ex.Message}");
-                return string.Empty;
-            }
-        }
-        
-        /// <summary>
-        /// Clean up cryptographic resources
-        /// </summary>
-        public void Cleanup()
-        {
-            try
-            {
-                isEncryptionEnabled = false;
-                
-                if (encryptionKey != null)
-                {
-                    Array.Clear(encryptionKey, 0, encryptionKey.Length);
-                    encryptionKey = null;
-                }
-                
-                aesAlgorithm?.Dispose();
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error during security cleanup: {ex.Message}");
-            }
+            Debug.LogError($"Failed to parse packet: {ex.Message}");
+            return default;
         }
     }
 }
