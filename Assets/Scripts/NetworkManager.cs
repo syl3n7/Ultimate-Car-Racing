@@ -8,7 +8,6 @@ using System.Collections.Generic;
 using Newtonsoft.Json;
 using System.Net;
 using System.Net.Security;
-using System.Security.Cryptography.X509Certificates;
 
 namespace CarRacing.Networking
 {
@@ -21,7 +20,6 @@ namespace CarRacing.Networking
         [SerializeField] private int tcpPort = 443;
         [SerializeField] private int udpPort = 8443;
         [SerializeField] private bool useTLS = true;
-        [SerializeField] private bool isTrustAllCertificates = false;
         
         [Header("Authentication")]
         [SerializeField] private string playerName = "";
