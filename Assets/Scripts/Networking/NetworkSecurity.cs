@@ -92,10 +92,10 @@ namespace CarRacing.Networking
                 // If encryption is not enabled, return plain text with a terminator
                 if (!isEncryptionEnabled)
                 {
-                    byte[] unencryptedPacket = new byte[jsonBytes.Length + 1];
-                    Buffer.BlockCopy(jsonBytes, 0, unencryptedPacket, 0, jsonBytes.Length);
-                    unencryptedPacket[jsonBytes.Length] = (byte)'\n';  // Add line terminator
-                    return unencryptedPacket;
+                    byte[] packet = new byte[jsonBytes.Length + 1];
+                    Buffer.BlockCopy(jsonBytes, 0, packet, 0, jsonBytes.Length);
+                    packet[jsonBytes.Length] = (byte)'\n';  // Add line terminator
+                    return packet;
                 }
                 
                 // Generate a random IV for each packet (security best practice)
@@ -113,11 +113,11 @@ namespace CarRacing.Networking
                 }
                 
                 // Create the final packet: [IV (16 bytes)][Encrypted Data]
-                byte[] encryptedPacket = new byte[IV_SIZE + encryptedData.Length];
-                Buffer.BlockCopy(iv, 0, encryptedPacket, 0, IV_SIZE);
-                Buffer.BlockCopy(encryptedData, 0, encryptedPacket, IV_SIZE, encryptedData.Length);
+                byte[] packet = new byte[IV_SIZE + encryptedData.Length];
+                Buffer.BlockCopy(iv, 0, packet, 0, IV_SIZE);
+                Buffer.BlockCopy(encryptedData, 0, packet, IV_SIZE, encryptedData.Length);
                 
-                return encryptedPacket;
+                return packet;
             }
             catch (Exception ex)
             {
