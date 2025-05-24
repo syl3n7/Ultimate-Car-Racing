@@ -7,61 +7,54 @@ using System.Text;
 using System.Collections.Generic;
 using Newtonsoft.Json;
 using System.Net;
-using System.Net.Security;
 
 public class NetworkManager : MonoBehaviour
 {
     public static NetworkManager Instance { get; private set; }
     
-    [Header("Server Configuration")]
-    [SerializeField] private string serverAddress = "localhost";
-    [SerializeField] private int tcpPort = 443;
-    [SerializeField] private int udpPort = 8443;
-    [SerializeField] private bool useTLS = true;
+    [Header("Server Settings")]
+    public string serverIP = "127.0.0.1";
+    public int tcpPort = 8443;
+    public int udpPort = 8443;
+    public float heartbeatInterval = 5f;
     
     [Header("Authentication")]
-    [SerializeField] private string playerName = "";
-    [SerializeField] private string playerPassword = "";
-    [SerializeField] private bool storeCredentialsSecurely = true;
+    public bool rememberCredentials = true;
+    public string defaultPlayerName = "Player";
+    private string playerPassword = ""; // Will be set during registration
     
-    // Network components
-    private TcpClient tcpClient;
-    private UdpClient udpClient;
-    private SslStream sslStream;
-    private NetworkStream tcpStream;
-    private System.IO.StreamReader reader;
-    private System.IO.StreamWriter writer;
+    [Header("Debug")]
+    public bool showDebugMessages = false;
     
-    // Security components
-    private NetworkSecurity networkSecurity;
-    
-    // Connection state
-    private bool isConnected = false;
-    private bool isAuthenticated = false;
-    private bool useUdpEncryption = false;
-    private string sessionId = "";
-    private string currentRoomId = "";
+    private TcpClient _tcpClient;
+    private UdpClient _udpClient;
+    private NetworkStream _tcpStream;
+    private CancellationTokenSource _cts;
+    private StringBuilder _messageBuffer = new StringBuilder();
+    private string _clientId;
+    private string _currentRoomId;
+    private string _hostId;
+    private bool _isConnected = false;
+    private bool _isHost = false;
+    private float _lastHeartbeatTime = 0f;
+    private float _lastPingTime = 0f;
+    private float _latency = 0f;
+    private const float PING_INTERVAL = 2f;
+    private string _deviceName = "Unknown Device";
     
     // Events
-    public Action OnConnected;
-    public Action OnDisconnected;
-    public Action OnConnectionFailed;
-    public Action<Dictionary<string, object>> OnRoomListReceived;
-    public Action<Dictionary<string, object>> OnRoomJoined;
-    public Action<Dictionary<string, object>> OnGameStarted;
-    public Action<Dictionary<string, object>> OnPlayerPositionUpdated;
-    public Action<Dictionary<string, object>> OnServerMessage;
-    
-    // Latency measurement
-    private float lastPingSentTime;
-    private float currentLatency;
-    public float CurrentLatency => currentLatency;
-    private float pingInterval = 5f;
-    private float nextPingTime = 0f;
-    
-    // Background processing
-    private bool isProcessingMessages = false;
-    private Queue<string> messageQueue = new Queue<string>();
+    public event Action<string> OnConnected;
+    public event Action<string> OnDisconnected;
+    public event Action<string> OnConnectionFailed;
+    public event Action<Dictionary<string, object>> OnRoomJoined;
+    public event Action<Dictionary<string, object>> OnRoomListReceived;
+    public event Action<Dictionary<string, object>> OnGameStarted;
+    public event Action<Dictionary<string, object>> OnGameHosted;
+    public event Action<Dictionary<string, object>> OnPlayerJoined;
+    public event Action<Dictionary<string, object>> OnPlayerDisconnected;
+    public event Action<Dictionary<string, object>> OnRoomPlayersReceived;
+    public event Action<Dictionary<string, object>> OnRelayReceived;
+    public event Action<Dictionary<string, object>> OnServerMessage;
     
     private void Awake()
     {
@@ -69,36 +62,47 @@ public class NetworkManager : MonoBehaviour
         {
             Instance = this;
             DontDestroyOnLoad(gameObject);
-            networkSecurity = new NetworkSecurity();
+            
+            // Capture device name on main thread
+            _deviceName = SystemInfo.deviceName;
+            
+            // Load saved credentials if available
+            LoadSavedCredentials();
+            
+            Debug.Log("NetworkManager initialized as singleton");
+            UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
         }
         else
         {
+            Debug.Log("Duplicate NetworkManager destroyed");
             Destroy(gameObject);
         }
     }
     
-    private void Start()
+    private void OnDestroy()
     {
-        // Load stored credentials if available
-        LoadCredentials();
+        UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoaded;
+        Disconnect();
     }
     
     private void Update()
     {
-        // Send periodic ping for latency measurement
-        if (isConnected && Time.time > nextPingTime)
+        if (_isConnected)
         {
-            SendPing();
-            nextPingTime = Time.time + pingInterval;
+            // Send periodic heartbeat
+            if (Time.time - _lastHeartbeatTime > heartbeatInterval)
+            {
+                SendHeartbeat();
+                _lastHeartbeatTime = Time.time;
+            }
+            
+            // Send periodic ping to calculate latency
+            if (Time.time - _lastPingTime > PING_INTERVAL)
+            {
+                SendPing();
+                _lastPingTime = Time.time;
+            }
         }
-        
-        // Process queued messages on main thread
-        ProcessMessageQueue();
-    }
-    
-    private void OnDestroy()
-    {
-        Disconnect();
     }
     
     private void OnApplicationQuit()
@@ -106,690 +110,1140 @@ public class NetworkManager : MonoBehaviour
         Disconnect();
     }
     
-    /// <summary>
-    /// Connect to the game server with optional TLS encryption
-    /// </summary>
-    public async void Connect()
+    private void OnSceneLoaded(UnityEngine.SceneManagement.Scene scene, UnityEngine.SceneManagement.LoadSceneMode mode)
     {
-        if (isConnected)
-        {
-            Debug.Log("Already connected to server");
-            return;
-        }
+        string sceneName = scene.name;
+        Debug.Log($"NetworkManager: Scene loaded: {sceneName}");
         
-        try
+        if (_isConnected && (sceneName.Contains("Track") || sceneName.Contains("Race")))
         {
-            Debug.Log($"Connecting to server at {serverAddress}:{tcpPort}");
-            
-            tcpClient = new TcpClient();
-            await tcpClient.ConnectAsync(serverAddress, tcpPort);
-            
-            if (useTLS)
-            {
-                // Set up TLS with proper certificate validation
-                sslStream = new SslStream(
-                    tcpClient.GetStream(), 
-                    false,
-                    new RemoteCertificateValidationCallback(ValidateServerCertificate),
-                    null
-                );
-                
-                // Authenticate as client (true = use client cert, we don't need this)
-                await sslStream.AuthenticateAsClientAsync(serverAddress);
-                
-                reader = new System.IO.StreamReader(sslStream, Encoding.UTF8);
-                writer = new System.IO.StreamWriter(sslStream, Encoding.UTF8);
-            }
-            else
-            {
-                // Fallback to regular TCP (non-encrypted)
-                Debug.LogWarning("Using unencrypted TCP connection - not recommended for production!");
-                tcpStream = tcpClient.GetStream();
-                reader = new System.IO.StreamReader(tcpStream, Encoding.UTF8);
-                writer = new System.IO.StreamWriter(tcpStream, Encoding.UTF8);
-            }
-            
-            // Set up UDP client for game state updates
-            udpClient = new UdpClient();
-            
-            // Start receiving TCP messages
-            isConnected = true;
-            StartMessageReceiver();
-            
-            // Handle welcome message to get session ID
-            string welcomeMessage = await reader.ReadLineAsync();
-            Debug.Log($"Received welcome message: {welcomeMessage}");
-            
-            // Extract session ID from welcome message format "CONNECTED|<sessionId>"
-            if (welcomeMessage.StartsWith("CONNECTED|"))
-            {
-                sessionId = welcomeMessage.Split('|')[1];
-                Debug.Log($"Session ID: {sessionId}");
-                
-                // Trigger connected event
-                OnConnected?.Invoke();
-                
-                // Send authentication if we have credentials
-                if (!string.IsNullOrEmpty(playerName))
-                {
-                    SendNameCommand(playerName, playerPassword);
-                }
-            }
-            else
-            {
-                Debug.LogError("Invalid welcome message format");
-                Disconnect();
-                OnConnectionFailed?.Invoke();
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"Connection failed: {ex.Message}");
-            Disconnect();
-            OnConnectionFailed?.Invoke();
+            // Send scene ready notification after delay
+            StartCoroutine(SendSceneReadyAfterDelay(2.0f));
         }
     }
     
-    /// <summary>
-    /// Disconnect from the server and clean up resources
-    /// </summary>
-    public void Disconnect()
+    private System.Collections.IEnumerator SendSceneReadyAfterDelay(float delay)
     {
-        if (!isConnected)
-            return;
-            
-        try
-        {
-            // Send BYE command if still connected
-            if (tcpClient != null && tcpClient.Connected)
-            {
-                SendCommand("BYE");
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.LogWarning($"Error sending BYE command: {ex.Message}");
-        }
+        yield return new WaitForSeconds(delay);
         
-        try
+        if (_isConnected && !string.IsNullOrEmpty(_currentRoomId))
         {
-            isConnected = false;
-            isAuthenticated = false;
-            useUdpEncryption = false;
+            Debug.Log("Sending scene ready notification after scene change");
             
-            // Clean up security resources
-            networkSecurity.Cleanup();
-            
-            // Close TCP connections
-            writer?.Close();
-            reader?.Close();
-            sslStream?.Close();
-            tcpStream?.Close();
-            tcpClient?.Close();
-            
-            // Close UDP client
-            udpClient?.Close();
-            
-            // Reset variables
-            sessionId = "";
-            currentRoomId = "";
-            
-            // Notify listeners
-            OnDisconnected?.Invoke();
-            
-            Debug.Log("Disconnected from server");
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"Error during disconnect: {ex.Message}");
+            // According to SERVER-README.md, SCENE_READY needs to be sent to each player individually
+            // We can't use "all" as targetId - instead we'll broadcast to room via GameManager
+            // Use BroadcastSceneReady method which is already set up correctly
+            if (GameManager.Instance != null)
+            {
+                GameManager.Instance.BroadcastSceneReady();
+                Debug.Log($"Broadcasted scene ready state via GameManager");
+            }
+            else
+            {
+                Debug.LogError("Cannot broadcast SCENE_READY - GameManager instance is null");
+            }
         }
     }
     
-    /// <summary>
-    /// Send player name for registration or authentication
-    /// </summary>
-    public void SendNameCommand(string name, string password)
+    public async Task Connect()
     {
-        if (!isConnected)
+        if (_isConnected) return;
+        
+        try
         {
-            Debug.LogError("Cannot send NAME command - not connected");
-            return;
+            _cts = new CancellationTokenSource();
+            
+            // TCP Connection
+            _tcpClient = new TcpClient();
+            await _tcpClient.ConnectAsync(serverIP, tcpPort);
+            _tcpStream = _tcpClient.GetStream();
+            
+            // UDP Connection
+            _udpClient = new UdpClient();
+            _udpClient.Connect(serverIP, udpPort);
+            
+            // Start listening tasks before sending any data
+            _ = Task.Run(ListenForTcpMessages, _cts.Token);
+            _ = Task.Run(ListenForUdpMessages, _cts.Token);
+            
+            // Reset buffer
+            _messageBuffer.Clear();
+            
+            // Note: Don't set _isConnected = true here
+            // It will be set when we receive the connection confirmation
+            
+            LogDebug("Socket connection established, waiting for server confirmation");
         }
+        catch (Exception e)
+        {
+            LogDebug($"Connection failed: {e.Message}");
+            OnConnectionFailed?.Invoke(e.Message);
+            
+            // Clean up
+            _tcpClient?.Close();
+            _udpClient?.Close();
+            _cts?.Cancel();
+        }
+    }
+    
+    // Fix SendRegistration to use NAME command according to section 3.2 of SERVER-README.md
+    private async Task SendRegistration()
+    {
+        // For clarity, let's check if we have a password first
+        bool hasPassword = !string.IsNullOrEmpty(playerPassword);
         
-        playerName = name;
-        playerPassword = password;
-        
-        // Construct NAME command according to protocol
-        var command = new Dictionary<string, object>
+        // First attempt - send just the name to see if we need authentication
+        var registrationMessage = new Dictionary<string, object>
         {
             { "command", "NAME" },
-            { "name", name }
+            { "name", _deviceName }
         };
         
-        // Add password if provided
-        if (!string.IsNullOrEmpty(password))
+        // Only add password if we have one
+        if (hasPassword)
         {
-            command["password"] = password;
+            registrationMessage["password"] = playerPassword;
+            Debug.Log($"Sending player registration with name: {_deviceName} and password");
+        }
+        else
+        {
+            Debug.Log($"Sending player registration with name: {_deviceName} (no password)");
             
-            // Save credentials securely if enabled
-            if (storeCredentialsSecurely)
+            // If we don't have a password, prepare to show auth panel after server response
+            UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                // Don't show auth panel immediately, wait for server response
+                // If name is new, server will accept without password
+                // If name exists, server will send AUTH_FAILED
+            });
+        }
+        
+        await SendTcpMessage(registrationMessage);
+    }
+    
+    private async Task ListenForTcpMessages()
+    {
+        byte[] buffer = new byte[4096];
+        
+        while (!_cts.IsCancellationRequested && _tcpClient.Connected)
+        {
+            try
             {
-                SaveCredentials(name, password);
+                int bytesRead = await _tcpStream.ReadAsync(buffer, 0, buffer.Length, _cts.Token);
+                if (bytesRead == 0) break; // Connection closed
+                
+                string data = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                Debug.Log($"Received raw data: {data}");
+                _messageBuffer.Append(data);
+                
+                string messages = _messageBuffer.ToString();
+                
+                // Check for welcome message format: "CONNECTED|<sessionId>\n"
+                if (messages.StartsWith("CONNECTED|"))
+                {
+                    int newlineIndex = messages.IndexOf('\n');
+                    if (newlineIndex != -1)
+                    {
+                        string welcomeMsg = messages.Substring(0, newlineIndex);
+                        string[] parts = welcomeMsg.Split('|');
+                        if (parts.Length == 2)
+                        {
+                            _clientId = parts[1];
+                            _isConnected = true;
+                            LogDebug($"Connected with session ID: {_clientId}");
+                            
+                            // Notify on the main thread that we're connected
+                            await UnityMainThreadDispatcher.Instance().EnqueueAsync(() => {
+                                // Now send the player name
+                                SendRegistration();
+                                OnConnected?.Invoke("Connected successfully");
+                            });
+                        }
+                        
+                        // Remove welcome message from buffer
+                        messages = messages.Substring(newlineIndex + 1);
+                        _messageBuffer.Clear();
+                        _messageBuffer.Append(messages);
+                    }
+                }
+                
+                // Process any remaining JSON messages
+                int newlineIndex2;
+                while ((newlineIndex2 = messages.IndexOf('\n')) != -1)
+                {
+                    string message = messages.Substring(0, newlineIndex2);
+                    messages = messages.Substring(newlineIndex2 + 1);
+                    
+                    ProcessServerMessage(message);
+                }
+                
+                _messageBuffer.Clear();
+                _messageBuffer.Append(messages);
+            }
+            catch (Exception e) when (!(e is OperationCanceledException))
+            {
+                LogDebug($"TCP Error: {e.Message}");
+                break;
             }
         }
         
-        SendCommand(JsonConvert.SerializeObject(command));
+        // If we exited the loop unexpectedly, disconnect
+        if (_isConnected && !_cts.IsCancellationRequested)
+        {
+            await UnityMainThreadDispatcher.Instance().EnqueueAsync(() => Disconnect());
+        }
     }
     
-    /// <summary>
-    /// Request authentication with saved password
-    /// </summary>
-    public void Authenticate()
+    private async Task ListenForUdpMessages()
     {
-        if (!isConnected || string.IsNullOrEmpty(playerPassword))
+        while (!_cts.IsCancellationRequested)
         {
-            Debug.LogError("Cannot authenticate - not connected or no password");
+            try
+            {
+                var result = await _udpClient.ReceiveAsync();
+                ProcessUdpMessage(Encoding.UTF8.GetString(result.Buffer));
+            }
+            catch (Exception e) when (!(e is OperationCanceledException))
+            {
+                LogDebug($"UDP Error: {e.Message}");
+                
+                // Only break if we're still supposed to be connected
+                if (_isConnected && !_cts.IsCancellationRequested)
+                {
+                    break;
+                }
+            }
+        }
+    }
+    
+    // Update ProcessServerMessage method to add more debugging
+    private void ProcessServerMessage(string message)
+    {
+        try
+        {
+            Debug.Log($"Received message from server: {message}");
+            
+            var messageObj = JsonConvert.DeserializeObject<Dictionary<string, object>>(message);
+            if (messageObj == null)
+            {
+                Debug.LogError("Failed to parse message as JSON");
+                return;
+            }
+            
+            // Server uses "command" as the key
+            if (!messageObj.ContainsKey("command"))
+            {
+                Debug.LogError("Message missing 'command' property");
+                return;
+            }
+            
+            string messageType = messageObj["command"].ToString();
+            Debug.Log($"Processing JSON message of type: {messageType}");
+            
+            // Handle messages based on command
+            switch (messageType)
+            {
+                case "NAME_OK":
+                    LogDebug($"Name acknowledged by server");
+                    
+                    // Check if we're authenticated
+                    bool authenticated = false;
+                    if (messageObj.ContainsKey("authenticated"))
+                    {
+                        if (messageObj["authenticated"] is bool authBool)
+                        {
+                            authenticated = authBool;
+                        }
+                        else if (messageObj["authenticated"] is string authStr)
+                        {
+                            bool.TryParse(authStr, out authenticated);
+                        }
+                    }
+                    
+                    Debug.Log($"Authentication status: {(authenticated ? "Authenticated" : "Not authenticated")}");
+                    
+                    // Save credentials if successfully authenticated
+                    if (authenticated && rememberCredentials)
+                    {
+                        SaveCredentials(_deviceName, playerPassword);
+                        
+                        // Continue with normal flow
+                        UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                            if (UIManager.Instance != null)
+                            {
+                                UIManager.Instance.HideConnectionPanel();
+                                UIManager.Instance.ShowNotification("Successfully authenticated!");
+                            }
+                        });
+                    }
+                    else if (!authenticated)
+                    {
+                        // Show auth panel if authentication failed
+                        UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                            if (UIManager.Instance != null)
+                            {
+                                UIManager.Instance.HideConnectionPanel();
+                                UIManager.Instance.ShowAuthPanel("Please enter password for this username");
+                            }
+                        });
+                    }
+                    
+                    break;
+                    
+                case "AUTH_FAILED":
+                    string errorMessage = "Authentication failed";
+                    if (messageObj.ContainsKey("message"))
+                    {
+                        errorMessage = messageObj["message"].ToString();
+                    }
+                    
+                    Debug.LogError($"Authentication error: {errorMessage}");
+                    
+                    // Show auth panel with error message
+                    UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                        if (UIManager.Instance != null)
+                        {
+                            UIManager.Instance.HideConnectionPanel();
+                            UIManager.Instance.ShowAuthPanel(errorMessage);
+                        }
+                    });
+                    
+                    break;
+                    
+                case "ROOM_CREATED":
+                    if (messageObj.ContainsKey("roomId") && messageObj.ContainsKey("name"))
+                    {
+                        _currentRoomId = messageObj["roomId"].ToString();
+                        _isHost = true;
+                        
+                        var roomCreatedMsg = new Dictionary<string, object>
+                        {
+                            { "room_id", _currentRoomId },
+                            { "room_name", messageObj["name"].ToString() }
+                        };
+                        
+                        Debug.Log($"Successfully created room: {roomCreatedMsg["room_name"]} with ID: {roomCreatedMsg["room_id"]}");
+                        
+                        UnityMainThreadDispatcher.Instance().Enqueue(() => 
+                            OnGameHosted?.Invoke(roomCreatedMsg));
+                        
+                        LogDebug($"Room created: {_currentRoomId}, {messageObj["name"]}");
+                    }
+                    break;
+                    
+                case "ROOM_LIST":
+                    Debug.Log($"Room list received: {message}");
+                    
+                    // Convert the server's room list format to our internal format
+                    var roomListMsg = new Dictionary<string, object>();
+                    var roomsList = new List<Dictionary<string, object>>();
+                    
+                    if (messageObj.ContainsKey("rooms"))
+                    {
+                        // Extract the rooms array more carefully
+                        try
+                        {
+                            // Check different possible types for the rooms property
+                            if (messageObj["rooms"] is Newtonsoft.Json.Linq.JArray jArray)
+                            {
+                                // It's already a JArray
+                                foreach (var roomObj in jArray)
+                                {
+                                    var serverRoom = roomObj.ToObject<Dictionary<string, object>>();
+                                    AddRoomToList(roomsList, serverRoom);
+                                }
+                            }
+                            else if (messageObj["rooms"] is IEnumerable<object> enumerable)
+                            {
+                                // It's a generic enumerable
+                                foreach (var roomObj in enumerable)
+                                {
+                                    if (roomObj is Newtonsoft.Json.Linq.JObject jObject)
+                                    {
+                                        var serverRoom = jObject.ToObject<Dictionary<string, object>>();
+                                        AddRoomToList(roomsList, serverRoom);
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                // Try to deserialize it directly
+                                string roomsJson = messageObj["rooms"].ToString();
+                                var directRooms = JsonConvert.DeserializeObject<List<Dictionary<string, object>>>(roomsJson);
+                                if (directRooms != null)
+                                {
+                                    foreach (var serverRoom in directRooms)
+                                    {
+                                        AddRoomToList(roomsList, serverRoom);
+                                    }
+                                }
+                                else
+                                {
+                                    Debug.LogError($"Could not parse rooms data: {roomsJson}");
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.LogError($"Error parsing rooms data: {ex.Message}");
+                        }
+                    }
+                    else
+                    {
+                        Debug.LogError("Server response missing 'rooms' array");
+                    }
+                    
+                    roomListMsg["rooms"] = roomsList;
+                    
+                    Debug.Log($"Final processed room list: {JsonConvert.SerializeObject(roomListMsg)}");
+                    
+                    UnityMainThreadDispatcher.Instance().Enqueue(() => 
+                        OnRoomListReceived?.Invoke(roomListMsg));
+                    break;
+                    
+                case "JOIN_OK":
+                    if (messageObj.ContainsKey("roomId"))
+                    {
+                        _currentRoomId = messageObj["roomId"].ToString();
+                        
+                        // According to SERVER-README.md section 3.2, store the host ID if provided
+                        if (messageObj.ContainsKey("hostId"))
+                        {
+                            _hostId = messageObj["hostId"].ToString();
+                            _isHost = (_hostId == _clientId);
+                            Debug.Log($"Room host is: {_hostId}, local client is: {_clientId}, isHost: {_isHost}");
+                        }
+                        
+                        var joinedMsg = new Dictionary<string, object>
+                        {
+                            { "room_id", _currentRoomId },
+                            { "host_id", _hostId ?? _clientId }
+                        };
+                        
+                        Debug.Log($"Successfully joined room with ID: {_currentRoomId}");
+                        
+                        UnityMainThreadDispatcher.Instance().Enqueue(() => 
+                            OnRoomJoined?.Invoke(joinedMsg));
+                        
+                        LogDebug($"Joined room: {_currentRoomId}");
+                    }
+                    break;
+                    
+                case "ROOM_PLAYERS":
+                    Debug.Log($"Room players list received: {message}");
+                    
+                    // Check if the message contains the players array
+                    if (messageObj.ContainsKey("players"))
+                    {
+                        var roomPlayersMsg = new Dictionary<string, object>();
+                        
+                        // Copy the original message fields
+                        foreach (var kvp in messageObj)
+                        {
+                            roomPlayersMsg[kvp.Key] = kvp.Value;
+                        }
+                        
+                        Debug.Log($"Forwarding players list with {roomPlayersMsg.Count} fields");
+                        
+                        UnityMainThreadDispatcher.Instance().Enqueue(() => 
+                            OnRoomPlayersReceived?.Invoke(roomPlayersMsg));
+                    }
+                    break;
+                    
+                case "GAME_STARTED":
+                    Debug.Log($"Game started message received: {message}");
+                    
+                    // According to SERVER-README.md section 7.3, the GAME_STARTED response format should include spawn positions:
+                    // {"command":"GAME_STARTED","roomId":"roomId","hostId":"hostId","spawnPositions":{"playerId1":{"x":66,"y":-2,"z":0.8},"playerId2":{"x":60,"y":-2,"z":0.8}}}
+                    
+                    var gameStartedMsg = new Dictionary<string, object>();
+                    
+                    // Check if server provided spawn positions
+                    if (messageObj.ContainsKey("spawnPositions"))
+                    {
+                        Debug.Log("Server provided spawn positions, using those");
+                        
+                        // Extract spawn position for this player
+                        var spawnPositions = messageObj["spawnPositions"] as Newtonsoft.Json.Linq.JObject;
+                        if (spawnPositions != null && spawnPositions.ContainsKey(_clientId))
+                        {
+                            var mySpawnPos = spawnPositions[_clientId] as Newtonsoft.Json.Linq.JObject;
+                            if (mySpawnPos != null)
+                            {
+                                // Use server-assigned spawn position
+                                gameStartedMsg["spawn_position"] = mySpawnPos;
+                                Debug.Log($"Using server-assigned spawn position: {mySpawnPos["x"]},{mySpawnPos["y"]},{mySpawnPos["z"]} for player {_clientId}");
+                            }
+                        }
+                    }
+                    
+                    // If no position found or provided, use a default position based on predefined garage positions
+                    if (!gameStartedMsg.ContainsKey("spawn_position"))
+                    {
+                        Debug.Log("No spawn position found in server message, using fallback position");
+                        
+                        // Find an appropriate fallback position using predefined garage positions from section 7.3
+                        // The track garage positions are defined in the GameManager class
+                        var spawnPosObj = new Newtonsoft.Json.Linq.JObject();
+                        spawnPosObj["x"] = 66f;  // Position 0 from documentation
+                        spawnPosObj["y"] = -2f;
+                        spawnPosObj["z"] = 0.8f;
+                        spawnPosObj["index"] = 0; // Default spawn index
+                        
+                        gameStartedMsg["spawn_position"] = spawnPosObj;
+                        Debug.Log($"Using fallback spawn position: {spawnPosObj["x"]},{spawnPosObj["y"]},{spawnPosObj["z"]}");
+                    }
+                    
+                    // Include room ID from server response
+                    if (messageObj.ContainsKey("roomId"))
+                    {
+                        gameStartedMsg["room_id"] = messageObj["roomId"];
+                    }
+                    
+                    // Include host ID if provided
+                    if (messageObj.ContainsKey("hostId"))
+                    {
+                        gameStartedMsg["host_id"] = messageObj["hostId"];
+                    }
+                    
+                    // Make sure we update the scene on the main thread
+                    UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                        OnGameStarted?.Invoke(gameStartedMsg);
+                        LogDebug($"Game started for room: {_currentRoomId}");
+                    });
+                    break;
+                
+                // Handle errors properly 
+                case "UNKNOWN_COMMAND":
+                    Debug.LogError($"Server rejected command: {messageObj["originalCommand"]}");
+                    break;
+                    
+                case "ERROR":
+                    Debug.LogError($"Server error: {messageObj["message"]}");
+                    break;
+                    
+                case "RELAYED_MESSAGE":
+                    Debug.Log($"Received relayed message: {message}");
+                    
+                    // According to SERVER-README.md section 3.2, RELAYED_MESSAGE has format:
+                    // {"command":"RELAYED_MESSAGE","senderId":"id","senderName":"name","message":"text"}
+                    
+                    if (messageObj.ContainsKey("senderId") && messageObj.ContainsKey("message"))
+                    {
+                        var relayedMsg = new Dictionary<string, object>
+                        {
+                            { "sender_id", messageObj["senderId"] },
+                            { "message", messageObj["message"] }
+                        };
+                        
+                        // Include sender name if provided
+                        if (messageObj.ContainsKey("senderName"))
+                        {
+                            relayedMsg["sender_name"] = messageObj["senderName"];
+                        }
+                        
+                        // If this is a SCENE_READY message, handle it specially
+                        string msgContent = messageObj["message"].ToString();
+                        if (msgContent.StartsWith("SCENE_READY:"))
+                        {
+                            try
+                            {
+                                string[] parts = msgContent.Split(':');
+                                if (parts.Length > 1)
+                                {
+                                    string readyPlayerId = parts[1];
+                                    Debug.Log($"Player {readyPlayerId} is ready - scene loaded");
+                                    
+                                    // Notify GameManager that this player is ready
+                                    UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                                        if (GameManager.Instance != null)
+                                        {
+                                            GameManager.Instance.HandlePlayerReady(readyPlayerId);
+                                        }
+                                    });
+                                }
+                            }
+                            catch (Exception e)
+                            {
+                                Debug.LogError($"Error processing SCENE_READY message: {e.Message}");
+                            }
+                        }
+                        
+                        UnityMainThreadDispatcher.Instance().Enqueue(() => 
+                            OnRelayReceived?.Invoke(relayedMsg));
+                    }
+                    break;
+
+                case "PLAYER_INFO":
+                    // According to section 3.2, PLAYER_INFO response format:
+                    // {"command":"PLAYER_INFO","playerInfo":{"id":"id","name":"playerName","currentRoomId":"roomId"}}
+                    Debug.Log($"Received player info from server: {message}");
+                    
+                    // Forward the player info to UI manager if needed
+                    if (messageObj.ContainsKey("playerInfo"))
+                    {
+                        var playerInfoMsg = new Dictionary<string, object>();
+                        playerInfoMsg["player_info"] = messageObj["playerInfo"];
+                        
+                        UnityMainThreadDispatcher.Instance().Enqueue(() => 
+                            OnServerMessage?.Invoke(playerInfoMsg));
+                    }
+                    break;
+
+                case "PONG":
+                    // According to SERVER-README.md section 3.2, PONG is the response to PING
+                    // We can't directly calculate latency here because Time.time can only be called from main thread
+                    // Instead, dispatch to main thread to calculate latency
+                    UnityMainThreadDispatcher.Instance().Enqueue(() => {
+                        _latency = Time.time - _lastPingTime;
+                        LogDebug($"Received PONG response, latency: {_latency * 1000:F2}ms");
+                    });
+                    break;
+                    
+                default:
+                    LogDebug($"Unhandled message type: {messageType}");
+                    break;
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"Error processing server message: {e.Message}\nMessage: {message}");
+        }
+    }
+    
+    private void ProcessUdpMessage(string jsonMessage)
+    {
+        try
+        {
+            Debug.Log($"Received UDP message: {jsonMessage}");
+            var message = JsonConvert.DeserializeObject<Dictionary<string, object>>(jsonMessage);
+            
+            // Skip if message is invalid
+            if (message == null) return;
+            
+            // Based on SERVER-README.md, UDP packets use the UPDATE command format:
+            // {"command":"UPDATE","sessionId":"id","position":{"x":0,"y":0,"z":0},"rotation":{"x":0,"y":0,"z":0,"w":1}}
+            
+            if (message.ContainsKey("command") && message["command"].ToString() == "UPDATE" && 
+                message.ContainsKey("sessionId") && message.ContainsKey("position") && message.ContainsKey("rotation"))
+            {
+                string fromClientId = message["sessionId"].ToString();
+                
+                // Skip our own messages
+                if (fromClientId == _clientId) return;
+                
+                var position = message["position"] as Newtonsoft.Json.Linq.JObject;
+                var rotation = message["rotation"] as Newtonsoft.Json.Linq.JObject;
+                
+                if (position != null && rotation != null)
+                {
+                    UnityMainThreadDispatcher.Instance().Enqueue(() =>
+                    {
+                        if (GameManager.Instance != null)
+                        {
+                            bool playerExists = GameManager.Instance.IsPlayerActive(fromClientId);
+                            
+                            // Create player state from position and rotation
+                            Vector3 pos = new Vector3(
+                                Convert.ToSingle(position["x"]),
+                                Convert.ToSingle(position["y"]),
+                                Convert.ToSingle(position["z"])
+                            );
+                            
+                            Quaternion rot = new Quaternion(
+                                Convert.ToSingle(rotation["x"]),
+                                Convert.ToSingle(rotation["y"]),
+                                Convert.ToSingle(rotation["z"]),
+                                Convert.ToSingle(rotation["w"])
+                            );
+                            
+                            var playerState = new GameManager.PlayerStateData
+                            {
+                                playerId = fromClientId,
+                                position = pos,
+                                rotation = rot,
+                                velocity = Vector3.zero,  // Server doesn't provide velocity
+                                angularVelocity = Vector3.zero, // Server doesn't provide angular velocity
+                                timestamp = Time.time
+                            };
+                            
+                            // If the player doesn't exist yet, spawn them
+                            if (!playerExists)
+                            {
+                                GameManager.Instance.SpawnRemotePlayer(
+                                    fromClientId, 
+                                    playerState.position, 
+                                    playerState.rotation
+                                );
+                            }
+                            
+                            // Update the player's state
+                            GameManager.Instance.ApplyPlayerState(playerState, !playerExists);
+                        }
+                    });
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            LogDebug($"UDP message processing error: {e.Message}");
+        }
+    }
+    
+    private Vector3 ParseVector3(object vectorObject)
+    {
+        var vectorData = vectorObject as Dictionary<string, object>;
+        if (vectorData != null)
+        {
+            return new Vector3(
+                Convert.ToSingle(vectorData["x"]),
+                Convert.ToSingle(vectorData["y"]),
+                Convert.ToSingle(vectorData["z"])
+            );
+        }
+        return Vector3.zero;
+    }
+    
+    private Quaternion ParseQuaternion(object quaternionObject)
+    {
+        var quaternionData = quaternionObject as Dictionary<string, object>;
+        if (quaternionData != null)
+        {
+            return new Quaternion(
+                Convert.ToSingle(quaternionData["x"]),
+                Convert.ToSingle(quaternionData["y"]),
+                Convert.ToSingle(quaternionData["z"]),
+                Convert.ToSingle(quaternionData["w"])
+            );
+        }
+        return Quaternion.identity;
+    }
+    
+    // Modify SendTcpMessage to add better logging
+    public async Task SendTcpMessage(object message)
+    {
+        if (!_isConnected || _tcpClient == null || !_tcpClient.Connected) 
+        {
+            Debug.LogError("Cannot send TCP message: Not connected to server");
             return;
         }
-        
-        var command = new Dictionary<string, object>
+            
+        try
         {
-            { "command", "AUTHENTICATE" },
-            { "password", playerPassword }
+            // Ensure client_id is included if we have one
+            if (message is Dictionary<string, object> dict && !dict.ContainsKey("client_id") && !string.IsNullOrEmpty(_clientId))
+            {
+                dict["client_id"] = _clientId;
+            }
+            
+            string json = JsonConvert.SerializeObject(message);
+            Debug.Log($"Sending TCP message: {json}");
+            byte[] data = Encoding.UTF8.GetBytes(json + "\n");
+            await _tcpStream.WriteAsync(data, 0, data.Length, _cts.Token);
+            Debug.Log("TCP message sent successfully");
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"Error sending TCP message: {e.Message}");
+            
+            // If serious error, disconnect
+            if (!_tcpClient.Connected)
+            {
+                await UnityMainThreadDispatcher.Instance().EnqueueAsync(() => Disconnect());
+            }
+        }
+    }
+    
+    public void SendUdpMessage(object message)
+    {
+        if (!_isConnected || _udpClient == null) return;
+        
+        try
+        {
+            // Ensure client_id is included if we have one
+            if (message is Dictionary<string, object> dict && !dict.ContainsKey("client_id") && !string.IsNullOrEmpty(_clientId))
+            {
+                dict["client_id"] = _clientId;
+            }
+            
+            string json = JsonConvert.SerializeObject(message);
+            byte[] data = Encoding.UTF8.GetBytes(json);
+            _udpClient.Send(data, data.Length);
+        }
+        catch (Exception e)
+        {
+            LogDebug($"Send UDP error: {e.Message}");
+        }
+    }
+    
+    private void SendHeartbeat()
+    {
+        var heartbeatMessage = new Dictionary<string, object>
+        {
+            { "command", "PING" } // Using PING as heartbeat since server supports it
         };
         
-        SendCommand(JsonConvert.SerializeObject(command));
+        SendTcpMessage(heartbeatMessage);
     }
     
-    /// <summary>
-    /// Request the list of available rooms
-    /// </summary>
-    public void RequestRoomList()
+    // Fix SendPing to use PING command
+    private void SendPing()
     {
-        SendCommand("{\"command\":\"LIST_ROOMS\"}");
-    }
-    
-    /// <summary>
-    /// Create a new game room
-    /// </summary>
-    public void CreateRoom(string roomName)
-    {
-        if (!isAuthenticated)
+        var pingMessage = new Dictionary<string, object>
         {
-            Debug.LogError("Must be authenticated to create a room");
+            { "command", "PING" }
+        };
+        
+        SendTcpMessage(pingMessage);
+        _lastPingTime = Time.time;
+    }
+    
+    public void Disconnect()
+    {
+        if (!_isConnected) return;
+        
+        try
+        {
+            // According to SERVER-README.md section 3.2, BYE is a supported command
+            if (_tcpClient != null && _tcpClient.Connected)
+            {
+                var disconnectMessage = new Dictionary<string, object>
+                {
+                    { "command", "BYE" }
+                };
+                
+                // Fire and forget - don't await
+                SendTcpMessage(disconnectMessage);
+                Debug.Log("Sent BYE command to server");
+            }
+        }
+        catch (Exception e)
+        {
+            Debug.LogError($"Error sending disconnect message: {e.Message}");
+        }
+        
+        // Cancel ongoing operations
+        _cts?.Cancel();
+        
+        // Close connections
+        _tcpClient?.Close();
+        _udpClient?.Close();
+        
+        // Reset state
+        _isConnected = false;
+        _currentRoomId = null;
+        _hostId = null;
+        _isHost = false;
+        
+        OnDisconnected?.Invoke("Disconnected from server");
+        LogDebug("Disconnected from server");
+    }
+    
+    // Game-specific methods
+    public void HostGame(string roomName, int maxPlayers = 20)
+    {
+        if (!_isConnected) 
+        {
+            Debug.LogError("Cannot host game: Not connected to server");
             return;
         }
         
-        var command = new Dictionary<string, object>
+        Debug.Log($"Sending CREATE_ROOM request for room: {roomName}");
+        
+        var message = new Dictionary<string, object>
         {
             { "command", "CREATE_ROOM" },
             { "name", roomName }
         };
         
-        SendCommand(JsonConvert.SerializeObject(command));
+        SendTcpMessage(message);
     }
     
-    /// <summary>
-    /// Join an existing room
-    /// </summary>
-    public void JoinRoom(string roomId)
+    public void JoinGame(string roomId)
     {
-        if (!isAuthenticated)
+        if (!_isConnected) 
         {
-            Debug.LogError("Must be authenticated to join a room");
-            return;
+            Debug.LogError("Cannot join game: Not connected to server");
+            return; 
         }
         
-        var command = new Dictionary<string, object>
+        Debug.Log($"Joining room with ID: {roomId}");
+        
+        var message = new Dictionary<string, object>
         {
             { "command", "JOIN_ROOM" },
             { "roomId", roomId }
         };
         
-        SendCommand(JsonConvert.SerializeObject(command));
+        SendTcpMessage(message);
     }
     
-    /// <summary>
-    /// Start the game (host only)
-    /// </summary>
+    // According to SERVER-README.md section 3.2, only the host can start the game
+    // The format is: {"command":"START_GAME"} - no roomId needed since server knows player's room
     public void StartGame()
     {
-        if (!isAuthenticated)
+        if (!_isConnected || string.IsNullOrEmpty(_currentRoomId)) 
         {
-            Debug.LogError("Must be authenticated to start a game");
+            Debug.LogError("Cannot start game: Not connected or no room ID");
             return;
         }
         
-        SendCommand("{\"command\":\"START_GAME\"}");
+        if (!_isHost)
+        {
+            Debug.LogError("Cannot start game: Only the host can start the game");
+            return;
+        }
+        
+        Debug.Log($"Sending START_GAME command for room: {_currentRoomId} as host: {_isHost}");
+        
+        var message = new Dictionary<string, object>
+        {
+            { "command", "START_GAME" }
+        };
+        
+        SendTcpMessage(message);
     }
     
-    /// <summary>
-    /// Leave the current room
-    /// </summary>
-    public void LeaveRoom()
+    public void LeaveGame()
     {
-        if (!isAuthenticated)
+        if (!_isConnected || string.IsNullOrEmpty(_currentRoomId)) return;
+        
+        // According to SERVER-README.md section 3.2, LEAVE_ROOM doesn't take a roomId parameter
+        // {"command":"LEAVE_ROOM"}
+        var message = new Dictionary<string, object>
         {
-            Debug.LogError("Must be authenticated to leave a room");
+            { "command", "LEAVE_ROOM" }
+        };
+        
+        SendTcpMessage(message);
+        _currentRoomId = null;
+        _isHost = false;
+    }
+    
+    public void RequestRoomList()
+    {
+        if (!_isConnected) 
+        {
+            Debug.LogError("Cannot request room list: Not connected to server");
             return;
         }
         
-        SendCommand("{\"command\":\"LEAVE_ROOM\"}");
-        currentRoomId = "";
+        Debug.Log("Sending LIST_ROOMS request to server");
+        
+        var message = new Dictionary<string, object>
+        {
+            { "command", "LIST_ROOMS" }
+        };
+        
+        SendTcpMessage(message);
     }
     
-    /// <summary>
-    /// Request player information
-    /// </summary>
+    public void SendPlayerState(GameManager.PlayerStateData stateData)
+    {
+        if (!_isConnected || string.IsNullOrEmpty(_currentRoomId)) return;
+        
+        // According to SERVER-README.md section 4.2, the UDP format must be:
+        // {"command":"UPDATE","sessionId":"id","position":{"x":0,"y":0,"z":0},"rotation":{"x":0,"y":0,"z":0,"w":1}}
+        var message = new Dictionary<string, object>
+        {
+            ["command"] = "UPDATE",
+            ["sessionId"] = _clientId,
+            ["position"] = new Dictionary<string, float>
+            {
+                ["x"] = stateData.position.x,
+                ["y"] = stateData.position.y,
+                ["z"] = stateData.position.z
+            },
+            ["rotation"] = new Dictionary<string, float>
+            {
+                ["x"] = stateData.rotation.x,
+                ["y"] = stateData.rotation.y,
+                ["z"] = stateData.rotation.z,
+                ["w"] = stateData.rotation.w
+            }
+        };
+        
+        // Debug.Log($"Sending UDP state update: {JsonConvert.SerializeObject(message)}");
+        SendUdpMessage(message);
+    }
+    
+    // Make sure we properly format the UDP INPUT command according to documentation
+    public void SendPlayerInput(GameManager.PlayerInputData input)
+    {
+        if (!_isConnected || string.IsNullOrEmpty(_currentRoomId)) return;
+        
+        // According to SERVER-README.md section 4.2, the INPUT format must be:
+        // {"command":"INPUT","sessionId":"id","roomId":"roomId","input":{...},"client_id":"id"}
+        var message = new Dictionary<string, object>
+        {
+            { "command", "INPUT" },
+            { "sessionId", _clientId },
+            { "roomId", _currentRoomId },
+            { "input", new Dictionary<string, object>
+                {
+                    { "steering", input.steering },
+                    { "throttle", input.throttle },
+                    { "brake", input.brake },
+                    { "timestamp", input.timestamp }
+                }
+            },
+            { "client_id", _clientId } // Required according to docs
+        };
+        
+        // Debug.Log($"Sending UDP input: {JsonConvert.SerializeObject(message)}");
+        SendUdpMessage(message);
+    }
+    
+    // Fix GET_ROOM_PLAYERS to include roomId parameter as required in the documentation
+    public void GetRoomPlayers(string roomId)
+    {
+        if (!_isConnected) return;
+        
+        // According to SERVER-README.md section 3.2, GET_ROOM_PLAYERS should include roomId
+        var message = new Dictionary<string, object>
+        {
+            { "command", "GET_ROOM_PLAYERS" },
+            { "roomId", roomId }
+        };
+        
+        SendTcpMessage(message);
+    }
+
+    // Get player information from the server
     public void RequestPlayerInfo()
     {
-        SendCommand("{\"command\":\"PLAYER_INFO\"}");
+        if (!_isConnected) return;
+        
+        // According to SERVER-README.md section 3.2, PLAYER_INFO command:
+        // {"command":"PLAYER_INFO"}
+        var message = new Dictionary<string, object>
+        {
+            { "command", "PLAYER_INFO" }
+        };
+        
+        SendTcpMessage(message);
+        Debug.Log("Sent PLAYER_INFO request to server");
     }
     
-    /// <summary>
-    /// Send a position update via UDP
-    /// </summary>
-    public void SendPositionUpdate(Vector3 position, Quaternion rotation)
+    // Utility methods
+    public string GetClientId() => _clientId;
+    public string GetCurrentRoomId() => _currentRoomId;
+    public float GetLatency() => _latency;
+    public bool IsConnected() => _isConnected;
+    public bool IsHost() => _isHost;
+    
+    private void LogDebug(string message)
     {
-        if (!isConnected || string.IsNullOrEmpty(sessionId) || string.IsNullOrEmpty(currentRoomId))
+        if (showDebugMessages)
+            Debug.Log($"[NetworkManager] {message}");
+    }
+
+    // Add this method to check event subscriptions
+    public bool HasGameHostedSubscribers()
+    {
+        return OnGameHosted != null;
+    }
+
+    // Helper method to add a room to the room list with proper mapping
+    private void AddRoomToList(List<Dictionary<string, object>> roomsList, Dictionary<string, object> serverRoom)
+    {
+        var roomData = new Dictionary<string, object>();
+        
+        // Match keys with our UI's expected format - according to SERVER-README.md field names
+        roomData["room_id"] = serverRoom.ContainsKey("id") ? serverRoom["id"] : "";
+        roomData["name"] = serverRoom.ContainsKey("name") ? serverRoom["name"] : "Unknown Room";
+        roomData["player_count"] = serverRoom.ContainsKey("playerCount") ? serverRoom["playerCount"] : 0;
+        roomData["max_players"] = 20; // Default to 20 if not provided
+        roomData["is_active"] = serverRoom.ContainsKey("isActive") ? serverRoom["isActive"] : false;
+        
+        // Per section 3.2, store the hostId if provided, for host status determination later
+        if (serverRoom.ContainsKey("hostId"))
         {
-            // Not ready to send position updates
-            return;
+            roomData["host_id"] = serverRoom["hostId"];
         }
+        
+        roomsList.Add(roomData);
+        Debug.Log($"Added room: {roomData["name"]} (ID: {roomData["room_id"]})");
+    }
+
+    // Helper method to get the room host ID
+    public string GetRoomHostId()
+    {
+        // Return the stored host ID, or default to client ID if none is available
+        return _hostId ?? _clientId;
+    }
+
+    // New method to set auth credentials
+    public void SetCredentials(string playerName, string password)
+    {
+        _deviceName = playerName;
+        playerPassword = password;
+        
+        // If already connected, send updated credentials
+        if (_isConnected)
+        {
+            SendRegistration();
+        }
+        
+        if (rememberCredentials)
+        {
+            SaveCredentials(playerName, password);
+        }
+    }
+    
+    // New methods to manage credentials
+    private void SaveCredentials(string playerName, string password)
+    {
+        if (!rememberCredentials) return;
         
         try
         {
-            // Create position update object according to protocol
-            var updateData = new Dictionary<string, object>
-            {
-                { "command", "UPDATE" },
-                { "sessionId", sessionId },
-                { "position", new Dictionary<string, float>
-                    {
-                        { "x", position.x },
-                        { "y", position.y },
-                        { "z", position.z }
-                    }
-                },
-                { "rotation", new Dictionary<string, float>
-                    {
-                        { "x", rotation.x },
-                        { "y", rotation.y },
-                        { "z", rotation.z },
-                        { "w", rotation.w }
-                    }
-                }
-            };
-            
-            byte[] data;
-            
-            // Use encryption if available
-            if (useUdpEncryption)
-            {
-                data = networkSecurity.CreatePacket(updateData);
-            }
-            else
-            {
-                // Fallback to plain text JSON for unauthenticated users
-                string json = JsonConvert.SerializeObject(updateData) + "\n";
-                data = Encoding.UTF8.GetBytes(json);
-            }
-            
-            if (data != null)
-            {
-                // Send UDP packet
-                udpClient.Send(data, data.Length, serverAddress, udpPort);
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"Error sending position update: {ex.Message}");
-        }
-    }
-    
-    /// <summary>
-    /// Send input controls via UDP
-    /// </summary>
-    public void SendInputControls(float steering, float throttle, float brake, float timestamp)
-    {
-        if (!isConnected || string.IsNullOrEmpty(sessionId) || string.IsNullOrEmpty(currentRoomId))
-        {
-            // Not ready to send input updates
-            return;
-        }
-        
-        try
-        {
-            // Create input update object according to protocol
-            var inputData = new Dictionary<string, object>
-            {
-                { "command", "INPUT" },
-                { "sessionId", sessionId },
-                { "roomId", currentRoomId },
-                { "input", new Dictionary<string, float>
-                    {
-                        { "steering", steering },
-                        { "throttle", throttle },
-                        { "brake", brake },
-                        { "timestamp", timestamp }
-                    }
-                },
-                { "client_id", sessionId }
-            };
-            
-            byte[] data;
-            
-            // Use encryption if available
-            if (useUdpEncryption)
-            {
-                data = networkSecurity.CreatePacket(inputData);
-            }
-            else
-            {
-                // Fallback to plain text JSON for unauthenticated users
-                string json = JsonConvert.SerializeObject(inputData) + "\n";
-                data = Encoding.UTF8.GetBytes(json);
-            }
-            
-            if (data != null)
-            {
-                // Send UDP packet
-                udpClient.Send(data, data.Length, serverAddress, udpPort);
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"Error sending input controls: {ex.Message}");
-        }
-    }
-    
-    /// <summary>
-    /// Send a ping to measure latency
-    /// </summary>
-    private void SendPing()
-    {
-        if (!isConnected)
-            return;
-            
-        lastPingSentTime = Time.time;
-        SendCommand("{\"command\":\"PING\"}");
-    }
-    
-    /// <summary>
-    /// Send a JSON command via TCP
-    /// </summary>
-    private async void SendCommand(string jsonCommand)
-    {
-        if (!isConnected)
-        {
-            Debug.LogError("Cannot send command - not connected");
-            return;
-        }
-        
-        try
-        {
-            await writer.WriteLineAsync(jsonCommand);
-            await writer.FlushAsync();
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"Error sending command: {ex.Message}");
-            HandleConnectionError();
-        }
-    }
-    
-    /// <summary>
-    /// Start receiving TCP messages in the background
-    /// </summary>
-    private async void StartMessageReceiver()
-    {
-        try
-        {
-            while (isConnected)
-            {
-                string message = await reader.ReadLineAsync();
-                
-                if (message == null)
-                {
-                    // Connection closed
-                    HandleConnectionError();
-                    break;
-                }
-                
-                // Queue message for processing on main thread
-                lock (messageQueue)
-                {
-                    messageQueue.Enqueue(message);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"Error in message receiver: {ex.Message}");
-            HandleConnectionError();
-        }
-    }
-    
-    /// <summary>
-    /// Process messages on the main thread
-    /// </summary>
-    private void ProcessMessageQueue()
-    {
-        if (isProcessingMessages)
-            return;
-            
-        isProcessingMessages = true;
-        
-        try
-        {
-            string message;
-            bool hasMessages = false;
-            
-            lock (messageQueue)
-            {
-                hasMessages = messageQueue.Count > 0;
-                
-                while (messageQueue.Count > 0)
-                {
-                    message = messageQueue.Dequeue();
-                    ProcessMessage(message);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"Error processing message queue: {ex.Message}");
-        }
-        finally
-        {
-            isProcessingMessages = false;
-        }
-    }
-    
-    /// <summary>
-    /// Process a received message
-    /// </summary>
-    private void ProcessMessage(string message)
-    {
-        try
-        {
-            // Parse JSON message
-            var msg = JsonConvert.DeserializeObject<Dictionary<string, object>>(message);
-            
-            if (msg == null || !msg.ContainsKey("command"))
-            {
-                Debug.LogWarning($"Received invalid message: {message}");
-                return;
-            }
-            
-            string command = msg["command"].ToString();
-            
-            // Handle common responses
-            switch (command)
-            {
-                case "PONG":
-                    // Calculate latency
-                    currentLatency = (Time.time - lastPingSentTime) * 1000f; // Convert to ms
-                    break;
-                    
-                case "NAME_OK":
-                    // Successful authentication or name registration
-                    isAuthenticated = msg.ContainsKey("authenticated") && 
-                                     (msg["authenticated"].ToString() == "True" || msg["authenticated"].ToString() == "true");
-                    
-                    // Check if UDP encryption is enabled
-                    useUdpEncryption = msg.ContainsKey("udpEncryption") && 
-                                      (msg["udpEncryption"].ToString() == "True" || msg["udpEncryption"].ToString() == "true");
-                    
-                    // Set up UDP encryption if available
-                    if (useUdpEncryption)
-                    {
-                        networkSecurity.SetupEncryption(sessionId);
-                    }
-                    
-                    Debug.Log($"NAME_OK received. Authenticated: {isAuthenticated}, UDP Encryption: {useUdpEncryption}");
-                    break;
-                    
-                case "AUTH_OK":
-                    isAuthenticated = true;
-                    Debug.Log("Authentication successful");
-                    break;
-                    
-                case "AUTH_FAILED":
-                    isAuthenticated = false;
-                    Debug.LogWarning("Authentication failed");
-                    OnServerMessage?.Invoke(msg);
-                    break;
-                    
-                case "ROOM_CREATED":
-                    if (msg.ContainsKey("roomId"))
-                    {
-                        currentRoomId = msg["roomId"].ToString();
-                    }
-                    OnRoomJoined?.Invoke(msg);
-                    break;
-                    
-                case "ROOM_JOINED":
-                    if (msg.ContainsKey("roomId"))
-                    {
-                        currentRoomId = msg["roomId"].ToString();
-                    }
-                    OnRoomJoined?.Invoke(msg);
-                    break;
-                    
-                case "ROOM_LIST":
-                    OnRoomListReceived?.Invoke(msg);
-                    break;
-                    
-                case "GAME_STARTED":
-                    OnGameStarted?.Invoke(msg);
-                    break;
-                    
-                case "ERROR":
-                case "UNKNOWN_COMMAND":
-                    Debug.LogWarning($"Server error: {message}");
-                    OnServerMessage?.Invoke(msg);
-                    break;
-                    
-                default:
-                    Debug.Log($"Received message: {message}");
-                    break;
-            }
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"Error processing message: {ex.Message}\nMessage: {message}");
-        }
-    }
-    
-    /// <summary>
-    /// Handle connection errors
-    /// </summary>
-    private void HandleConnectionError()
-    {
-        if (!isConnected)
-            return;
-            
-        Debug.LogWarning("Connection error detected");
-        Disconnect();
-    }
-    
-    /// <summary>
-    /// Save player credentials securely
-    /// </summary>
-    private void SaveCredentials(string name, string password)
-    {
-        try
-        {
-            // Use PlayerPrefs for this example, but in a real game you would use 
-            // more secure storage like Unity's Keychain on iOS or a similar secure storage method
-            PlayerPrefs.SetString("PlayerName", name);
-            
-            // WARNING: Do not store passwords in PlayerPrefs in a real game!
-            // This is just for demonstration purposes
-            // For production, use secure storage or a token-based auth system
-            if (storeCredentialsSecurely)
-            {
-                // Example only - do NOT use this in production:
-                PlayerPrefs.SetString("PlayerAuth", Convert.ToBase64String(
-                    Encoding.UTF8.GetBytes(password)));
-            }
-            
+            PlayerPrefs.SetString("PlayerName", playerName);
+            PlayerPrefs.SetString("PlayerPassword", password);
             PlayerPrefs.Save();
+            Debug.Log("Saved player credentials");
         }
-        catch (Exception ex)
+        catch (Exception e)
         {
-            Debug.LogError($"Error saving credentials: {ex.Message}");
+            Debug.LogError($"Failed to save credentials: {e.Message}");
         }
     }
     
-    /// <summary>
-    /// Load player credentials
-    /// </summary>
-    private void LoadCredentials()
+    private void LoadSavedCredentials()
     {
+        if (!rememberCredentials) return;
+        
         try
         {
             if (PlayerPrefs.HasKey("PlayerName"))
             {
-                playerName = PlayerPrefs.GetString("PlayerName");
-                
-                // Only load password if secure storage is enabled
-                if (storeCredentialsSecurely && PlayerPrefs.HasKey("PlayerAuth"))
-                {
-                    string encoded = PlayerPrefs.GetString("PlayerAuth");
-                    
-                    // Example only - do NOT use this in production:
-                    playerPassword = Encoding.UTF8.GetString(
-                        Convert.FromBase64String(encoded));
-                }
+                _deviceName = PlayerPrefs.GetString("PlayerName");
             }
+            
+            if (PlayerPrefs.HasKey("PlayerPassword"))
+            {
+                playerPassword = PlayerPrefs.GetString("PlayerPassword");
+            }
+            
+            Debug.Log($"Loaded saved credentials for: {_deviceName}");
         }
-        catch (Exception ex)
+        catch (Exception e)
         {
-            Debug.LogError($"Error loading credentials: {ex.Message}");
+            Debug.LogError($"Failed to load credentials: {e.Message}");
         }
     }
-
-    // Update certificate validation callback to be more secure
-    private bool ValidateServerCertificate(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
+    
+    // New method for explicit authentication (if needed separately)
+    public void Authenticate(string password)
     {
-        // For production, implement proper certificate validation
-        if (isTrustAllCertificates)
+        if (!_isConnected) return;
+        
+        var authMessage = new Dictionary<string, object>
         {
-            // Development mode - accept self-signed certificates, but log a warning
-            Debug.LogWarning("SECURITY WARNING: Accepting self-signed certificates (development mode)");
-            return true;
-        }
+            { "command", "AUTHENTICATE" },
+            { "password", password }
+        };
         
-        // Production mode - properly verify certificates
-        if (sslPolicyErrors == SslPolicyErrors.None)
-            return true;
-            
-        // Log specific validation errors
-        Debug.LogError($"Certificate error: {sslPolicyErrors}");
-        
-        // In production, we shouldn't accept invalid certificates
-        return false;
+        playerPassword = password; // Store for future use
+        SendTcpMessage(authMessage);
     }
 }

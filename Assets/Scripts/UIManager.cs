@@ -448,35 +448,26 @@ public class UIManager : MonoBehaviour
         // Don't hide race UI panels here - they're controlled by scene changes
     }
 
-    public void ShowAuthPanel(string statusMessage = "")
+    public void ShowAuthPanel(string message = "Please login to continue")
     {
+        if (authPanel == null)
+        {
+            Debug.LogError("Auth panel is not assigned in the Inspector!");
+            return;
+        }
+        
+        HideAllPanels();
         authPanel.SetActive(true);
         
-        if (!string.IsNullOrEmpty(statusMessage))
+        if (authStatusText != null)
         {
-            authStatusText.text = statusMessage;
-        }
-        else
-        {
-            authStatusText.text = "Enter your credentials";
+            authStatusText.text = message;
         }
         
-        // Load saved username if available
-        if (PlayerPrefs.HasKey("PlayerUsername"))
+        // Pre-fill the username if we have a profile selected
+        if (usernameInput != null && !string.IsNullOrEmpty(playerName))
         {
-            usernameInput.text = PlayerPrefs.GetString("PlayerUsername");
-        }
-        
-        // Focus on password field if username is already filled
-        if (!string.IsNullOrEmpty(usernameInput.text))
-        {
-            passwordInput.Select();
-            passwordInput.ActivateInputField();
-        }
-        else
-        {
-            usernameInput.Select();
-            usernameInput.ActivateInputField();
+            usernameInput.text = playerName;
         }
     }
     
@@ -514,43 +505,6 @@ public class UIManager : MonoBehaviour
                 _ = NetworkManager.Instance.Connect();
             }
         }
-    }
-    
-    public void AttemptLogin()
-    {
-        string username = usernameInput.text.Trim();
-        string password = passwordInput.text.Trim();
-        
-        if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
-        {
-            authStatusText.text = "Username and password are required";
-            return;
-        }
-        
-        // Store credentials securely for reconnection
-        playerUsername = username;
-        playerPassword = password;
-        
-        // Save username for convenience (don't save password)
-        PlayerPrefs.SetString("PlayerUsername", username);
-        PlayerPrefs.Save();
-        
-        // Clear password field for security
-        passwordInput.text = string.Empty;
-        
-        HideAuthPanel();
-        ShowConnectionPanel("Authenticating...");
-        
-        // Initiate connection with credentials
-        if (NetworkManager.Instance != null)
-        {
-            NetworkManager.Instance.Connect(username, password);
-        }
-    }
-    
-    public void HideAuthPanel()
-    {
-        authPanel.SetActive(false);
     }
     
     #endregion
@@ -980,8 +934,6 @@ public async void CreateRoom()
     {
         HideConnectionPanel();
         
-        isAuthenticated = true;
-        
         // According to SERVER-README.md section 3.2, only NAME is needed for registration
         // NetworkManager already sent the NAME command during connection
         
@@ -994,27 +946,9 @@ public async void CreateRoom()
         ShowNotification("Connected to server");
     }
     
-    // Add proper certificate validation method for the NetworkManager to use
-    public static bool ValidateServerCertificate(object sender, System.Security.Cryptography.X509Certificates.X509Certificate certificate,
-                                                System.Security.Cryptography.X509Certificates.X509Chain chain,
-                                                System.Net.Security.SslPolicyErrors sslPolicyErrors)
-    {
-        // For development/LAN environments, accept self-signed certificates  
-        if (sslPolicyErrors == System.Net.Security.SslPolicyErrors.RemoteCertificateChainErrors)
-        {
-            Debug.LogWarning("Accepting self-signed certificate (development environment)");
-            return true; 
-        }
-        
-        // For production use, implement proper certificate validation
-        // Only accept certificates with no policy errors
-        return sslPolicyErrors == System.Net.Security.SslPolicyErrors.None;
-    }
-    
     private void OnDisconnected()
     {
         HideConnectionPanel();
-        isAuthenticated = false;
         ShowMainMenu();
         ShowNotification("Disconnected from server");
     }
@@ -1022,24 +956,8 @@ public async void CreateRoom()
     private void OnConnectionFailed()
     {
         HideConnectionPanel();
-        isAuthenticated = false;
         ShowMainMenu();
         ShowNotification("Failed to connect to server");
-    }
-    
-    // Add proper certificate validation for secure connections
-    // This follows SERVER-README.md section 3.1 security recommendation
-    public bool ValidateServerCertificate(object sender, System.Security.Cryptography.X509Certificates.X509Certificate certificate, 
-        System.Security.Cryptography.X509Certificates.X509Chain chain, System.Net.Security.SslPolicyErrors sslPolicyErrors)
-    {
-        // For development/LAN use, we accept self-signed certificates
-        if (sslPolicyErrors == System.Net.Security.SslPolicyErrors.RemoteCertificateChainErrors)
-            return true; // Accept self-signed certificates for LAN/development
-            
-        // For production, this should be modified to only accept valid certificates
-        // TODO: For production, implement proper certificate validation or pinning
-        
-        return sslPolicyErrors == System.Net.Security.SslPolicyErrors.None;
     }
     
     private void OnRoomListReceived(Dictionary<string, object> message)
@@ -1471,46 +1389,17 @@ public async void CreateRoom()
             ShowNotification($"Server: {serverMessage}");
         }
         
-        // Handle AUTH_FAILED messages with proper error display
-        if (message.ContainsKey("command"))
+        // Handle AUTH_FAILED messages
+        if (message.ContainsKey("command") && message["command"].ToString() == "AUTH_FAILED")
         {
-            string command = message["command"].ToString();
+            string errorMessage = "Authentication failed";
+            if (message.ContainsKey("message"))
+            {
+                errorMessage = message["message"].ToString();
+            }
             
-            if (command == "AUTH_FAILED")
-            {
-                string errorMessage = "Authentication failed";
-                if (message.ContainsKey("message"))
-                {
-                    errorMessage = message["message"].ToString();
-                }
-                
-                HideConnectionPanel();
-                ShowAuthPanel(errorMessage);
-                
-                // Log authentication failure
-                Debug.LogWarning($"Authentication failed: {errorMessage}");
-                
-                // Clear password field for security
-                if (passwordInput != null)
-                {
-                    passwordInput.text = string.Empty;
-                }
-            }
-            else if (command == "NAME_OK" && message.ContainsKey("authenticated") && message.ContainsKey("udpEncryption"))
-            {
-                bool authenticated = Convert.ToBoolean(message["authenticated"]);
-                bool udpEncryption = Convert.ToBoolean(message["udpEncryption"]);
-                
-                if (authenticated && udpEncryption)
-                {
-                    Debug.Log("Successfully authenticated with UDP encryption enabled");
-                    // The NetworkManager should handle the UDP encryption key derivation
-                }
-                else if (authenticated && !udpEncryption)
-                {
-                    Debug.LogWarning("Authenticated but UDP encryption is disabled - less secure");
-                }
-            }
+            HideConnectionPanel();
+            ShowAuthPanel(errorMessage);
         }
     }
     
@@ -1754,44 +1643,6 @@ public async void CreateRoom()
 
             // Set the next update time
             fpsNextUpdateTime = Time.unscaledTime + fpsUpdateInterval;
-        }
-    }
-
-    // Implement secure player profile saving - store only name, not password
-    private void SavePlayerProfile(string playerName)
-    {
-        try
-        {
-            // Generate a unique ID for this player
-            string playerId = Guid.NewGuid().ToString();
-            
-            // Create a new profile with name and ID, but never store passwords
-            var profileData = new ProfileData(playerName, playerId);
-            
-            // Add to profile list if it doesn't already exist
-            bool profileExists = false;
-            for (int i = 0; i < profileList.profiles.Count; i++)
-            {
-                if (profileList.profiles[i].name == playerName)
-                {
-                    // Update existing profile's last played time
-                    profileList.profiles[i].lastPlayed = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-                    profileExists = true;
-                    break;
-                }
-            }
-            
-            if (!profileExists)
-            {
-                profileList.profiles.Add(profileData);
-            }
-            
-            // Save the updated profile list
-            SaveProfiles();
-        }
-        catch (Exception ex)
-        {
-            Debug.LogError($"Failed to save player profile: {ex.Message}");
         }
     }
 }
