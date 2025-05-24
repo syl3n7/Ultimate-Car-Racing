@@ -44,9 +44,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 16eeac70443a24dfeb85ca15e57e13eb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  serverIP: 89.114.116.19
-  tcpPort: 8443
-  udpPort: 8443
+  serverIP: 192.168.100.78
+  tcpPort: 443
+  udpPort: 443
   heartbeatInterval: 5
   rememberCredentials: 1
   defaultPlayerName: Player
