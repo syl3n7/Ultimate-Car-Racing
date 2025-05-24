@@ -45,9 +45,11 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   serverIP: 89.114.116.19
-  tcpPort: 8443
-  udpPort: 8443
+  tcpPort: 443
+  udpPort: 443
   heartbeatInterval: 5
+  acceptSelfSignedCerts: 1
+  useUdpEncryption: 1
   rememberCredentials: 1
   defaultPlayerName: Player
   showDebugMessages: 0
