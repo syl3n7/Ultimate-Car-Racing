@@ -7,6 +7,10 @@ using System.Text;
 using System.Collections.Generic;
 using Newtonsoft.Json;
 using System.Net;
+using System.Security.Cryptography.X509Certificates;
+using System.Net.Security;
+using System.IO;
+using System.Security.Authentication;
 
 public class NetworkManager : MonoBehaviour
 {
@@ -18,6 +22,10 @@ public class NetworkManager : MonoBehaviour
     public int udpPort = 8443;
     public float heartbeatInterval = 5f;
     
+    [Header("Security Settings")]
+    public bool acceptSelfSignedCerts = true;  // For development/LAN use
+    public bool useUdpEncryption = true;       // Enable UDP packet encryption
+    
     [Header("Authentication")]
     public bool rememberCredentials = true;
     public string defaultPlayerName = "Player";
@@ -28,7 +36,7 @@ public class NetworkManager : MonoBehaviour
     
     private TcpClient _tcpClient;
     private UdpClient _udpClient;
-    private NetworkStream _tcpStream;
+    private SslStream _sslStream;              // Use SslStream instead of NetworkStream for TLS
     private CancellationTokenSource _cts;
     private StringBuilder _messageBuffer = new StringBuilder();
     private string _clientId;
@@ -41,6 +49,8 @@ public class NetworkManager : MonoBehaviour
     private float _latency = 0f;
     private const float PING_INTERVAL = 2f;
     private string _deviceName = "Unknown Device";
+    private bool _udpEncryptionEnabled = false;
+    private UdpCrypto _udpCrypto = null;       // Will implement UdpCrypto class
     
     // Events
     public event Action<string> OnConnected;
@@ -145,6 +155,7 @@ public class NetworkManager : MonoBehaviour
         }
     }
     
+    // Updated Connect method to use SslStream with proper certificate validation
     public async Task Connect()
     {
         if (_isConnected) return;
@@ -153,10 +164,25 @@ public class NetworkManager : MonoBehaviour
         {
             _cts = new CancellationTokenSource();
             
-            // TCP Connection
+            // TCP Connection with TLS
             _tcpClient = new TcpClient();
             await _tcpClient.ConnectAsync(serverIP, tcpPort);
-            _tcpStream = _tcpClient.GetStream();
+            
+            // Set up TLS connection
+            _sslStream = new SslStream(
+                _tcpClient.GetStream(),
+                false,
+                new RemoteCertificateValidationCallback(ValidateServerCertificate),
+                null
+            );
+            
+            // According to SERVER-README.md section 3.1:
+            // Use proper TLS authentication with server hostname
+            await _sslStream.AuthenticateAsClientAsync(serverIP, null, 
+                SslProtocols.Tls12 | SslProtocols.Tls13, // Support both TLS 1.2 and 1.3
+                true); // Check certificate revocation
+            
+            Debug.Log("TLS handshake complete, connection secured");
             
             // UDP Connection
             _udpClient = new UdpClient();
@@ -176,7 +202,7 @@ public class NetworkManager : MonoBehaviour
         }
         catch (Exception e)
         {
-            LogDebug($"Connection failed: {e.Message}");
+            Debug.LogError($"Connection failed: {e.Message}");
             OnConnectionFailed?.Invoke(e.Message);
             
             // Clean up
@@ -184,6 +210,30 @@ public class NetworkManager : MonoBehaviour
             _udpClient?.Close();
             _cts?.Cancel();
         }
+    }
+    
+    // Certificate validation callback
+    private bool ValidateServerCertificate(
+        object sender,
+        X509Certificate certificate,
+        X509Chain chain,
+        SslPolicyErrors sslPolicyErrors)
+    {
+        // If we're accepting self-signed certs (development mode)
+        if (acceptSelfSignedCerts && sslPolicyErrors == SslPolicyErrors.RemoteCertificateChainErrors)
+        {
+            Debug.Log("Accepting self-signed certificate");
+            return true;
+        }
+        
+        // For production use, validate certificate properly
+        bool isValid = sslPolicyErrors == SslPolicyErrors.None;
+        if (!isValid)
+        {
+            Debug.LogWarning($"Certificate validation failed: {sslPolicyErrors}");
+        }
+        
+        return isValid;
     }
     
     // Fix SendRegistration to use NAME command according to section 3.2 of SERVER-README.md
@@ -220,31 +270,26 @@ public class NetworkManager : MonoBehaviour
         await SendTcpMessage(registrationMessage);
     }
     
+    // Updated to use SslStream instead of NetworkStream
     private async Task ListenForTcpMessages()
     {
-        byte[] buffer = new byte[4096];
-        
-        while (!_cts.IsCancellationRequested && _tcpClient.Connected)
+        // Create a StreamReader for easier line-based reading
+        using (var reader = new StreamReader(_sslStream, Encoding.UTF8))
         {
-            try
+            while (!_cts.IsCancellationRequested && _tcpClient.Connected)
             {
-                int bytesRead = await _tcpStream.ReadAsync(buffer, 0, buffer.Length, _cts.Token);
-                if (bytesRead == 0) break; // Connection closed
-                
-                string data = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                Debug.Log($"Received raw data: {data}");
-                _messageBuffer.Append(data);
-                
-                string messages = _messageBuffer.ToString();
-                
-                // Check for welcome message format: "CONNECTED|<sessionId>\n"
-                if (messages.StartsWith("CONNECTED|"))
+                try
                 {
-                    int newlineIndex = messages.IndexOf('\n');
-                    if (newlineIndex != -1)
+                    // Read line by line as per section 3.1 of SERVER-README.md
+                    string line = await reader.ReadLineAsync();
+                    if (line == null) break; // Connection closed
+                    
+                    Debug.Log($"Received: {line}");
+                    
+                    // Check for welcome message format: "CONNECTED|<sessionId>"
+                    if (line.StartsWith("CONNECTED|"))
                     {
-                        string welcomeMsg = messages.Substring(0, newlineIndex);
-                        string[] parts = welcomeMsg.Split('|');
+                        string[] parts = line.Split('|');
                         if (parts.Length == 2)
                         {
                             _clientId = parts[1];
@@ -258,41 +303,29 @@ public class NetworkManager : MonoBehaviour
                                 OnConnected?.Invoke("Connected successfully");
                             });
                         }
-                        
-                        // Remove welcome message from buffer
-                        messages = messages.Substring(newlineIndex + 1);
-                        _messageBuffer.Clear();
-                        _messageBuffer.Append(messages);
+                    }
+                    else
+                    {
+                        // Process normal JSON messages
+                        ProcessServerMessage(line);
                     }
                 }
-                
-                // Process any remaining JSON messages
-                int newlineIndex2;
-                while ((newlineIndex2 = messages.IndexOf('\n')) != -1)
+                catch (Exception e) when (!(e is OperationCanceledException))
                 {
-                    string message = messages.Substring(0, newlineIndex2);
-                    messages = messages.Substring(newlineIndex2 + 1);
-                    
-                    ProcessServerMessage(message);
+                    LogDebug($"TCP Error: {e.Message}");
+                    break;
                 }
-                
-                _messageBuffer.Clear();
-                _messageBuffer.Append(messages);
             }
-            catch (Exception e) when (!(e is OperationCanceledException))
+            
+            // If we exited the loop unexpectedly, disconnect
+            if (_isConnected && !_cts.IsCancellationRequested)
             {
-                LogDebug($"TCP Error: {e.Message}");
-                break;
+                await UnityMainThreadDispatcher.Instance().EnqueueAsync(() => Disconnect());
             }
-        }
-        
-        // If we exited the loop unexpectedly, disconnect
-        if (_isConnected && !_cts.IsCancellationRequested)
-        {
-            await UnityMainThreadDispatcher.Instance().EnqueueAsync(() => Disconnect());
         }
     }
     
+    // Updated UDP packet handling with encryption support
     private async Task ListenForUdpMessages()
     {
         while (!_cts.IsCancellationRequested)
@@ -300,7 +333,31 @@ public class NetworkManager : MonoBehaviour
             try
             {
                 var result = await _udpClient.ReceiveAsync();
-                ProcessUdpMessage(Encoding.UTF8.GetString(result.Buffer));
+                var packetData = result.Buffer;
+                
+                try
+                {
+                    string jsonString;
+                
+                    // Check if this is an encrypted packet (min 4 bytes for length header)
+                    if (packetData.Length >= 4 && _udpEncryptionEnabled && _udpCrypto != null)
+                    {
+                        // Try to decrypt with UdpCrypto
+                        jsonString = _udpCrypto.DecryptPacket(packetData);
+                    }
+                    else
+                    {
+                        // Treat as plain-text packet
+                        jsonString = Encoding.UTF8.GetString(packetData);
+                    }
+                    
+                    // Process the resulting JSON
+                    ProcessUdpMessage(jsonString);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Error processing UDP packet: {ex.Message}");
+                }
             }
             catch (Exception e) when (!(e is OperationCanceledException))
             {
@@ -385,6 +442,35 @@ public class NetworkManager : MonoBehaviour
                                 UIManager.Instance.ShowAuthPanel("Please enter password for this username");
                             }
                         });
+                    }
+
+                    // Check if UDP encryption is enabled by the server
+                    if (messageObj.ContainsKey("udpEncryption"))
+                    {
+                        bool serverSupportsEncryption = false;
+                        
+                        if (messageObj["udpEncryption"] is bool encBool)
+                        {
+                            serverSupportsEncryption = encBool;
+                        }
+                        else if (messageObj["udpEncryption"] is string encStr)
+                        {
+                            bool.TryParse(encStr, out serverSupportsEncryption);
+                        }
+                        
+                        // Enable UDP encryption if both server and client support it
+                        _udpEncryptionEnabled = serverSupportsEncryption && useUdpEncryption;
+                        
+                        if (_udpEncryptionEnabled)
+                        {
+                            // Initialize UDP crypto with session ID
+                            _udpCrypto = new UdpCrypto(_clientId);
+                            Debug.Log("UDP encryption enabled");
+                        }
+                        else
+                        {
+                            Debug.Log("UDP encryption disabled");
+                        }
                     }
                     
                     break;
@@ -710,6 +796,7 @@ public class NetworkManager : MonoBehaviour
         }
     }
     
+    // Add UDP encryption support
     private void ProcessUdpMessage(string jsonMessage)
     {
         try
@@ -818,10 +905,10 @@ public class NetworkManager : MonoBehaviour
         return Quaternion.identity;
     }
     
-    // Modify SendTcpMessage to add better logging
+    // Update to use SslStream instead of NetworkStream
     public async Task SendTcpMessage(object message)
     {
-        if (!_isConnected || _tcpClient == null || !_tcpClient.Connected) 
+        if (!_isConnected || _tcpClient == null || !_tcpClient.Connected || _sslStream == null) 
         {
             Debug.LogError("Cannot send TCP message: Not connected to server");
             return;
@@ -837,8 +924,8 @@ public class NetworkManager : MonoBehaviour
             
             string json = JsonConvert.SerializeObject(message);
             Debug.Log($"Sending TCP message: {json}");
-            byte[] data = Encoding.UTF8.GetBytes(json + "\n");
-            await _tcpStream.WriteAsync(data, 0, data.Length, _cts.Token);
+            byte[] data = Encoding.UTF8.GetBytes(json + "\n"); // Add newline as specified in docs
+            await _sslStream.WriteAsync(data, 0, data.Length, _cts.Token);
             Debug.Log("TCP message sent successfully");
         }
         catch (Exception e)
@@ -853,6 +940,7 @@ public class NetworkManager : MonoBehaviour
         }
     }
     
+    // Add UDP encryption support
     public void SendUdpMessage(object message)
     {
         if (!_isConnected || _udpClient == null) return;
@@ -866,7 +954,20 @@ public class NetworkManager : MonoBehaviour
             }
             
             string json = JsonConvert.SerializeObject(message);
-            byte[] data = Encoding.UTF8.GetBytes(json);
+            byte[] data;
+            
+            // Use encryption if enabled and initialized
+            if (_udpEncryptionEnabled && _udpCrypto != null)
+            {
+                data = _udpCrypto.EncryptPacket(json);
+                //Debug.Log("Sending encrypted UDP packet");
+            }
+            else
+            {
+                data = Encoding.UTF8.GetBytes(json);
+                //Debug.Log("Sending plain-text UDP packet");
+            }
+            
             _udpClient.Send(data, data.Length);
         }
         catch (Exception e)
@@ -1245,5 +1346,107 @@ public class NetworkManager : MonoBehaviour
         
         playerPassword = password; // Store for future use
         SendTcpMessage(authMessage);
+    }
+
+    // UdpCrypto class for handling encryption
+    private class UdpCrypto
+    {
+        private const string CRYPTO_KEY = "UCR_GAME_SECRET_KEY"; // This would ideally be fetched securely
+        private byte[] _encryptionKey;
+        private byte[] _iv;
+        
+        public UdpCrypto(string sessionId)
+        {
+            // According to SERVER-README.md section 4.2 
+            // Each session gets unique encryption keys derived from the session ID
+            if (string.IsNullOrEmpty(sessionId))
+            {
+                throw new ArgumentException("Session ID cannot be null or empty");
+            }
+            
+            // In a real implementation, we would properly derive a key using PBKDF2 or similar
+            // This is a simplified version for demonstration
+            using (var deriveBytes = new System.Security.Cryptography.Rfc2898DeriveBytes(
+                sessionId + CRYPTO_KEY,
+                Encoding.UTF8.GetBytes(CRYPTO_KEY + sessionId),
+                1000))
+            {
+                _encryptionKey = deriveBytes.GetBytes(32); // 256 bits for AES-256
+                _iv = deriveBytes.GetBytes(16); // 128 bit IV for CBC mode
+            }
+            
+            Debug.Log($"UDP crypto initialized with session ID: {sessionId}");
+        }
+        
+        // Encrypt a JSON string into a packet with the format [4-byte length header][encrypted data]
+        public byte[] EncryptPacket(string jsonData)
+        {
+            byte[] plaintext = Encoding.UTF8.GetBytes(jsonData);
+            
+            using (var aes = System.Security.Cryptography.Aes.Create())
+            {
+                aes.Key = _encryptionKey;
+                aes.IV = _iv;
+                aes.Mode = System.Security.Cryptography.CipherMode.CBC;
+                aes.Padding = System.Security.Cryptography.PaddingMode.PKCS7;
+                
+                using (var encryptor = aes.CreateEncryptor())
+                {
+                    // Encrypt the data
+                    byte[] encrypted = encryptor.TransformFinalBlock(plaintext, 0, plaintext.Length);
+                    
+                    // Create the packet with length prefix
+                    byte[] packet = new byte[4 + encrypted.Length];
+                    
+                    // Write the length as a 4-byte integer (big-endian)
+                    packet[0] = (byte)((encrypted.Length >> 24) & 0xFF);
+                    packet[1] = (byte)((encrypted.Length >> 16) & 0xFF);
+                    packet[2] = (byte)((encrypted.Length >> 8) & 0xFF);
+                    packet[3] = (byte)(encrypted.Length & 0xFF);
+                    
+                    // Copy the encrypted data after the length prefix
+                    Buffer.BlockCopy(encrypted, 0, packet, 4, encrypted.Length);
+                    
+                    return packet;
+                }
+            }
+        }
+        
+        // Decrypt a packet with format [4-byte length header][encrypted data]
+        public string DecryptPacket(byte[] packet)
+        {
+            if (packet.Length < 4)
+            {
+                throw new ArgumentException("Packet too small to contain length header");
+            }
+            
+            // Read the length from the 4-byte header (big-endian)
+            int length = (packet[0] << 24) | (packet[1] << 16) | (packet[2] << 8) | packet[3];
+            
+            if (length <= 0 || length > packet.Length - 4)
+            {
+                throw new ArgumentException("Invalid packet length");
+            }
+            
+            byte[] encryptedData = new byte[length];
+            Buffer.BlockCopy(packet, 4, encryptedData, 0, length);
+            
+            using (var aes = System.Security.Cryptography.Aes.Create())
+            {
+                aes.Key = _encryptionKey;
+                aes.IV = _iv;
+                aes.Mode = System.Security.Cryptography.CipherMode.CBC;
+                aes.Padding = System.Security.Cryptography.PaddingMode.PKCS7;
+                
+                using (var decryptor = aes.CreateDecryptor())
+                {
+                    // Decrypt the data
+                    byte[] decrypted = decryptor.TransformFinalBlock(encryptedData, 0, encryptedData.Length);
+                    
+                    // Convert to string
+                    return Encoding.UTF8.GetString(decrypted);
+                }
+            }
+        }
     }
 }
