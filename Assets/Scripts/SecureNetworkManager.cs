@@ -2,6 +2,7 @@ using System;
 using System.Net.Sockets;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
+using System.Security.Authentication; // Added for SslProtocols
 using System.Threading.Tasks;
 using UnityEngine;
 using System.Threading;
@@ -9,6 +10,7 @@ using System.Text;
 using System.Collections.Generic;
 using Newtonsoft.Json;
 using System.Net;
+using System.IO; // Added for IOException
 using System.IO;
 using System.Collections;
 
@@ -95,24 +97,150 @@ public class SecureNetworkManager : MonoBehaviour
         {
             Log("Connecting to server...");
             
-            // Create TCP connection
+            // Create TCP connection with keepalive enabled
             _tcpClient = new TcpClient();
-            await _tcpClient.ConnectAsync(serverHost, serverPort);
             
-            // Setup TLS encryption
-            _sslStream = new SslStream(_tcpClient.GetStream(), false, ValidateServerCertificate);
-            await _sslStream.AuthenticateAsClientAsync(serverHost);
+            // Set advanced socket options to prevent premature connection termination
+            _tcpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+            _tcpClient.Client.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.NoDelay, true);
             
-            // Setup reader for responses
-            _tcpReader = new StreamReader(_sslStream, Encoding.UTF8);
+            // Set reasonable timeouts
+            _tcpClient.SendTimeout = 30000;  // 30 seconds
+            _tcpClient.ReceiveTimeout = 30000;  // 30 seconds
             
-            // Read welcome message
-            string welcome = await _tcpReader.ReadLineAsync();
+            // Use cancellation token for connection timeout
+            using (var timeoutCts = new CancellationTokenSource(10000)) // 10 second timeout
+            {
+                try {
+                    var connectTask = _tcpClient.ConnectAsync(serverHost, serverPort);
+                    
+                    // Wait for either connection or timeout
+                    var completedTask = await Task.WhenAny(connectTask, Task.Delay(10000, timeoutCts.Token));
+                    
+                    if (completedTask != connectTask) {
+                        throw new TimeoutException("Connection timed out");
+                    }
+                    
+                    // Ensure the connection task is complete
+                    await connectTask;
+                    
+                    Log($"TCP connection established to {serverHost}:{serverPort}");
+                }
+                catch (TaskCanceledException) {
+                    throw new TimeoutException("Connection timed out");
+                }
+            }
+            
+            // Setup TLS encryption with explicit TLS 1.2 protocol
+            _sslStream = new SslStream(_tcpClient.GetStream(), false, ValidateServerCertificate, null);
+            
+            // Create SSL options with TLS 1.2 explicitly enabled
+            try {
+                // Define TLS protocols to use - explicitly set to TLS 1.2
+                SslProtocols protocol = SslProtocols.Tls12;
+                
+                // Set longer timeouts for the handshake process
+                _tcpClient.SendTimeout = 30000;  // 30 seconds
+                _tcpClient.ReceiveTimeout = 30000;  // 30 seconds
+                
+                // Authenticate with explicit protocol version and server name
+                await _sslStream.AuthenticateAsClientAsync(
+                    serverHost,                      // Target host name
+                    null,                            // No client certificates
+                    protocol,                        // Use TLS 1.2 explicitly  
+                    false                            // Don't check certificate revocation
+                );
+                
+                // Ensure the TLS handshake is completed properly
+                await _sslStream.FlushAsync();
+                
+                // Add a small delay to ensure the handshake completes
+                await Task.Delay(100);
+                
+                Log($"TLS connection established with protocol: {_sslStream.SslProtocol}");
+            }
+            catch (System.Security.Authentication.AuthenticationException authEx) {
+                LogError($"TLS authentication failed: {authEx.Message}");
+                throw;
+            }
+            catch (Exception ex) {
+                LogError($"TLS general error: {ex.Message}");
+                throw;
+            }
+            
+            // Setup reader for responses with a buffer size that can handle larger messages
+            _tcpReader = new StreamReader(_sslStream, Encoding.UTF8, true, 4096);
+            
+            // Read welcome message with timeout to avoid indefinite waiting
+            string welcome = null;
+            int retryCount = 0;
+            const int maxRetries = 3;
+            
+            while (welcome == null && retryCount < maxRetries)
+            {
+                try
+                {
+                    // Use cancellation token for timeout
+                    using (var cts = new CancellationTokenSource(5000)) // 5 second timeout
+                    {
+                        Log($"Waiting for server welcome message (attempt {retryCount + 1}/{maxRetries})");
+                        
+                        // ReadLine could hang, so we need a timeout
+                        Task<string> readTask = _tcpReader.ReadLineAsync();
+                        var welcomeReadTimeout = Task.Delay(5000, cts.Token); // 5 second timeout
+                        
+                        Task finishedTask = await Task.WhenAny(readTask, welcomeReadTimeout);
+                        if (finishedTask != readTask)
+                        {
+                            if (retryCount < maxRetries - 1)
+                            {
+                                Log("Timed out waiting for server welcome message, retrying...");
+                                retryCount++;
+                                await Task.Delay(500); // Wait a bit before retry
+                                continue;
+                            }
+                            else
+                            {
+                                throw new TimeoutException("Timed out waiting for server welcome message after multiple attempts");
+                            }
+                        }
+                        
+                        welcome = await readTask;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (retryCount < maxRetries - 1)
+                    {
+                        LogError($"Error reading welcome message: {ex.Message}, retrying...");
+                        retryCount++;
+                        await Task.Delay(500); // Wait a bit before retry
+                        continue;
+                    }
+                    else
+                    {
+                        throw new Exception($"Failed to read welcome message after {maxRetries} attempts: {ex.Message}");
+                    }
+                }
+            }
+            
+            // Handle null or empty welcome message
+            if (string.IsNullOrEmpty(welcome))
+            {
+                throw new Exception("Received empty welcome message from server");
+            }
+            
             Log($"Server welcome: {welcome}");
             
-            if (welcome != null && welcome.StartsWith("CONNECTED|"))
+            if (welcome.StartsWith("CONNECTED|"))
             {
-                _sessionId = welcome.Split('|')[1];
+                string[] parts = welcome.Split('|');
+                if (parts.Length < 2)
+                {
+                    throw new FormatException("Invalid welcome format: missing session ID");
+                }
+                
+                _sessionId = parts[1];
                 _isConnected = true;
                 OnConnectionChanged?.Invoke(true);
                 OnConnected?.Invoke("Connected successfully");
@@ -126,7 +254,7 @@ public class SecureNetworkManager : MonoBehaviour
                 return true;
             }
             
-            throw new Exception("Invalid welcome message from server");
+            throw new Exception($"Invalid welcome message from server: {welcome}");
         }
         catch (Exception ex)
         {
@@ -143,17 +271,26 @@ public class SecureNetworkManager : MonoBehaviour
         // For development: Accept self-signed certificates
         // For production: Implement proper certificate validation
         if (sslPolicyErrors == SslPolicyErrors.None)
+        {
+            Log("Certificate validation successful");
             return true;
+        }
             
+        // Log detailed certificate information for debugging
+        X509Certificate2 cert2 = new X509Certificate2(certificate);
+        Log($"Certificate subject: {cert2.Subject}");
+        Log($"Certificate issuer: {cert2.Issuer}");
+        Log($"Certificate valid from: {cert2.NotBefore} to {cert2.NotAfter}");
+        
         if (sslPolicyErrors == SslPolicyErrors.RemoteCertificateChainErrors ||
             sslPolicyErrors == SslPolicyErrors.RemoteCertificateNameMismatch)
         {
-            Log($"Accepting self-signed certificate: {sslPolicyErrors}");
+            Log($"Accepting self-signed certificate despite errors: {sslPolicyErrors}");
             return true; // Accept for development
         }
         
-        LogError($"Certificate validation failed: {sslPolicyErrors}");
-        return false;
+        LogError($"Certificate validation failed with errors: {sslPolicyErrors}");
+        return false; // In production, you may want to reject invalid certificates
     }
     
     private async Task AuthenticatePlayer()
@@ -223,41 +360,132 @@ public class SecureNetworkManager : MonoBehaviour
         {
             string json = JsonConvert.SerializeObject(message) + "\n";
             byte[] data = Encoding.UTF8.GetBytes(json);
-            await _sslStream.WriteAsync(data, 0, data.Length);
             
-            Log($"Sent: {json.Trim()}");
+            // Add cancellation token to prevent indefinite waiting
+            using (var cts = new CancellationTokenSource(5000)) // 5 second timeout
+            {
+                try {
+                    await _sslStream.WriteAsync(data, 0, data.Length, cts.Token);
+                    
+                    // Ensure the data is sent immediately
+                    await _sslStream.FlushAsync(cts.Token);
+                    
+                    Log($"Sent: {json.Trim()}");
+                }
+                catch (TaskCanceledException) {
+                    LogError("Sending TCP message timed out");
+                    
+                    // If we get a timeout, check the connection
+                    if (_tcpClient != null && !_tcpClient.Connected) {
+                        LogError("TCP client disconnected, attempting to reconnect...");
+                        _ = Disconnect();
+                    }
+                }
+            }
         }
         catch (Exception ex)
         {
             LogError($"Failed to send TCP message: {ex.Message}");
+            
+            // Check if the exception indicates a connection failure
+            if (ex is IOException || ex is SocketException) {
+                LogError("Connection may be broken. Attempting to reconnect...");
+                _ = Disconnect();
+            }
         }
     }
     
     private IEnumerator ListenForTcpMessages()
     {
+        int consecutiveErrors = 0;
+        const int maxConsecutiveErrors = 3;
+        
         while (_isConnected && _tcpReader != null)
         {
-            Task<string> readTask = _tcpReader.ReadLineAsync();
+            string message = null;
+            bool hasError = false;
             
-            // Wait for the task to complete
-            while (!readTask.IsCompleted)
+            // Start reading the next message
+            var readTask = _tcpReader?.ReadLineAsync();
+            if (readTask == null)
             {
+                LogError("TCP reader is not available");
+                break;
+            }
+            
+            // Wait for the read to complete or timeout
+            float startTime = Time.time;
+            while (!readTask.IsCompleted && !readTask.IsFaulted && !readTask.IsCanceled)
+            {
+                // Check for timeout
+                if (Time.time - startTime > 30f)  // 30 second timeout
+                {
+                    Log("TCP read timed out");
+                    hasError = true;
+                    break;
+                }
+                
                 yield return null;
             }
             
-            if (readTask.Result != null)
+            // Handle the completed task
+            if (!hasError)
             {
-                ProcessTcpMessage(readTask.Result);
+                try
+                {
+                    if (readTask.IsCompleted && !readTask.IsFaulted && !readTask.IsCanceled)
+                    {
+                        message = readTask.Result;
+                    }
+                    else if (readTask.IsFaulted)
+                    {
+                        LogError($"TCP read task faulted: {readTask.Exception?.Message}");
+                        hasError = true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogError($"Exception getting TCP read result: {ex.Message}");
+                    hasError = true;
+                }
             }
-            else
+            
+            // Process the message if we got one
+            if (!hasError && !string.IsNullOrEmpty(message))
             {
-                // Connection lost
-                Log("TCP connection lost");
-                break;
+                try
+                {
+                    ProcessTcpMessage(message);
+                    consecutiveErrors = 0;  // Reset error counter on success
+                }
+                catch (Exception ex)
+                {
+                    LogError($"Error processing message: {ex.Message}");
+                    hasError = true;
+                }
+            }
+            else if (!hasError && string.IsNullOrEmpty(message))
+            {
+                LogError("Received empty TCP message");
+                hasError = true;
+            }
+            
+            // Handle errors by incrementing counter and potentially disconnecting
+            if (hasError)
+            {
+                consecutiveErrors++;
+                if (consecutiveErrors >= maxConsecutiveErrors)
+                {
+                    LogError($"Too many consecutive errors ({maxConsecutiveErrors}), disconnecting");
+                    break;
+                }
+                
+                yield return new WaitForSeconds(1f);  // Wait a bit before retrying
             }
         }
         
         // Connection ended
+        LogError("TCP message listener ended");
         _ = Disconnect();
     }
     
@@ -675,6 +903,20 @@ public class SecureNetworkManager : MonoBehaviour
         await SendTcpMessage(new { command = "LIST_ROOMS" });
     }
     
+    public async Task RequestPlayerInfo()
+    {
+        if (!_isConnected) return;
+        
+        await SendTcpMessage(new { command = "PLAYER_INFO" });
+    }
+    
+    public async Task GetRoomPlayers(string roomId)
+    {
+        if (!_isConnected || string.IsNullOrEmpty(roomId)) return;
+        
+        await SendTcpMessage(new { command = "GET_ROOM_PLAYERS", roomId = roomId });
+    }
+    
     #endregion
     
     #region Compatibility Methods (for existing code)
@@ -696,6 +938,15 @@ public class SecureNetworkManager : MonoBehaviour
         _ = JoinRoom(roomId);
     }
     
+    public async Task LeaveGame()
+    {
+        if (!_isConnected || string.IsNullOrEmpty(_currentRoomId)) return;
+        
+        await SendTcpMessage(new { command = "LEAVE_ROOM", roomId = _currentRoomId });
+        _currentRoomId = null;
+        _currentRoomHostId = null;
+    }
+    
     public void SendPlayerState(GameManager.PlayerStateData stateData)
     {
         _ = SendPositionUpdate(stateData.position, stateData.rotation);
@@ -711,6 +962,10 @@ public class SecureNetworkManager : MonoBehaviour
     public string GetRoomHostId() => _currentRoomHostId;
     public bool IsConnected() => _isConnected;
     public bool IsAuthenticated() => _isAuthenticated;
+    
+    // Add latency measurement method
+    private float _latency = 0f;
+    public float GetLatency() => _latency;
     
     #endregion
     
