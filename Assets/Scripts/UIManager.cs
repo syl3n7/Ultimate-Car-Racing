@@ -340,8 +340,7 @@ public class UIManager : MonoBehaviour
         if (NetworkManager.Instance != null && !NetworkManager.Instance.IsConnected())
         {
             ShowConnectionPanel("Connecting to server...");
-            // Use non-TLS connection first, then upgrade if needed
-            _ = NetworkManager.Instance.Connect(useTls: false);
+            _ = NetworkManager.Instance.Connect();
         }
     }
     public void OnPlayButtonClicked()
@@ -1308,11 +1307,29 @@ public async void CreateRoom()
             
             Debug.Log($"Game started with spawn position: {spawnPosition}, index: {spawnIndex}");
             
+            // Request the player list before loading the scene
+            if (NetworkManager.Instance != null && !string.IsNullOrEmpty(currentRoomId))
+            {
+                Dictionary<string, object> playerListRequest = new Dictionary<string, object>
+                {
+                    { "command", "GET_ROOM_PLAYERS" },
+                    { "roomId", currentRoomId }
+                };
+                
+                _ = NetworkManager.Instance.SendTcpMessage(playerListRequest);
+            }
+
+            // Hide UI and ensure all panels are disabled before loading scene
+            HideAllPanels();
+            
+            // IMPORTANT: Set spawn position in GameManager BEFORE loading scene
             if (GameManager.Instance != null)
             {
-                // Store the spawn position in the GameManager for the race scene to use
-                GameManager.Instance.SetPlayerSpawnPosition(spawnPosition, spawnIndex);
+                // Set the spawn position and index before loading the scene
+                GameManager.Instance.SetMultiplayerSpawnPosition(spawnPosition, spawnIndex);
                 
+                // Load the race track scene - use the correct scene name
+                // FIXED: Use the generic "RaceTrack" scene name instead of track-specific
                 string sceneName = "RaceTrack";
                 
                 Debug.Log($"Loading race scene: {sceneName} (immediate scene transition)");
@@ -1333,76 +1350,6 @@ public async void CreateRoom()
         {
             Debug.LogError("Spawn position data missing in game start message!");
             ShowNotification("Error: Missing spawn data. Please try again.");
-        }
-    }
-    
-    // Add a method to configure TLS settings
-    public void ConfigureConnection(string address, int port, bool useSecureConnection = true, string certHash = "")
-    {
-        this.useTLS = useSecureConnection;
-        this.serverCertificateHash = certHash;
-        
-        if (NetworkManager.Instance != null)
-        {
-            NetworkManager.Instance.ConfigureConnection(address, port, useSecureConnection, certHash);
-            Debug.Log($"Connection configured: Server={address}:{port}, TLS={useSecureConnection}, CertHash={certHash}");
-        }
-        else
-        {
-            Debug.LogError("Cannot configure connection - NetworkManager.Instance is null");
-            ShowNotification("Error: Network manager not found. Please restart the game.");
-        }
-    }
-    
-    // Method to connect with appropriate security settings
-    public void ConnectToServer(string address, int port)
-    {
-        ShowNotification("Connecting to server...");
-        
-        // Default to secure connection if not specified otherwise
-        ConfigureConnection(address, port, true);
-        
-        if (NetworkManager.Instance != null)
-        {
-            NetworkManager.Instance.Connect(address, port, (success, message) => {
-                if (success)
-                {
-                    ShowNotification("Connected to server!");
-                }
-                else
-                {
-                    // If connection fails with TLS, try without TLS as fallback
-                    if (useTLS && message.Contains("TLS"))
-                    {
-                        Debug.LogWarning("TLS connection failed, attempting non-secure fallback");
-                        ShowNotification("Secure connection failed. Trying alternate connection...");
-                        
-                        // Try again without TLS
-                        ConfigureConnection(address, port, false);
-                        NetworkManager.Instance.Connect(address, port, (fallbackSuccess, fallbackMessage) => {
-                            if (fallbackSuccess)
-                            {
-                                ShowNotification("Connected to server (non-secure)!");
-                            }
-                            else
-                            {
-                                Debug.LogError($"Failed to connect: {fallbackMessage}");
-                                ShowNotification($"Connection failed: {fallbackMessage}");
-                            }
-                        });
-                    }
-                    else
-                    {
-                        Debug.LogError($"Failed to connect: {message}");
-                        ShowNotification($"Connection failed: {message}");
-                    }
-                }
-            });
-        }
-        else
-        {
-            Debug.LogError("Cannot connect - NetworkManager.Instance is null");
-            ShowNotification("Error: Network manager not found. Please restart the game.");
         }
     }
     
