@@ -179,7 +179,7 @@ public class NetworkManager : MonoBehaviour
             // According to SERVER-README.md section 3.1:
             // Use proper TLS authentication with server hostname
             await _sslStream.AuthenticateAsClientAsync(serverIP, null, 
-                SslProtocols.Tls12, // Use only TLS 1.2 which is widely supported
+                SslProtocols.Tls12 | SslProtocols.Tls13, // Support both TLS 1.2 and 1.3
                 true); // Check certificate revocation
             
             Debug.Log("TLS handshake complete, connection secured");
