@@ -193,9 +193,13 @@ public class UIManager : MonoBehaviour
         }
     }
     
+    // Update the ConnectAllUIButtons method to use explicit BackFromMultiplayer method
     private void ConnectAllUIButtons()
     {
         Debug.Log("Connecting all UI buttons automatically");
+        
+        // Debug: List all buttons found in the scene
+        DebugListAllButtons();
         
         // Main Menu buttons
         ConnectButton("PlayButton", OnPlayButtonClicked);
@@ -211,7 +215,7 @@ public class UIManager : MonoBehaviour
         // Multiplayer panel buttons
         ConnectButton("CreateGameButton", ShowRoomListPanel);
         ConnectButton("JoinGameButton", ShowRoomListPanel);
-        ConnectButton("BackFromMultiplayerButton", ShowMainMenu);
+        ConnectButton("BackFromMultiplayerButton", BackFromMultiplayer);  // Use explicit method
         
         // Room list panel buttons
         ConnectButton("CreateRoomButton", CreateRoom);
@@ -230,6 +234,9 @@ public class UIManager : MonoBehaviour
         // Room lobby panel buttons
         ConnectButton("StartGameButton", StartGame);
         ConnectButton("LeaveRoomButton", LeaveRoom);
+        
+        // Auth panel buttons
+        ConnectButton("LoginButton", OnLoginButtonClicked);
         
         // Find and connect sliders
         Slider[] allSliders = FindObjectsByType<Slider>(FindObjectsSortMode.None);
@@ -250,9 +257,34 @@ public class UIManager : MonoBehaviour
         }
     }
 
+    // Debug method to list all buttons in the scene
+    private void DebugListAllButtons()
+    {
+        Debug.Log("=== Listing all buttons in the scene ===");
+        Button[] allButtons = FindObjectsByType<Button>(FindObjectsSortMode.None);
+        foreach (var button in allButtons)
+        {
+            Debug.Log($"Found button: {button.name} at path: {GetGameObjectPath(button.gameObject)}");
+        }
+        Debug.Log($"Total buttons found: {allButtons.Length}");
+    }
+
+    // Helper method to get the full path of a GameObject
+    private string GetGameObjectPath(GameObject obj)
+    {
+        string path = obj.name;
+        Transform parent = obj.transform.parent;
+        while (parent != null)
+        {
+            path = parent.name + "/" + path;
+            parent = parent.parent;
+        }
+        return path;
+    }
+
     private void ConnectButton(string buttonName, UnityEngine.Events.UnityAction action)
     {
-        // Find all buttons in the scene
+        // Find all buttons in the scene, including those nested in children
         Button[] allButtons = FindObjectsByType<Button>(FindObjectsSortMode.None);
         
         foreach (var button in allButtons)
@@ -263,6 +295,24 @@ public class UIManager : MonoBehaviour
                 button.onClick.RemoveAllListeners();
                 button.onClick.AddListener(action);
                 return;
+            }
+        }
+        
+        // If not found with standard search, try searching recursively through all GameObjects
+        // This will find buttons even if they're deeply nested in UI panels
+        GameObject[] allGameObjects = FindObjectsByType<GameObject>(FindObjectsSortMode.None);
+        foreach (var go in allGameObjects)
+        {
+            if (go.name == buttonName)
+            {
+                Button button = go.GetComponent<Button>();
+                if (button != null)
+                {
+                    Debug.Log($"Connected nested button: {buttonName}");
+                    button.onClick.RemoveAllListeners();
+                    button.onClick.AddListener(action);
+                    return;
+                }
             }
         }
         
@@ -298,8 +348,10 @@ public class UIManager : MonoBehaviour
     
     public void ShowMainMenu()
     {
+        Debug.Log("ShowMainMenu called - transitioning to main menu");
         HideAllPanels();
         mainMenuPanel.SetActive(true);
+        Debug.Log($"Main menu panel active: {mainMenuPanel.activeSelf}");
     }
     
     public void ShowInstructions()
@@ -351,13 +403,20 @@ public class UIManager : MonoBehaviour
         // No profile exists, direct to profile panel
         ShowProfilePanel();
         ShowNotification("Please create or select a profile to play");
+        return;
     }
-    else
+    
+    // If SecureNetworkManager exists, check if authenticated
+    if (SecureNetworkManager.Instance != null && !SecureNetworkManager.Instance.IsAuthenticated())
     {
-        // Profile exists, go directly to game mode selection or single player
-        // You can modify this to go to a game mode selection screen instead
-        ShowMultiplayerPanel();
+        // Show authentication panel first
+        ShowAuthPanel();
+        ShowNotification("Please log in to continue");
+        return;
     }
+    
+    // Profile exists and authenticated, go to multiplayer panel
+    ShowMultiplayerPanel();
 }
     public void ShowRoomListPanel()
     {
@@ -505,6 +564,13 @@ public class UIManager : MonoBehaviour
                 _ = SecureNetworkManager.Instance.Connect();
             }
         }
+    }
+    
+    // Add explicit method for back button functionality
+    public void BackFromMultiplayer()
+    {
+        Debug.Log("BackFromMultiplayer called");
+        ShowMainMenu();
     }
     
     #endregion
@@ -690,6 +756,15 @@ public async void CreateRoom()
         return;
     }
     
+    // Check authentication first
+    if (!SecureNetworkManager.Instance.IsAuthenticated())
+    {
+        Debug.LogWarning("User must authenticate before creating a room");
+        ShowNotification("Please log in before creating a room");
+        ShowAuthPanel();
+        return;
+    }
+    
     // Show connection panel immediately to provide feedback
     ShowConnectionPanel("Creating room...");
     
@@ -700,7 +775,7 @@ public async void CreateRoom()
         ShowConnectionPanel("Connecting to server...");
         
         try {
-            // Actually await the connection this time
+            // Connect() returns a Task, not a bool
             await SecureNetworkManager.Instance.Connect();
             
             // Check if we're connected after the await
@@ -725,7 +800,18 @@ public async void CreateRoom()
     int maxPlayers = (int)maxPlayersSlider.value;
     
     Debug.Log($"Creating room: {roomName}, Max players: {maxPlayers}");
-    SecureNetworkManager.Instance.HostGame(roomName, maxPlayers);
+    try {
+        // HostGame is not async and doesn't return a value, it just calls CreateRoom internally
+        SecureNetworkManager.Instance.HostGame(roomName, maxPlayers);
+        
+        // The actual feedback will come through the OnGameHosted event callback
+        // We don't need to do anything else here, the event system handles it
+    }
+    catch (Exception e) {
+        Debug.LogError($"Exception during room creation: {e.Message}");
+        ShowNotification("Error creating room: " + e.Message);
+        HideConnectionPanel();
+    }
 }
     
     // In JoinSelectedRoom method - update to use NetworkManager
@@ -802,28 +888,56 @@ public async void CreateRoom()
     }
     
     // In RefreshRoomList method - update to use NetworkManager
-    public void RefreshRoomList()
+    public async void RefreshRoomList()
     {
-        if (SecureNetworkManager.Instance != null && SecureNetworkManager.Instance.IsConnected())
+        Debug.Log("RefreshRoomList called");
+        
+        if (SecureNetworkManager.Instance == null)
         {
-            Debug.Log("Requesting room list from server");
-            ClearRoomList();
-            
-            // Show a temporary "Loading..." message
-            GameObject loadingText = new GameObject("LoadingText");
-            loadingText.transform.SetParent(roomListContent, false);
-            TextMeshProUGUI textComponent = loadingText.AddComponent<TextMeshProUGUI>();
-            textComponent.text = "Loading rooms...";
-            textComponent.fontSize = 24;
-            textComponent.alignment = TextAlignmentOptions.Center;
-            
-            _ = SecureNetworkManager.Instance.RequestRoomList();
+            Debug.LogError("SecureNetworkManager.Instance is null");
+            ShowNotification("Network manager not available");
+            return;
         }
-        else
+        
+        // Check if we're connected to the server
+        if (!SecureNetworkManager.Instance.IsConnected())
         {
-            Debug.LogError("Cannot refresh room list - not connected to server");
-            ShowNotification("Not connected to server");
+            Debug.LogWarning("Not connected to server, attempting to connect...");
+            ShowConnectionPanel("Connecting to server...");
+            
+            try {
+                // Connect returns Task, not Task<bool>
+                await SecureNetworkManager.Instance.Connect();
+                
+                // Check connection status after awaiting
+                if (!SecureNetworkManager.Instance.IsConnected())
+                {
+                    ShowNotification("Failed to connect to server");
+                    HideConnectionPanel();
+                    return;
+                }
+            }
+            catch (Exception e) {
+                Debug.LogError($"Connection error: {e.Message}");
+                ShowNotification("Connection error: " + e.Message);
+                HideConnectionPanel();
+                return;
+            }
         }
+        
+        // We're connected, clear the current list and request updates
+        ClearRoomList();
+        
+        // Show a temporary "Loading..." message
+        GameObject loadingText = new GameObject("LoadingText");
+        loadingText.transform.SetParent(roomListContent, false);
+        TextMeshProUGUI textComponent = loadingText.AddComponent<TextMeshProUGUI>();
+        textComponent.text = "Loading rooms...";
+        textComponent.fontSize = 24;
+        textComponent.alignment = TextAlignmentOptions.Center;
+        
+        // Request room list from server - this triggers the OnRoomListReceived event callback
+        _ = SecureNetworkManager.Instance.RequestRoomList();
     }
     
     private void ClearRoomList()
