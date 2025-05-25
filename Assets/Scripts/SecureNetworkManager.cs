@@ -11,7 +11,6 @@ using System.Collections.Generic;
 using Newtonsoft.Json;
 using System.Net;
 using System.IO; // Added for IOException
-using System.IO;
 using System.Collections;
 
 /// <summary>
@@ -282,15 +281,24 @@ public class SecureNetworkManager : MonoBehaviour
         Log($"Certificate issuer: {cert2.Issuer}");
         Log($"Certificate valid from: {cert2.NotBefore} to {cert2.NotAfter}");
         
-        if (sslPolicyErrors == SslPolicyErrors.RemoteCertificateChainErrors ||
-            sslPolicyErrors == SslPolicyErrors.RemoteCertificateNameMismatch)
+        // Check if the errors are only related to self-signed certificates
+        // Use bitwise AND to check for flag presence, since multiple errors can be combined
+        bool hasChainErrors = (sslPolicyErrors & SslPolicyErrors.RemoteCertificateChainErrors) != 0;
+        bool hasNameMismatch = (sslPolicyErrors & SslPolicyErrors.RemoteCertificateNameMismatch) != 0;
+        bool hasNotAvailable = (sslPolicyErrors & SslPolicyErrors.RemoteCertificateNotAvailable) != 0;
+        
+        Log($"SSL Error Analysis - Chain: {hasChainErrors}, Name: {hasNameMismatch}, NotAvailable: {hasNotAvailable}");
+        
+        // Accept certificates with only chain errors or name mismatch (common with self-signed certs)
+        // but reject if certificate is not available at all
+        if ((hasChainErrors || hasNameMismatch) && !hasNotAvailable)
         {
             Log($"Accepting self-signed certificate despite errors: {sslPolicyErrors}");
-            return true; // Accept for development
+            return true; // Accept for development with self-signed certificates
         }
         
         LogError($"Certificate validation failed with errors: {sslPolicyErrors}");
-        return false; // In production, you may want to reject invalid certificates
+        return false; // Reject certificates that are completely unavailable or have other issues
     }
     
     private async Task AuthenticatePlayer()
