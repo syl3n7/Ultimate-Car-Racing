@@ -93,6 +93,9 @@ public class GameManager : MonoBehaviour
         public float timestamp;
     }
     
+    // Network reference - uses SecureNetworkManager only
+    private SecureNetworkManager NetworkManager => SecureNetworkManager.Instance;
+    
     void Awake()
     {
         if (Instance == null)
@@ -142,7 +145,7 @@ public class GameManager : MonoBehaviour
     private void RestoreCursorState()
     {
         // Find any CameraFollow components and restore their cursor state
-        CameraFollow[] cameraFollowers = FindObjectsOfType<CameraFollow>();
+        CameraFollow[] cameraFollowers = FindObjectsByType<CameraFollow>(FindObjectsSortMode.None);
         if (cameraFollowers.Length > 0)
         {
             foreach (CameraFollow cameraFollow in cameraFollowers)
@@ -203,9 +206,9 @@ public class GameManager : MonoBehaviour
         sceneFullyLoaded = true;
         
         // Broadcast "scene ready" message to other players
-        if (NetworkManager.Instance != null && isMultiplayerGame)
+        if (NetworkManager != null && isMultiplayerGame)
         {
-            string currentRoomId = NetworkManager.Instance.GetCurrentRoomId();
+            string currentRoomId = NetworkManager.GetCurrentRoomId();
             
             if (!string.IsNullOrEmpty(currentRoomId))
             {
@@ -215,17 +218,17 @@ public class GameManager : MonoBehaviour
                     { "roomId", currentRoomId }
                 };
                 
-                _ = NetworkManager.Instance.SendTcpMessage(getPlayersMsg);
+                _ = NetworkManager.SendTcpMessage(getPlayersMsg);
                 yield return new WaitForSeconds(0.5f);
                 
                 Dictionary<string, object> readyMessage = new Dictionary<string, object>
                 {
                     { "command", "RELAY_MESSAGE" },
-                    { "targetId", NetworkManager.Instance.GetRoomHostId() },
+                    { "targetId", NetworkManager.GetRoomHostId() },
                     { "message", $"SCENE_READY:{localPlayerId}" }
                 };
                 
-                _ = NetworkManager.Instance.SendTcpMessage(readyMessage);
+                _ = NetworkManager.SendTcpMessage(readyMessage);
                 Debug.Log($"Sent SCENE_READY message to room host");
             }
             else
@@ -238,7 +241,7 @@ public class GameManager : MonoBehaviour
     // In Update method - update to use NetworkManager
     void Update()
     {
-        if (isMultiplayerGame && NetworkManager.Instance != null && NetworkManager.Instance.IsConnected() && sceneFullyLoaded)
+        if (isMultiplayerGame && NetworkManager != null && NetworkManager.IsConnected() && sceneFullyLoaded)
         {
             // Only sync state when scene is fully loaded
             if (Time.time - lastStateSyncTime > syncInterval)
@@ -272,9 +275,9 @@ public class GameManager : MonoBehaviour
         if (localPlayerId != null && activePlayers.ContainsKey(localPlayerId))
         {
             var stateData = GetPlayerState(localPlayerId);
-            if (stateData != null && NetworkManager.Instance != null)
+            if (stateData != null && NetworkManager != null)
             {
-                NetworkManager.Instance.SendPlayerState(stateData);
+                NetworkManager.SendPlayerState(stateData);
             }
         }
     }
@@ -295,9 +298,9 @@ public class GameManager : MonoBehaviour
         {
             // Send our state to the newly ready player
             var stateData = GetPlayerState(localPlayerId);
-            if (stateData != null && NetworkManager.Instance != null)
+            if (stateData != null && NetworkManager != null)
             {
-                NetworkManager.Instance.SendPlayerState(stateData);
+                NetworkManager.SendPlayerState(stateData);
                 Debug.Log($"Sent state update to newly ready player {playerId}");
             }
         }
@@ -307,9 +310,9 @@ public class GameManager : MonoBehaviour
         if (localPlayerId != null && activePlayers.ContainsKey(localPlayerId))
         {
             var inputData = GetPlayerInput(localPlayerId);
-            if (inputData != null && NetworkManager.Instance != null)
+            if (inputData != null && NetworkManager != null)
             {
-                NetworkManager.Instance.SendPlayerInput(inputData);
+                NetworkManager.SendPlayerInput(inputData);
             }
         }
     }
@@ -331,9 +334,9 @@ public class GameManager : MonoBehaviour
         }
         
         // Check if we're in a multiplayer game
-        if (isMultiplayerGame && NetworkManager.Instance != null)
+        if (isMultiplayerGame && NetworkManager != null)
         {
-            localPlayerId = NetworkManager.Instance.GetClientId();
+            localPlayerId = NetworkManager.GetClientId();
             
             // Use multiplayer spawn position - ADD RESPAWN HEIGHT to Y value
             Vector3 spawnPosition = new Vector3(
@@ -610,7 +613,7 @@ public class GameManager : MonoBehaviour
             Debug.Log($"*** LOCAL PLAYER CAR INITIALIZED: {controller.gameObject.name} with ID {playerId} ***");
             
             // Setup camera follow
-            CameraFollow cameraFollow = FindObjectOfType<CameraFollow>();
+            CameraFollow cameraFollow = FindFirstObjectByType<CameraFollow>();
             if (cameraFollow != null)
             {
                 cameraFollow.target = controller.transform;
@@ -653,7 +656,7 @@ public class GameManager : MonoBehaviour
         Debug.Log($"Setting up camera to follow local player: {playerTransform.name}");
         
         // Find all CameraFollow scripts in the scene
-        CameraFollow[] cameraFollowers = FindObjectsOfType<CameraFollow>();
+        CameraFollow[] cameraFollowers = FindObjectsByType<CameraFollow>(FindObjectsSortMode.None);
         
         if (cameraFollowers.Length > 0)
         {

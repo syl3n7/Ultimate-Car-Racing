@@ -9,9 +9,9 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 8901063129558861309}
-  - component: {fileID: 625864769487328849}
+  - component: {fileID: 1457017774786166952}
   m_Layer: 0
-  m_Name: NetworkManager
+  m_Name: SecureNetworkManager
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -32,7 +32,7 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &625864769487328849
+--- !u!114 &1457017774786166952
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -41,13 +41,11 @@ MonoBehaviour:
   m_GameObject: {fileID: 794126849708622356}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 16eeac70443a24dfeb85ca15e57e13eb, type: 3}
+  m_Script: {fileID: 11500000, guid: 09b26ce14750f0532946f4e66f8b2b5b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  serverIP: 89.114.116.19
-  tcpPort: 443
-  udpPort: 443
-  heartbeatInterval: 5
-  rememberCredentials: 1
-  defaultPlayerName: Player
-  showDebugMessages: 0
+  serverHost: 89.114.116.19
+  serverPort: 443
+  playerName: Player
+  playerPassword: secret123
+  enableDebugLogs: 1

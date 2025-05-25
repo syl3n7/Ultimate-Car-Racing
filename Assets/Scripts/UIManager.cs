@@ -142,7 +142,7 @@ public class UIManager : MonoBehaviour
         ConnectAllUIButtons();
         
         // Register for network events
-        NetworkManager networkManager = NetworkManager.Instance;
+        SecureNetworkManager networkManager = SecureNetworkManager.Instance;
         if (networkManager != null)
         {
             networkManager.OnConnected += (msg) => OnConnected();
@@ -270,11 +270,11 @@ public class UIManager : MonoBehaviour
         Debug.LogWarning($"Button not found: {buttonName}");
     }
     
-    // In OnDestroy method - replace NetworkClient references with NetworkManager
+    // In OnDestroy method - replace NetworkClient references with SecureNetworkManager
     void OnDestroy()
     {
         // Unregister network events
-        NetworkManager networkManager = NetworkManager.Instance;
+        SecureNetworkManager networkManager = SecureNetworkManager.Instance;
         if (networkManager != null)
         {
             networkManager.OnConnected -= (msg) => OnConnected();
@@ -337,10 +337,10 @@ public class UIManager : MonoBehaviour
         multiplayerPanel.SetActive(true);
         
         // Connect to server if not already connected
-        if (NetworkManager.Instance != null && !NetworkManager.Instance.IsConnected())
+        if (SecureNetworkManager.Instance != null && !SecureNetworkManager.Instance.IsConnected())
         {
             ShowConnectionPanel("Connecting to server...");
-            _ = NetworkManager.Instance.Connect();
+            _ = SecureNetworkManager.Instance.Connect();
         }
     }
     public void OnPlayButtonClicked()
@@ -488,10 +488,10 @@ public class UIManager : MonoBehaviour
             return;
         }
         
-        if (NetworkManager.Instance != null)
+        if (SecureNetworkManager.Instance != null)
         {
             // Set the credentials in NetworkManager
-            NetworkManager.Instance.SetCredentials(username, password);
+            SecureNetworkManager.Instance.SetCredentials(username, password);
             
             // Update local player name and attempt to reconnect
             playerName = username;
@@ -500,9 +500,9 @@ public class UIManager : MonoBehaviour
             ShowConnectionPanel("Authenticating...");
             
             // If not connected, connect
-            if (!NetworkManager.Instance.IsConnected())
+            if (!SecureNetworkManager.Instance.IsConnected())
             {
-                _ = NetworkManager.Instance.Connect();
+                _ = SecureNetworkManager.Instance.Connect();
             }
         }
     }
@@ -683,9 +683,9 @@ public async void CreateRoom()
         GameManager.SelectedTrackIndex = 0; // Set to default track
     }
     
-    if (NetworkManager.Instance == null)
+    if (SecureNetworkManager.Instance == null)
     {
-        Debug.LogError("NetworkManager.Instance is null");
+        Debug.LogError("SecureNetworkManager.Instance is null");
         ShowNotification("Network manager not available");
         return;
     }
@@ -694,17 +694,17 @@ public async void CreateRoom()
     ShowConnectionPanel("Creating room...");
     
     // Make sure we're connected before attempting to create a room
-    if (!NetworkManager.Instance.IsConnected())
+    if (!SecureNetworkManager.Instance.IsConnected())
     {
         Debug.Log("Not connected, connecting first...");
         ShowConnectionPanel("Connecting to server...");
         
         try {
             // Actually await the connection this time
-            await NetworkManager.Instance.Connect();
+            await SecureNetworkManager.Instance.Connect();
             
             // Check if we're connected after the await
-            if (!NetworkManager.Instance.IsConnected()) {
+            if (!SecureNetworkManager.Instance.IsConnected()) {
                 ShowNotification("Could not connect to server");
                 HideConnectionPanel();
                 return;
@@ -725,16 +725,16 @@ public async void CreateRoom()
     int maxPlayers = (int)maxPlayersSlider.value;
     
     Debug.Log($"Creating room: {roomName}, Max players: {maxPlayers}");
-    NetworkManager.Instance.HostGame(roomName, maxPlayers);
+    SecureNetworkManager.Instance.HostGame(roomName, maxPlayers);
 }
     
     // In JoinSelectedRoom method - update to use NetworkManager
     public void JoinSelectedRoom()
     {
-        if (currentRoomId != null && NetworkManager.Instance != null && NetworkManager.Instance.IsConnected())
+        if (currentRoomId != null && SecureNetworkManager.Instance != null && SecureNetworkManager.Instance.IsConnected())
         {
             ShowConnectionPanel("Joining room...");
-            NetworkManager.Instance.JoinGame(currentRoomId);
+            SecureNetworkManager.Instance.JoinGame(currentRoomId);
         }
         else
         {

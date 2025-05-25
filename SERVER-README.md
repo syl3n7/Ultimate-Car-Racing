@@ -1,26 +1,39 @@
 # MP-Server Protocol Documentation
 
 ## 1. Overview
-MP-Server is a simple TCP/UDP racing‐game server.  
-Clients connect over TCP (for commands, room management, chat) and send/receive UDP packets (for real‐time position updates).
+MP-Server is a secure TCP/UDP racing‐game server with TLS/SSL encryption.  
+Clients connect over TLS-encrypted TCP (for commands, room management, chat) and send/receive encrypted UDP     await udp.SendAsync(bytes, bytes.Length, serverHost, 443);ackets (for real‐time position updates).
 
 Ports (defaults):
-- TCP: 7777
-- UDP: 7778
+- TCP: 443 (TLS/SSL encrypted) - Uses standard HTTPS port for firewall traversal
+- UDP: 443 (AES encrypted for authenticated users) - Same port as TCP 
 - Dashboard Web UI: 8080
+
+## 1.1 Security Features
+- **TLS/SSL TCP encryption**: All command traffic is encrypted using TLS 1.2/1.3
+- **Self-signed certificate generation**: Server automatically generates certificates if none provided
+- **UDP AES encryption**: Position and input data encrypted with session-specific keys
+- **Player authentication**: Password-based authentication with hashed storage
+- **Session isolation**: Each player gets unique encryption keys
 
 ## 2. Prerequisites
 - .NET 9.0 runtime
-- A TCP‐capable socket library (e.g. `System.Net.Sockets.TcpClient` in .NET, `net` module in Node.js, or BSD sockets in C/C++)
-- A UDP socket library for state updates
+- A TLS-capable TCP socket library
+- A UDP socket library for state updates  
 - UTF-8 support for text commands
 - JSON parser (server uses System.Text.Json for all command processing)
+- AES encryption support for UDP packets (authenticated users only)
 
 ## 3. TCP Protocol
 
 ### 3.1 Connection & Framing
-1. Client opens a TCP connection to server:  
-   `tcpClient.Connect("server.address", 7777)`
+1. Client opens a **TLS-encrypted** TCP connection to server:  
+   ```csharp
+   var client = new TcpClient();
+   await client.ConnectAsync("server.address", 443);
+   var sslStream = new SslStream(client.GetStream());
+   await sslStream.AuthenticateAsClientAsync("server.address");
+   ```
 2. Server immediately responds with a welcome message terminated by `\n`:  
    ```
    CONNECTED|<sessionId>\n
@@ -30,18 +43,20 @@ Ports (defaults):
    {"command":"COMMAND_NAME","param1":"value1","param2":"value2"}\n
    ```
 
+**Important**: The server automatically generates and uses a self-signed certificate. For production use, clients should either:
+- Accept self-signed certificates (for local/LAN use)
+- Provide a proper CA-signed certificate to the server
+- Implement certificate validation callbacks
+
 ### 3.2 Authentication
 The server supports a simple authentication system to protect player identities:
 
 1. **During Registration** (first time using a username):
    - When setting a player name for the first time, a password can be provided
-   - The server will store the password hash for that player name
    - Example: `{"command":"NAME","name":"playerName","password":"secretPassword"}`
 
 2. **During Login** (using an existing username):
    - When connecting with a previously used name, password verification is required
-   - If the password matches, the player is marked as authenticated
-   - If the password is incorrect, an AUTH_FAILED response is sent
    - Example: `{"command":"NAME","name":"playerName","password":"secretPassword"}`
 
 3. **Separate Authentication**:
@@ -49,15 +64,20 @@ The server supports a simple authentication system to protect player identities:
    - Example: `{"command":"AUTHENTICATE","password":"secretPassword"}`
 
 4. **Command Restrictions**:
-   - Some commands require authentication (creating/joining rooms, game actions)
-   - Basic commands like PING, LIST_ROOMS, etc. work without authentication
-   - Attempting to use restricted commands while unauthenticated results in an error
+   - Unauthenticated players can only use: NAME, AUTHENTICATE, PING, BYE, PLAYER_INFO, LIST_ROOMS
+   - All other commands require authentication
+   - Attempting restricted commands without auth returns an error
+
+5. **UDP Encryption Setup**:
+   - Once authenticated via TCP, players receive unique UDP encryption keys
+   - UDP packets from authenticated players are automatically encrypted with AES-256
+   - The server can handle both encrypted and plain-text UDP packets for backward compatibility
 
 ### 3.3 Supported Commands
 
 | Command        | Direction    | Payload (JSON)                                    | Response (JSON)                         | Requires Auth |
 | -------------- | ------------ | ------------------------------------------------- | --------------------------------------- | ------------- |
-| `NAME`         | Client → Srv | `{"command":"NAME","name":"playerName","password":"secret"}` | `{"command":"NAME_OK","name":"playerName","authenticated":true}` or `{"command":"AUTH_FAILED","message":"Invalid password for this player name."}` | No |
+| `NAME`         | Client → Srv | `{"command":"NAME","name":"playerName","password":"secret"}` | `{"command":"NAME_OK","name":"playerName","authenticated":true,"udpEncryption":true}` or `{"command":"AUTH_FAILED","message":"Invalid password for this player name."}` | No |
 | `AUTHENTICATE` | Client → Srv | `{"command":"AUTHENTICATE","password":"secret"}` | `{"command":"AUTH_OK","name":"playerName"}` or `{"command":"AUTH_FAILED","message":"Invalid password."}` | No |
 | `CREATE_ROOM`  | Client → Srv | `{"command":"CREATE_ROOM","name":"roomName"}`   | `{"command":"ROOM_CREATED","roomId":"id","name":"roomName"}` | Yes |
 | `JOIN_ROOM`    | Client → Srv | `{"command":"JOIN_ROOM","roomId":"id"}`         | `{"command":"JOIN_OK","roomId":"id"}` or `{"command":"ERROR","message":"Failed to join room. Room may be full or inactive."}` | Yes |
@@ -107,7 +127,18 @@ The UDP protocol provides low-latency communication for:
 
 All UDP communication happens after the client has joined or created a room via TCP.
 
-### 4.2 Packet Format (JSON-based)
+### 4.2 Encryption
+**For Authenticated Players:**
+- UDP packets are automatically encrypted using AES-256-CBC
+- Each session gets unique encryption keys derived from the session ID
+- Packet format: `[4-byte length header][encrypted JSON data]`
+- The server handles encryption/decryption transparently
+
+**For Unauthenticated Players:**
+- UDP packets are sent as plain-text JSON (backward compatibility)
+- Limited functionality compared to authenticated users
+
+### 4.3 Packet Format (JSON-based)
 The server supports two primary types of UDP packets, both based on JSON:
 
 #### Position Updates
@@ -180,8 +211,9 @@ The server supports two primary types of UDP packets, both based on JSON:
    - High-frequency updates (like position) should be sent periodically regardless of changes
    - Input commands should be sent when input values change or at a consistent rate
 
-### 4.5 Example (C# send)
+### 4.5 Example (C# send with encryption)
 ```csharp
+// For authenticated players - packets are automatically encrypted
 using var udp = new UdpClient();
 var posUpdate = new { 
     command = "UPDATE", 
@@ -189,12 +221,23 @@ var posUpdate = new {
     position = new { x = posX, y = posY, z = posZ },
     rotation = new { x = rotX, y = rotY, z = rotZ, w = rotW }
 };
-var json = JsonSerializer.Serialize(posUpdate) + "\n";
-var bytes = Encoding.UTF8.GetBytes(json);
-await udp.SendAsync(bytes, bytes.Length, serverHost, 7778);
+
+// If you have UDP encryption enabled (authenticated player)
+if (udpCrypto != null)
+{
+    var encryptedPacket = udpCrypto.CreatePacket(posUpdate);
+    await udp.SendAsync(encryptedPacket, encryptedPacket.Length, serverHost, 443);
+}
+else
+{
+    // Fallback to plain text for unauthenticated users
+    var json = JsonSerializer.Serialize(posUpdate) + "\n";
+    var bytes = Encoding.UTF8.GetBytes(json);
+    await udp.SendAsync(bytes, bytes.Length, serverHost, 8443);
+}
 ```
 
-### 4.6 Example (C# receive)
+### 4.6 Example (C# receive with decryption)
 ```csharp
 using var udpClient = new UdpClient(localPort); // Local port to listen on
 var endpoint = new IPEndPoint(IPAddress.Any, 0);
@@ -202,8 +245,31 @@ var endpoint = new IPEndPoint(IPAddress.Any, 0);
 while (true)
 {
     var result = await udpClient.ReceiveAsync();
-    var json = Encoding.UTF8.GetString(result.Buffer);
-    var update = JsonSerializer.Deserialize<JsonElement>(json);
+    var packetData = result.Buffer;
+    
+    JsonElement update;
+    
+    // Try to decrypt if this looks like an encrypted packet
+    if (packetData.Length >= 4 && udpCrypto != null)
+    {
+        var parsedData = udpCrypto.ParsePacket<JsonElement>(packetData);
+        if (parsedData.ValueKind != JsonValueKind.Undefined)
+        {
+            update = parsedData;
+        }
+        else
+        {
+            // Fallback to plain text parsing
+            var json = Encoding.UTF8.GetString(packetData);
+            update = JsonSerializer.Deserialize<JsonElement>(json);
+        }
+    }
+    else
+    {
+        // Plain text packet
+        var json = Encoding.UTF8.GetString(packetData);
+        update = JsonSerializer.Deserialize<JsonElement>(json);
+    }
     
     // Process by command type
     if (update.TryGetProperty("command", out var cmdElement))
@@ -212,7 +278,7 @@ while (true)
         
         if (command == "UPDATE")
         {
-            // Process position update
+            // Process position update (same as before)
             var sessionId = update.GetProperty("sessionId").GetString();
             var position = update.GetProperty("position");
             var rotation = update.GetProperty("rotation");
@@ -231,7 +297,7 @@ while (true)
         }
         else if (command == "INPUT")
         {
-            // Process input update
+            // Process input update (same as before)
             var sessionId = update.GetProperty("sessionId").GetString();
             var input = update.GetProperty("input");
             
@@ -272,29 +338,34 @@ while (true)
 - List rooms: Get all available rooms with their basic information
 - Get room players: Get the list of players in the current room
 
-## 6. Example TCP Client (C#)
+## 6. Example TCP Client (C# with TLS)
 
 ```csharp
 using System;
 using System.Net.Sockets;
+using System.Net.Security;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using System.Security.Cryptography.X509Certificates;
 
 class RacingClient
 {
     private TcpClient _tcp;
-    private NetworkStream _stream;
+    private SslStream _sslStream;
     private string _sessionId;
 
     public async Task RunAsync(string host, int port)
     {
         _tcp = new TcpClient();
         await _tcp.ConnectAsync(host, port);
-        _stream = _tcp.GetStream();
+        
+        // Setup TLS connection
+        _sslStream = new SslStream(_tcp.GetStream(), false, ValidateServerCertificate);
+        await _sslStream.AuthenticateAsClientAsync(host);
 
         // Read welcome
-        var reader = new StreamReader(_stream, Encoding.UTF8);
+        var reader = new StreamReader(_sslStream, Encoding.UTF8);
         var welcome = await reader.ReadLineAsync();
         Console.WriteLine(welcome); // "CONNECTED|<sessionId>"
         _sessionId = welcome.Split('|')[1];
@@ -302,21 +373,30 @@ class RacingClient
         // Set name with password
         await SendJsonAsync(new { command = "NAME", name = "Speedy", password = "secret123" });
         var response = await reader.ReadLineAsync();
-        Console.WriteLine(response); // {"command":"NAME_OK","name":"Speedy","authenticated":true}
+        Console.WriteLine(response); // {"command":"NAME_OK","name":"Speedy","authenticated":true,"udpEncryption":true}
 
         // Create a room
         await SendJsonAsync(new { command = "CREATE_ROOM", name = "FastTrack" });
         response = await reader.ReadLineAsync();
         Console.WriteLine(response); // {"command":"ROOM_CREATED","roomId":"<id>","name":"FastTrack"}
 
-        // ... then start your UDP updates …
+        // ... then start your UDP updates with encryption …
+    }
+
+    private bool ValidateServerCertificate(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors sslPolicyErrors)
+    {
+        // For development/LAN use, you might accept self-signed certificates
+        if (sslPolicyErrors == SslPolicyErrors.RemoteCertificateChainErrors)
+            return true; // Accept self-signed certificates
+
+        return sslPolicyErrors == SslPolicyErrors.None;
     }
 
     private async Task SendJsonAsync<T>(T data)
     {
         var json = JsonSerializer.Serialize(data) + "\n";
         var bytes = Encoding.UTF8.GetBytes(json);
-        await _stream.WriteAsync(bytes, 0, bytes.Length);
+        await _sslStream.WriteAsync(bytes, 0, bytes.Length);
     }
 }
 ```
@@ -477,29 +557,161 @@ When an admin action is performed:
 - No login is required as it's designed for LAN-only access
 
 ## 12. Next Steps
-- Add authentication/tokens for secure player identification
-- Implement chat functionality
+- Implement certificate pinning for enhanced security
+- Add rate limiting for UDP packets
+- Implement server-side physics validation
 - Add race-specific features like lap counting and race timing
 - Optimize UDP broadcast for large player counts
 - Implement game state synchronization for deterministic physics
+- Add comprehensive logging and monitoring
 
-## 13. Authentication System
+## 13. Security Implementation Details
 
-### 13.1 Purpose
+### 13.1 TLS/SSL Configuration
+- **Certificate Management**: Server automatically generates self-signed certificates if none provided
+- **Certificate Storage**: Certificates are saved as `server.pfx` in the application directory
+- **TLS Versions**: Supports TLS 1.2 and TLS 1.3
+- **Cipher Suites**: Uses modern cipher suites with forward secrecy
+- **Certificate Validation**: Clients should implement proper certificate validation for production use
+
+### 13.2 UDP Encryption Details
+- **Algorithm**: AES-256-CBC encryption
+- **Key Derivation**: Session-specific keys derived from session ID + shared secret
+- **Packet Format**: `[4-byte length][encrypted data]`
+- **Backward Compatibility**: Server accepts both encrypted and plain-text UDP packets
+- **Session Isolation**: Each authenticated player gets unique encryption keys
+
+### 13.3 Password Security
+- **Hashing**: SHA-256 (should be upgraded to bcrypt/scrypt for production)
+- **Storage**: Only password hashes are stored, never plain text
+- **First-time Setup**: First connection with a username sets the password
+- **Verification**: Subsequent connections require correct password
+
+### 13.4 Security Best Practices for Clients
+1. **Certificate Validation**: Implement proper certificate validation for production
+2. **Connection Security**: Always use TLS for TCP connections
+3. **Key Management**: Securely store UDP encryption keys
+4. **Error Handling**: Handle authentication failures gracefully
+5. **Rate Limiting**: Implement client-side rate limiting for UDP packets
+
+### 13.5 Server Security Features
+- **Session Isolation**: Each player session is completely isolated
+- **Automatic Cleanup**: Inactive sessions are automatically removed
+- **Certificate Rotation**: Certificates can be replaced without server restart
+- **Encryption Negotiation**: Server automatically detects encrypted vs plain UDP packets
+- **Admin Interface**: Dashboard is designed for LAN-only access (no authentication required)
+
+## 13.6 Certificate Handling with Unity Clients
+
+### 13.6.1 Certificate Validation in Unity
+Unity clients might encounter certificate validation issues when connecting to the server:
+```
+Certificate validation failed: RemoteCertificateNameMismatch, RemoteCertificateChainErrors
+```
+
+This happens because:
+1. The server uses a self-signed certificate
+2. The client attempts to validate the certificate against trusted roots (which fails)
+3. The hostname or IP the client connects to might not match what's in the certificate
+
+### 13.6.2 Solution Options
+
+#### Option 1: Bypass Certificate Validation (Development Only)
+For development and testing, you can bypass certificate validation by implementing a custom validation callback:
+
+```csharp
+// In your Unity NetworkManager class
+public bool ValidateServerCertificate(object sender, X509Certificate certificate, 
+                                      X509Chain chain, SslPolicyErrors sslPolicyErrors)
+{
+    Debug.LogWarning($"Certificate validation: {sslPolicyErrors}");
+    
+    // Accept any certificate from our server
+    // IMPORTANT: Only use this for your specific racing server, not general web traffic
+    return true;
+}
+
+// When creating your SslStream
+var sslStream = new SslStream(networkStream, false, ValidateServerCertificate);
+await sslStream.AuthenticateAsClientAsync("your-server-hostname-or-ip");
+```
+
+#### Option 2: Export and Include the Server Certificate
+For better security, you can include the server's public certificate in your game:
+
+1. Export the server's public certificate (without private key)
+2. Include it as a resource in your Unity game
+3. Load and verify against this specific certificate:
+
+```csharp
+public class CertificateHandler
+{
+    private readonly X509Certificate2 _serverCert;
+    
+    public CertificateHandler()
+    {
+        // Load server certificate from resources
+        TextAsset certAsset = Resources.Load<TextAsset>("server-cert");
+        _serverCert = new X509Certificate2(certAsset.bytes);
+    }
+    
+    public bool ValidateServerCertificate(object sender, X509Certificate certificate, 
+                                          X509Chain chain, SslPolicyErrors sslPolicyErrors)
+    {
+        // Only accept our specific server certificate
+        return certificate.GetCertHashString() == _serverCert.GetCertHashString();
+    }
+}
+```
+
+### 13.6.3 Exporting the Server Certificate
+To export the server's public certificate for client validation:
+
+1. From the server machine:
+```bash
+# Export PFX to PEM (public part only)
+openssl pkcs12 -in server.pfx -clcerts -nokeys -out server-public.pem
+```
+
+2. Copy the `server-public.pem` file to your Unity project's Resources folder
+
+### 13.6.4 Certificate Generation Details
+The server automatically generates a certificate with:
+- The server's public IP (obtained from `SERVER_PUBLIC_IP` environment variable or defaults to "89.114.116.19")
+- The server's internal IP addresses
+- The server hostname (`SERVER_HOSTNAME` environment variable or "racing-server")
+- All common network interfaces
+- Common special IPs (loopback, Any)
+
+You can customize the certificate by setting these environment variables before starting the server:
+
+```bash
+# Linux/macOS
+export SERVER_HOSTNAME="my-racing-server"
+export SERVER_PUBLIC_IP="your-public-ip"
+
+# Windows
+set SERVER_HOSTNAME=my-racing-server
+set SERVER_PUBLIC_IP=your-public-ip
+```
+
+## 14. Authentication System
+
+### 14.1 Purpose
 The authentication system provides a simple identity protection mechanism where:
 - Players can claim and protect their unique usernames
 - Re-connecting with the same name requires password verification
 - Only basic commands are available without authentication
 - Game-related features require successful authentication
 
-### 13.2 Password Handling
+### 14.2 Password Handling
 The server uses SHA-256 hashing for password storage:
 - Passwords are never stored in plain text
 - Each player name has its own associated password hash
 - The first time a name is used, the provided password is stored
 - Subsequent connections must use the same password
 
-### 13.3 Client Implementation
+### 14.3 Client Implementation
 Client applications should:
 1. Store the player's name and password locally
 2. Send the password with the NAME command on reconnection
@@ -508,12 +720,12 @@ Client applications should:
    - Request the correct password
    - Offer to use a different name
 
-### 13.4 Authentication States
+### 14.4 Authentication States
 Players can be in one of two authentication states:
 1. **Unauthenticated**: Limited to basic commands
 2. **Authenticated**: Full access to all game features
 
-### 13.5 Recommended Client Workflow
+### 14.5 Recommended Client Workflow
 ```
 1. Connect to server → Receive session ID
 2. Ask user for name and password
@@ -522,6 +734,924 @@ Players can be in one of two authentication states:
 5. Once authenticated (NAME_OK with authenticated=true), proceed with game
 ```
 
+## 15. Unity Client Implementation Guide
+
+### 15.1 Overview
+This section provides a complete guide for implementing a secure Unity client that connects to the MP-Server. The implementation covers TLS-encrypted TCP for commands and AES-encrypted UDP for real-time updates.
+
+### 15.2 Unity Project Setup
+
+#### 15.2.1 Required Assemblies
+Add these assemblies to your Unity project (in the Player Settings → Configuration):
+```
+System.Net.Security
+System.Security.Cryptography
+System.Text.Json
+```
+
+#### 15.2.2 Required Using Statements
+```csharp
+using System;
+using System.Net.Sockets;
+using System.Net.Security;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+using System.Collections;
+using UnityEngine;
+using System.Net;
+```
+
+### 15.3 Complete Unity NetworkManager Implementation
+
+```csharp
+using System;
+using System.Net.Sockets;
+using System.Net.Security;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+using System.Collections;
+using UnityEngine;
+using System.Net;
+using System.IO;
+
+public class RacingNetworkManager : MonoBehaviour
+{
+    [Header("Connection Settings")]
+    public string serverHost = "localhost";
+    public int serverPort = 443;
+    
+    [Header("Player Settings")]
+    public string playerName = "Player";
+    public string playerPassword = "secret123";
+    
+    [Header("Debug")]
+    public bool enableDebugLogs = true;
+    
+    // Networking components
+    private TcpClient _tcpClient;
+    private SslStream _sslStream;
+    private UdpClient _udpClient;
+    private StreamReader _tcpReader;
+    private bool _isConnected = false;
+    private bool _isAuthenticated = false;
+    
+    // Session data
+    private string _sessionId;
+    private string _currentRoomId;
+    private UdpEncryption _udpCrypto;
+    
+    // UDP endpoint
+    private IPEndPoint _serverUdpEndpoint;
+    
+    // Events
+    public System.Action<bool> OnConnectionChanged;
+    public System.Action<bool> OnAuthenticationChanged;
+    public System.Action<string> OnRoomJoined;
+    public System.Action<PlayerUpdate> OnPlayerUpdate;
+    public System.Action<string, string> OnMessageReceived;
+    
+    void Start()
+    {
+        DontDestroyOnLoad(gameObject);
+        _serverUdpEndpoint = new IPEndPoint(IPAddress.Parse(serverHost), serverPort);
+    }
+    
+    #region Connection Management
+    
+    public async Task<bool> ConnectToServer()
+    {
+        try
+        {
+            Log("Connecting to server...");
+            
+            // Create TCP connection
+            _tcpClient = new TcpClient();
+            await _tcpClient.ConnectAsync(serverHost, serverPort);
+            
+            // Setup TLS encryption
+            _sslStream = new SslStream(_tcpClient.GetStream(), false, ValidateServerCertificate);
+            await _sslStream.AuthenticateAsClientAsync(serverHost);
+            
+            // Setup reader for responses
+            _tcpReader = new StreamReader(_sslStream, Encoding.UTF8);
+            
+            // Read welcome message
+            string welcome = await _tcpReader.ReadLineAsync();
+            Log($"Server welcome: {welcome}");
+            
+            if (welcome != null && welcome.StartsWith("CONNECTED|"))
+            {
+                _sessionId = welcome.Split('|')[1];
+                _isConnected = true;
+                OnConnectionChanged?.Invoke(true);
+                
+                // Start listening for TCP messages
+                StartCoroutine(ListenForTcpMessages());
+                
+                // Authenticate player
+                await AuthenticatePlayer();
+                
+                return true;
+            }
+            
+            throw new Exception("Invalid welcome message from server");
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to connect: {ex.Message}");
+            await Disconnect();
+            return false;
+        }
+    }
+    
+    private bool ValidateServerCertificate(object sender, X509Certificate certificate, 
+                                          X509Chain chain, SslPolicyErrors sslPolicyErrors)
+    {
+        // For development: Accept self-signed certificates
+        // For production: Implement proper certificate validation
+        if (sslPolicyErrors == SslPolicyErrors.None)
+            return true;
+            
+        if (sslPolicyErrors == SslPolicyErrors.RemoteCertificateChainErrors ||
+            sslPolicyErrors == SslPolicyErrors.RemoteCertificateNameMismatch)
+        {
+            Log($"Accepting self-signed certificate: {sslPolicyErrors}");
+            return true; // Accept for development
+        }
+        
+        LogError($"Certificate validation failed: {sslPolicyErrors}");
+        return false;
+    }
+    
+    private async Task AuthenticatePlayer()
+    {
+        try
+        {
+            var nameCommand = new
+            {
+                command = "NAME",
+                name = playerName,
+                password = playerPassword
+            };
+            
+            await SendTcpMessage(nameCommand);
+        }
+        catch (Exception ex)
+        {
+            LogError($"Authentication failed: {ex.Message}");
+        }
+    }
+    
+    public async Task Disconnect()
+    {
+        _isConnected = false;
+        _isAuthenticated = false;
+        
+        try
+        {
+            if (_sslStream != null)
+            {
+                await SendTcpMessage(new { command = "BYE" });
+                _sslStream.Close();
+            }
+            
+            _tcpClient?.Close();
+            _udpClient?.Close();
+        }
+        catch (Exception ex)
+        {
+            LogError($"Error during disconnect: {ex.Message}");
+        }
+        
+        OnConnectionChanged?.Invoke(false);
+        OnAuthenticationChanged?.Invoke(false);
+    }
+    
+    #endregion
+    
+    #region TCP Communication
+    
+    private async Task SendTcpMessage<T>(T message)
+    {
+        if (!_isConnected || _sslStream == null)
+        {
+            LogError("Not connected to server");
+            return;
+        }
+        
+        try
+        {
+            string json = JsonSerializer.Serialize(message) + "\n";
+            byte[] data = Encoding.UTF8.GetBytes(json);
+            await _sslStream.WriteAsync(data, 0, data.Length);
+            
+            Log($"Sent: {json.Trim()}");
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to send TCP message: {ex.Message}");
+        }
+    }
+    
+    private IEnumerator ListenForTcpMessages()
+    {
+        while (_isConnected && _tcpReader != null)
+        {
+            Task<string> readTask = _tcpReader.ReadLineAsync();
+            
+            // Wait for the task to complete
+            while (!readTask.IsCompleted)
+            {
+                yield return null;
+            }
+            
+            if (readTask.Result != null)
+            {
+                ProcessTcpMessage(readTask.Result);
+            }
+            else
+            {
+                // Connection lost
+                Log("TCP connection lost");
+                break;
+            }
+        }
+        
+        // Connection ended
+        _ = Disconnect();
+    }
+    
+    private void ProcessTcpMessage(string message)
+    {
+        try
+        {
+            Log($"Received: {message}");
+            
+            var jsonDoc = JsonDocument.Parse(message);
+            var root = jsonDoc.RootElement;
+            
+            if (root.TryGetProperty("command", out var commandElement))
+            {
+                string command = commandElement.GetString();
+                
+                switch (command)
+                {
+                    case "NAME_OK":
+                        HandleNameOk(root);
+                        break;
+                        
+                    case "AUTH_FAILED":
+                        HandleAuthFailed(root);
+                        break;
+                        
+                    case "ROOM_CREATED":
+                    case "JOIN_OK":
+                        HandleRoomJoined(root);
+                        break;
+                        
+                    case "GAME_STARTED":
+                        HandleGameStarted(root);
+                        break;
+                        
+                    case "RELAYED_MESSAGE":
+                        HandleRelayedMessage(root);
+                        break;
+                        
+                    case "ERROR":
+                        HandleError(root);
+                        break;
+                        
+                    default:
+                        Log($"Unhandled command: {command}");
+                        break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to process TCP message: {ex.Message}");
+        }
+    }
+    
+    private void HandleNameOk(JsonElement root)
+    {
+        if (root.TryGetProperty("authenticated", out var authElement) && authElement.GetBoolean())
+        {
+            _isAuthenticated = true;
+            OnAuthenticationChanged?.Invoke(true);
+            
+            // Setup UDP encryption if available
+            if (root.TryGetProperty("udpEncryption", out var udpElement) && udpElement.GetBoolean())
+            {
+                _udpCrypto = new UdpEncryption(_sessionId);
+                SetupUdpClient();
+            }
+            
+            Log("Successfully authenticated with UDP encryption enabled");
+        }
+    }
+    
+    private void HandleAuthFailed(JsonElement root)
+    {
+        if (root.TryGetProperty("message", out var messageElement))
+        {
+            LogError($"Authentication failed: {messageElement.GetString()}");
+        }
+        _isAuthenticated = false;
+        OnAuthenticationChanged?.Invoke(false);
+    }
+    
+    private void HandleRoomJoined(JsonElement root)
+    {
+        if (root.TryGetProperty("roomId", out var roomIdElement))
+        {
+            _currentRoomId = roomIdElement.GetString();
+            OnRoomJoined?.Invoke(_currentRoomId);
+            Log($"Joined room: {_currentRoomId}");
+        }
+    }
+    
+    private void HandleGameStarted(JsonElement root)
+    {
+        // Handle spawn positions and game start logic
+        if (root.TryGetProperty("spawnPositions", out var spawnElement))
+        {
+            // Process spawn positions for each player
+            Log("Game started! Processing spawn positions...");
+            // Implementation depends on your game logic
+        }
+    }
+    
+    private void HandleRelayedMessage(JsonElement root)
+    {
+        if (root.TryGetProperty("senderName", out var senderElement) &&
+            root.TryGetProperty("message", out var messageElement))
+        {
+            OnMessageReceived?.Invoke(senderElement.GetString(), messageElement.GetString());
+        }
+    }
+    
+    private void HandleError(JsonElement root)
+    {
+        if (root.TryGetProperty("message", out var messageElement))
+        {
+            LogError($"Server error: {messageElement.GetString()}");
+        }
+    }
+    
+    #endregion
+    
+    #region UDP Communication
+    
+    private void SetupUdpClient()
+    {
+        try
+        {
+            _udpClient = new UdpClient();
+            StartCoroutine(ListenForUdpMessages());
+            Log("UDP client setup complete");
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to setup UDP client: {ex.Message}");
+        }
+    }
+    
+    public async Task SendPositionUpdate(Vector3 position, Quaternion rotation)
+    {
+        if (!_isAuthenticated || _udpClient == null || string.IsNullOrEmpty(_currentRoomId))
+            return;
+        
+        try
+        {
+            var update = new
+            {
+                command = "UPDATE",
+                sessionId = _sessionId,
+                position = new { x = position.x, y = position.y, z = position.z },
+                rotation = new { x = rotation.x, y = rotation.y, z = rotation.z, w = rotation.w }
+            };
+            
+            byte[] data;
+            
+            if (_udpCrypto != null)
+            {
+                // Send encrypted packet
+                data = _udpCrypto.CreatePacket(update);
+            }
+            else
+            {
+                // Fallback to plain text
+                string json = JsonSerializer.Serialize(update);
+                data = Encoding.UTF8.GetBytes(json);
+            }
+            
+            await _udpClient.SendAsync(data, data.Length, _serverUdpEndpoint);
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to send position update: {ex.Message}");
+        }
+    }
+    
+    public async Task SendInputUpdate(float steering, float throttle, float brake)
+    {
+        if (!_isAuthenticated || _udpClient == null || string.IsNullOrEmpty(_currentRoomId))
+            return;
+        
+        try
+        {
+            var input = new
+            {
+                command = "INPUT",
+                sessionId = _sessionId,
+                roomId = _currentRoomId,
+                input = new
+                {
+                    steering = steering,
+                    throttle = throttle,
+                    brake = brake,
+                    timestamp = Time.time
+                },
+                client_id = _sessionId
+            };
+            
+            byte[] data;
+            
+            if (_udpCrypto != null)
+            {
+                data = _udpCrypto.CreatePacket(input);
+            }
+            else
+            {
+                string json = JsonSerializer.Serialize(input);
+                data = Encoding.UTF8.GetBytes(json);
+            }
+            
+            await _udpClient.SendAsync(data, data.Length, _serverUdpEndpoint);
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to send input update: {ex.Message}");
+        }
+    }
+    
+    private IEnumerator ListenForUdpMessages()
+    {
+        while (_isConnected && _udpClient != null)
+        {
+            Task<UdpReceiveResult> receiveTask = _udpClient.ReceiveAsync();
+            
+            while (!receiveTask.IsCompleted)
+            {
+                yield return null;
+            }
+            
+            if (receiveTask.IsCompletedSuccessfully)
+            {
+                ProcessUdpMessage(receiveTask.Result.Buffer);
+            }
+        }
+    }
+    
+    private void ProcessUdpMessage(byte[] data)
+    {
+        try
+        {
+            JsonElement update;
+            
+            // Try to decrypt if possible
+            if (_udpCrypto != null && data.Length >= 4)
+            {
+                var parsedData = _udpCrypto.ParsePacket<JsonElement>(data);
+                if (parsedData.ValueKind != JsonValueKind.Undefined)
+                {
+                    update = parsedData;
+                }
+                else
+                {
+                    // Fallback to plain text
+                    string json = Encoding.UTF8.GetString(data);
+                    update = JsonSerializer.Deserialize<JsonElement>(json);
+                }
+            }
+            else
+            {
+                // Plain text packet
+                string json = Encoding.UTF8.GetString(data);
+                update = JsonSerializer.Deserialize<JsonElement>(json);
+            }
+            
+            // Process the update
+            if (update.TryGetProperty("command", out var cmdElement))
+            {
+                string command = cmdElement.GetString();
+                
+                if (command == "UPDATE")
+                {
+                    HandlePositionUpdate(update);
+                }
+                else if (command == "INPUT")
+                {
+                    HandleInputUpdate(update);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to process UDP message: {ex.Message}");
+        }
+    }
+    
+    private void HandlePositionUpdate(JsonElement update)
+    {
+        try
+        {
+            var sessionId = update.GetProperty("sessionId").GetString();
+            var position = update.GetProperty("position");
+            var rotation = update.GetProperty("rotation");
+            
+            var playerUpdate = new PlayerUpdate
+            {
+                SessionId = sessionId,
+                Position = new Vector3(
+                    position.GetProperty("x").GetSingle(),
+                    position.GetProperty("y").GetSingle(),
+                    position.GetProperty("z").GetSingle()
+                ),
+                Rotation = new Quaternion(
+                    rotation.GetProperty("x").GetSingle(),
+                    rotation.GetProperty("y").GetSingle(),
+                    rotation.GetProperty("z").GetSingle(),
+                    rotation.GetProperty("w").GetSingle()
+                )
+            };
+            
+            OnPlayerUpdate?.Invoke(playerUpdate);
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to handle position update: {ex.Message}");
+        }
+    }
+    
+    private void HandleInputUpdate(JsonElement update)
+    {
+        // Handle input updates from other players
+        // Implementation depends on your game's input handling system
+    }
+    
+    #endregion
+    
+    #region Room Management
+    
+    public async Task CreateRoom(string roomName)
+    {
+        if (!_isAuthenticated) return;
+        
+        await SendTcpMessage(new { command = "CREATE_ROOM", name = roomName });
+    }
+    
+    public async Task JoinRoom(string roomId)
+    {
+        if (!_isAuthenticated) return;
+        
+        await SendTcpMessage(new { command = "JOIN_ROOM", roomId = roomId });
+    }
+    
+    public async Task StartGame()
+    {
+        if (!_isAuthenticated || string.IsNullOrEmpty(_currentRoomId)) return;
+        
+        await SendTcpMessage(new { command = "START_GAME" });
+    }
+    
+    public async Task SendMessage(string targetId, string message)
+    {
+        if (!_isAuthenticated) return;
+        
+        await SendTcpMessage(new { command = "RELAY_MESSAGE", targetId = targetId, message = message });
+    }
+    
+    #endregion
+    
+    #region Logging
+    
+    private void Log(string message)
+    {
+        if (enableDebugLogs)
+        {
+            Debug.Log($"[RacingNetwork] {message}");
+        }
+    }
+    
+    private void LogError(string message)
+    {
+        Debug.LogError($"[RacingNetwork] {message}");
+    }
+    
+    #endregion
+    
+    void OnDestroy()
+    {
+        _ = Disconnect();
+    }
+}
+
+// Data structures
+[System.Serializable]
+public struct PlayerUpdate
+{
+    public string SessionId;
+    public Vector3 Position;
+    public Quaternion Rotation;
+}
+```
+
+### 15.4 UDP Encryption Implementation for Unity
+
+```csharp
+using System;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+
+public class UdpEncryption
+{
+    private readonly byte[] _key;
+    private readonly byte[] _iv;
+    
+    public UdpEncryption(string sessionId, string sharedSecret = "RacingServerUDP2024!")
+    {
+        // Generate deterministic key and IV from session ID and shared secret
+        using var sha256 = SHA256.Create();
+        var keySource = Encoding.UTF8.GetBytes(sessionId + sharedSecret);
+        var keyHash = sha256.ComputeHash(keySource);
+        
+        _key = new byte[32]; // AES-256 key
+        _iv = new byte[16];   // AES IV
+        
+        Array.Copy(keyHash, 0, _key, 0, 32);
+        Array.Copy(keyHash, 16, _iv, 0, 16);
+    }
+    
+    public byte[] Encrypt(string jsonData)
+    {
+        using var aes = Aes.Create();
+        aes.Key = _key;
+        aes.IV = _iv;
+        aes.Mode = CipherMode.CBC;
+        aes.Padding = PaddingMode.PKCS7;
+        
+        var dataBytes = Encoding.UTF8.GetBytes(jsonData);
+        using var encryptor = aes.CreateEncryptor();
+        return encryptor.TransformFinalBlock(dataBytes, 0, dataBytes.Length);
+    }
+    
+    public string Decrypt(byte[] encryptedData)
+    {
+        try
+        {
+            using var aes = Aes.Create();
+            aes.Key = _key;
+            aes.IV = _iv;
+            aes.Mode = CipherMode.CBC;
+            aes.Padding = PaddingMode.PKCS7;
+            
+            using var decryptor = aes.CreateDecryptor();
+            var decryptedBytes = decryptor.TransformFinalBlock(encryptedData, 0, encryptedData.Length);
+            return Encoding.UTF8.GetString(decryptedBytes);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+    
+    public byte[] CreatePacket(object data)
+    {
+        var json = JsonSerializer.Serialize(data);
+        var encryptedData = Encrypt(json);
+        
+        // Create packet with length header
+        var packet = new byte[4 + encryptedData.Length];
+        BitConverter.GetBytes(encryptedData.Length).CopyTo(packet, 0);
+        encryptedData.CopyTo(packet, 4);
+        
+        return packet;
+    }
+    
+    public T ParsePacket<T>(byte[] packetData)
+    {
+        if (packetData.Length < 4)
+            return default(T);
+        
+        var length = BitConverter.ToInt32(packetData, 0);
+        if (length != packetData.Length - 4 || length <= 0)
+            return default(T);
+        
+        var encryptedData = new byte[length];
+        Array.Copy(packetData, 4, encryptedData, 0, length);
+        
+        var json = Decrypt(encryptedData);
+        if (string.IsNullOrEmpty(json))
+            return default(T);
+        
+        return JsonSerializer.Deserialize<T>(json);
+    }
+}
+```
+
+### 15.5 Unity Usage Example
+
+```csharp
+public class GameController : MonoBehaviour
+{
+    [Header("Network")]
+    public RacingNetworkManager networkManager;
+    
+    [Header("Player")]
+    public Transform playerCar;
+    
+    [Header("Other Players")]
+    public GameObject playerCarPrefab;
+    
+    private Dictionary<string, GameObject> _otherPlayers = new Dictionary<string, GameObject>();
+    
+    async void Start()
+    {
+        // Setup network events
+        networkManager.OnConnectionChanged += OnConnectionChanged;
+        networkManager.OnAuthenticationChanged += OnAuthenticationChanged;
+        networkManager.OnPlayerUpdate += OnPlayerUpdate;
+        
+        // Connect to server
+        bool connected = await networkManager.ConnectToServer();
+        if (connected)
+        {
+            Debug.Log("Connected to racing server!");
+        }
+    }
+    
+    void Update()
+    {
+        // Send position updates for our player
+        if (networkManager._isAuthenticated && playerCar != null)
+        {
+            _ = networkManager.SendPositionUpdate(playerCar.position, playerCar.rotation);
+            
+            // Send input if the car is being controlled
+            float steering = Input.GetAxis("Horizontal");
+            float throttle = Input.GetAxis("Vertical");
+            float brake = Input.GetKey(KeyCode.Space) ? 1.0f : 0.0f;
+            
+            _ = networkManager.SendInputUpdate(steering, throttle, brake);
+        }
+    }
+    
+    private void OnConnectionChanged(bool connected)
+    {
+        Debug.Log($"Connection status: {connected}");
+    }
+    
+    private void OnAuthenticationChanged(bool authenticated)
+    {
+        Debug.Log($"Authentication status: {authenticated}");
+        
+        if (authenticated)
+        {
+            // Auto-create or join a room
+            _ = networkManager.CreateRoom("My Race Room");
+        }
+    }
+    
+    private void OnPlayerUpdate(PlayerUpdate update)
+    {
+        // Update other player positions
+        if (!_otherPlayers.ContainsKey(update.SessionId))
+        {
+            // Create new player car
+            GameObject newPlayer = Instantiate(playerCarPrefab);
+            _otherPlayers[update.SessionId] = newPlayer;
+        }
+        
+        // Update position and rotation
+        var playerObject = _otherPlayers[update.SessionId];
+        playerObject.transform.position = update.Position;
+        playerObject.transform.rotation = update.Rotation;
+    }
+}
+```
+
+### 15.6 Security Best Practices for Unity
+
+#### 15.6.1 Certificate Handling
+- **Development**: Use the provided certificate validation bypass for testing
+- **Production**: Implement proper certificate validation or bundle the server's public certificate
+- **Never** accept all certificates in production builds
+
+#### 15.6.2 Password Security
+- Store passwords securely using Unity's PlayerPrefs with encryption or a secure vault
+- Consider implementing a proper registration/login UI
+- Use strong passwords for player accounts
+
+#### 15.6.3 Network Security
+- Always validate incoming data before using it
+- Implement client-side rate limiting for UDP packets
+- Handle network errors gracefully
+
+#### 15.6.4 Error Handling
+```csharp
+private void HandleNetworkError(Exception ex)
+{
+    Debug.LogError($"Network error: {ex.Message}");
+    
+    // Attempt reconnection
+    StartCoroutine(ReconnectAfterDelay(5.0f));
+}
+
+private IEnumerator ReconnectAfterDelay(float delay)
+{
+    yield return new WaitForSeconds(delay);
+    
+    if (!networkManager._isConnected)
+    {
+        bool reconnected = await networkManager.ConnectToServer();
+        if (!reconnected)
+        {
+            // Show error to user or try again
+            StartCoroutine(ReconnectAfterDelay(10.0f));
+        }
+    }
+}
+```
+
+### 15.7 Testing Your Unity Client
+
+1. **Local Testing**: Connect to `localhost` or `127.0.0.1`
+2. **LAN Testing**: Connect to the server's local IP address
+3. **Internet Testing**: Connect to the server's public IP address
+
+#### 15.7.1 Debug Console Commands
+Add these debug commands to test your client:
+
+```csharp
+void OnGUI()
+{
+    if (GUI.Button(new Rect(10, 10, 100, 30), "Connect"))
+    {
+        _ = networkManager.ConnectToServer();
+    }
+    
+    if (GUI.Button(new Rect(10, 50, 100, 30), "Create Room"))
+    {
+        _ = networkManager.CreateRoom("Test Room");
+    }
+    
+    if (GUI.Button(new Rect(10, 90, 100, 30), "Start Game"))
+    {
+        _ = networkManager.StartGame();
+    }
+}
+```
+
+### 15.8 Performance Optimization
+
+#### 15.8.1 Update Frequency
+- Position updates: 10-20 Hz (every 50-100ms)
+- Input updates: 30-60 Hz (every 16-33ms)
+- Use Unity's `InvokeRepeating` or coroutines for consistent timing
+
+#### 15.8.2 Network Interpolation
+Implement client-side interpolation for smooth movement:
+
+```csharp
+public class NetworkPlayerController : MonoBehaviour
+{
+    private Vector3 _targetPosition;
+    private Quaternion _targetRotation;
+    private float _interpolationSpeed = 10f;
+    
+    public void UpdateNetworkTransform(Vector3 position, Quaternion rotation)
+    {
+        _targetPosition = position;
+        _targetRotation = rotation;
+    }
+    
+    void Update()
+    {
+        transform.position = Vector3.Lerp(transform.position, _targetPosition, Time.deltaTime * _interpolationSpeed);
+        transform.rotation = Quaternion.Lerp(transform.rotation, _targetRotation, Time.deltaTime * _interpolationSpeed);
+    }
+}
+```
+
 ---
 
-With this guide and the samples above, you can implement a client in your language of choice, manage TCP commands, and stream position updates over UDP. Happy racing!
+With this complete Unity implementation guide, you can now create a secure racing game client that properly connects to the MP-Server with full TLS encryption for commands and AES encryption for real-time updates. The implementation handles all security aspects while providing a robust foundation for your multiplayer racing game. Happy racing!
