@@ -26,13 +26,19 @@ public class CarController : MonoBehaviour
     [SerializeField] private float finalDriveRatio = 3.44f;
     [SerializeField] private float reverseGearRatio = 3.67f;
     
+    [Header("Transmission Settings")]
+    public bool useManualTransmission = true; // Toggle between manual and automatic
+    public bool allowReverseFromNeutral = true; // Allow shifting to reverse when stopped
+    
     [Header("Engine Sounds")]
     public AudioClip engineIdleClip;
     public AudioClip engineRunningClip;
+    public AudioClip gearShiftClip; // Add gear shift sound
     public float minPitch = 0.7f;
     public float maxPitch = 1.5f;
     public float pitchMultiplier = 1f;
     private AudioSource engineAudioSource;
+    private AudioSource gearShiftAudioSource; // Separate audio source for gear shifts
     
     // Speed properties
     public float currentSpeed { get; private set; }
@@ -82,11 +88,36 @@ public class CarController : MonoBehaviour
         engineAudioSource.loop = true;
         engineAudioSource.clip = engineRunningClip;
         engineAudioSource.Play();
+        
+        // Setup gear shift audio source
+        gearShiftAudioSource = gameObject.AddComponent<AudioSource>();
+        gearShiftAudioSource.spatialBlend = 1f;
+        gearShiftAudioSource.rolloffMode = AudioRolloffMode.Linear;
+        gearShiftAudioSource.minDistance = 3f;
+        gearShiftAudioSource.maxDistance = 15f;
+        gearShiftAudioSource.volume = 0.7f;
     }
     
     public void OnMove(InputValue value)
     {
         moveInput = value.Get<Vector2>();
+    }
+    
+    // Manual gear shifting input handlers
+    public void OnShiftUp(InputValue value)
+    {
+        if (value.isPressed && useManualTransmission)
+        {
+            ShiftUp();
+        }
+    }
+    
+    public void OnShiftDown(InputValue value)
+    {
+        if (value.isPressed && useManualTransmission)
+        {
+            ShiftDown();
+        }
     }
 
     public void EnableControls(bool enabled)
@@ -148,20 +179,44 @@ public class CarController : MonoBehaviour
         // Get throttle input and clamp it
         float throttle = moveInput.y;
         
-        if (throttle > 0) // Accelerating
+        // In neutral gear, no power transmission
+        if (currentGear == 0)
         {
-            // Apply driving force to appropriate wheels
             foreach (var wheel in wheels)
             {
-                // Handle FWD, RWD, or AWD configurations
-                if ((wheel.wheelType == WheelType.front) || (wheel.wheelType == WheelType.rear))
+                wheel.collider.motorTorque = 0;
+                // Light braking for natural slowdown
+                wheel.collider.brakeTorque = throttle < 0 ? -throttle * brakeForce * 0.1f : 10f;
+            }
+            return;
+        }
+        
+        if (throttle > 0) // Accelerating
+        {
+            // Only apply power if we're in a valid gear
+            if (currentGear > 0 || currentGear == -1)
+            {
+                // Apply driving force to appropriate wheels
+                foreach (var wheel in wheels)
                 {
-                    wheel.collider.motorTorque = throttle * powerMultiplier / 2.0f; // Divide power between wheels
-                    wheel.collider.brakeTorque = 0; // Release brakes when accelerating
+                    // Handle FWD, RWD, or AWD configurations
+                    if ((wheel.wheelType == WheelType.front) || (wheel.wheelType == WheelType.rear))
+                    {
+                        float powerOutput = throttle * powerMultiplier / 2.0f; // Divide power between wheels
+                        
+                        // Reverse the power direction if in reverse gear
+                        if (currentGear == -1)
+                        {
+                            powerOutput *= -1;
+                        }
+                        
+                        wheel.collider.motorTorque = powerOutput;
+                        wheel.collider.brakeTorque = 0; // Release brakes when accelerating
+                    }
                 }
             }
         }
-        else if (throttle < 0) // Braking or reversing
+        else if (throttle < 0) // Braking
         {
             // Apply brakes to all wheels
             foreach (var wheel in wheels)
@@ -180,12 +235,6 @@ public class CarController : MonoBehaviour
                 wheel.collider.brakeTorque = brakePower;
                 wheel.collider.motorTorque = 0; // No motor force when braking
             }
-            
-            // If we're almost stopped and still pressing brake, switch to reverse
-            if (speedKmh < 1.0f && throttle < -0.5f && currentGear > 0)
-            {
-                currentGear = -1; // Reverse gear
-            }
         }
         else // No input - let the car coast
         {
@@ -194,12 +243,6 @@ public class CarController : MonoBehaviour
                 wheel.collider.motorTorque = 0;
                 wheel.collider.brakeTorque = 10f; // Light braking for natural slowdown
             }
-        }
-        
-        // If in reverse gear but pressing accelerator, switch back to first gear when stopped
-        if (currentGear == -1 && throttle > 0.5f && speedKmh < 1.0f)
-        {
-            currentGear = 1;
         }
     }
     
@@ -248,28 +291,105 @@ public class CarController : MonoBehaviour
     
     private void HandleGearChanges()
     {
-        // Don't shift too frequently
+        // Only use automatic shifting if manual transmission is disabled
+        if (!useManualTransmission)
+        {
+            // Don't shift too frequently
+            if (Time.time - lastShiftTime < shiftDelay) return;
+            
+            // Automatic gear shifting when in forward gears
+            if (currentGear > 0)
+            {
+                // Calculate RPM thresholds for shifting
+                float shiftUpRPM = maxRPM * 0.85f;
+                float shiftDownRPM = maxRPM * 0.4f;
+                
+                // Shift up if RPM too high
+                if (engineRPM > shiftUpRPM && currentGear < gearRatios.Length)
+                {
+                    currentGear++;
+                    lastShiftTime = Time.time;
+                }
+                // Shift down if RPM too low
+                else if (engineRPM < shiftDownRPM && currentGear > 1)
+                {
+                    currentGear--;
+                    lastShiftTime = Time.time;
+                }
+            }
+        }
+    }
+    
+    // Manual transmission methods
+    public void ShiftUp()
+    {
+        // Prevent rapid shifting
         if (Time.time - lastShiftTime < shiftDelay) return;
         
-        // Automatic gear shifting when in forward gears
-        if (currentGear > 0)
+        if (currentGear == -1) // From reverse to neutral (0) to first (1)
         {
-            // Calculate RPM thresholds for shifting
-            float shiftUpRPM = maxRPM * 0.85f;
-            float shiftDownRPM = maxRPM * 0.4f;
-            
-            // Shift up if RPM too high
-            if (engineRPM > shiftUpRPM && currentGear < gearRatios.Length)
+            if (speedKmh < 5f) // Only shift out of reverse when nearly stopped
             {
-                currentGear++;
+                currentGear = 0; // Neutral
                 lastShiftTime = Time.time;
+                PlayGearShiftSound();
+                Debug.Log("Shifted to Neutral");
             }
-            // Shift down if RPM too low
-            else if (engineRPM < shiftDownRPM && currentGear > 1)
+        }
+        else if (currentGear == 0) // From neutral to first gear
+        {
+            currentGear = 1;
+            lastShiftTime = Time.time;
+            PlayGearShiftSound();
+            Debug.Log("Shifted to 1st gear");
+        }
+        else if (currentGear > 0 && currentGear < gearRatios.Length) // Normal upshift
+        {
+            currentGear++;
+            lastShiftTime = Time.time;
+            PlayGearShiftSound();
+            Debug.Log($"Shifted up to gear {currentGear}");
+        }
+    }
+    
+    public void ShiftDown()
+    {
+        // Prevent rapid shifting
+        if (Time.time - lastShiftTime < shiftDelay) return;
+        
+        if (currentGear > 1) // Normal downshift
+        {
+            currentGear--;
+            lastShiftTime = Time.time;
+            PlayGearShiftSound();
+            Debug.Log($"Shifted down to gear {currentGear}");
+        }
+        else if (currentGear == 1) // From first to neutral
+        {
+            currentGear = 0;
+            lastShiftTime = Time.time;
+            PlayGearShiftSound();
+            Debug.Log("Shifted to Neutral");
+        }
+        else if (currentGear == 0 && allowReverseFromNeutral) // From neutral to reverse
+        {
+            if (speedKmh < 5f) // Only shift to reverse when nearly stopped
             {
-                currentGear--;
+                currentGear = -1;
                 lastShiftTime = Time.time;
+                PlayGearShiftSound();
+                Debug.Log("Shifted to Reverse");
             }
+        }
+    }
+    
+    private void PlayGearShiftSound()
+    {
+        if (gearShiftAudioSource != null && gearShiftClip != null)
+        {
+            gearShiftAudioSource.clip = gearShiftClip;
+            gearShiftAudioSource.pitch = Random.Range(0.9f, 1.1f); // Slight pitch variation
+            gearShiftAudioSource.Play();
         }
     }
     
@@ -324,8 +444,9 @@ public class CarController : MonoBehaviour
         currentSpeed = Vector3.Dot(rb.linearVelocity, transform.forward);
         speedKmh = Mathf.Abs(currentSpeed * 3.6f);
         
-        // Trigger the UI update event
-        OnCarStatsUpdated?.Invoke(speedKmh, engineRPM, currentGear);
+        // Trigger the UI update event with proper gear display
+        int displayGear = currentGear;
+        OnCarStatsUpdated?.Invoke(speedKmh, engineRPM, displayGear);
     }
     
     private void UpdateWheelVisuals()
