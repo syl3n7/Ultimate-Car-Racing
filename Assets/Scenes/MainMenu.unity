@@ -1121,7 +1121,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: -0.00004863739, y: 23.019424}
+  m_AnchoredPosition: {x: -0.00004863739, y: 23.019249}
   m_SizeDelta: {x: 0, y: 300}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &240730155
@@ -8285,15 +8285,21 @@ MonoBehaviour:
   m_text: 'controls description
 
 
-    W
+    W -> Accelerate
 
-    A
+    S -> Brake
 
-    S
+    A -> Turn
+    Left
 
-    D
+    D -> Turn Right
 
-    Space
+    Space -> HandBrake
+
+    Q -> Shift Down
+
+    E
+    -> Shift Up
 
 '
   m_isRightToLeft: 0
@@ -9871,8 +9877,8 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 2116467349}
   m_HandleRect: {fileID: 2116467348}
   m_Direction: 2
-  m_Value: -0.000018560575
-  m_Size: 0.9232476
+  m_Value: -0.000010606057
+  m_Size: 0.92327005
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
