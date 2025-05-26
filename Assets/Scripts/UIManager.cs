@@ -51,6 +51,12 @@ public class UIManager : MonoBehaviour
     public GameObject notificationPanel;
     public TextMeshProUGUI notificationText;
 
+    [Header("Loading Screen")]
+    public GameObject loadingPanel;
+    public TextMeshProUGUI loadingText;
+    public Slider loadingProgressBar;
+    public TextMeshProUGUI loadingTips;
+
     [Header("Authentication UI")]
     public GameObject authPanel;
     public TMP_InputField usernameInput;
@@ -420,6 +426,60 @@ public class UIManager : MonoBehaviour
         connectionPanel.SetActive(false);
     }
     
+    public void ShowLoadingScreen(string message = "Loading...")
+    {
+        if (loadingPanel != null)
+        {
+            HideAllPanels();
+            loadingPanel.SetActive(true);
+            
+            if (loadingText != null)
+                loadingText.text = message;
+                
+            if (loadingProgressBar != null)
+                loadingProgressBar.value = 0f;
+                
+            if (loadingTips != null)
+                ShowRandomLoadingTip();
+        }
+    }
+    
+    public void UpdateLoadingProgress(float progress, string message = null)
+    {
+        if (loadingPanel != null && loadingPanel.activeSelf)
+        {
+            if (loadingProgressBar != null)
+                loadingProgressBar.value = Mathf.Clamp01(progress);
+                
+            if (!string.IsNullOrEmpty(message) && loadingText != null)
+                loadingText.text = message;
+        }
+    }
+    
+    public void HideLoadingScreen()
+    {
+        if (loadingPanel != null)
+        {
+            loadingPanel.SetActive(false);
+        }
+    }
+    
+    private void ShowRandomLoadingTip()
+    {
+        if (loadingTips == null) return;
+        
+        string[] tips = {
+            "Hold shift to brake harder and get better control",
+            "Use manual transmission for better acceleration",
+            "Bank into turns for realistic driving physics",
+            "Watch your RPM meter to optimize gear shifts",
+            "The camera automatically follows your driving style",
+            "Higher gears give better top speed but slower acceleration"
+        };
+        
+        loadingTips.text = "Tip: " + tips[UnityEngine.Random.Range(0, tips.Length)];
+    }
+    
     public void ShowNotification(string message, float duration = 3f)
     {
         notificationPanel.SetActive(true);
@@ -450,6 +510,12 @@ public class UIManager : MonoBehaviour
         if (authPanel != null)
         {
             authPanel.SetActive(false);
+        }
+        
+        // Also hide loading panel if it exists
+        if (loadingPanel != null)
+        {
+            loadingPanel.SetActive(false);
         }
         
         // Don't hide race UI panels here - they're controlled by scene changes
@@ -1434,26 +1500,30 @@ public async void CreateRoom()
     {
         Debug.Log($"Starting async scene load for {sceneName}");
         
+        // Show loading screen
+        ShowLoadingScreen("Loading Race Track...");
+        
+        // Small delay to ensure loading screen is visible
+        yield return new WaitForSeconds(0.1f);
+        
         // Begin loading the scene
         AsyncOperation asyncLoad = UnityEngine.SceneManagement.SceneManager.LoadSceneAsync(sceneName);
-        
-        // Don't allow scene activation until we're ready (optional)
-        // asyncLoad.allowSceneActivation = false;
         
         // Show loading progress
         while (!asyncLoad.isDone)
         {
             float progress = Mathf.Clamp01(asyncLoad.progress / 0.9f);
-            Debug.Log($"Loading progress: {progress * 100}%");
-            
-            // If we're close to done, allow activation
-            // if (asyncLoad.progress >= 0.9f)
-            // {
-            //     asyncLoad.allowSceneActivation = true;
-            // }
+            UpdateLoadingProgress(progress, $"Loading Race Track... {(progress * 100):0}%");
             
             yield return null;
         }
+        
+        // Final progress update
+        UpdateLoadingProgress(1f, "Loading Complete!");
+        yield return new WaitForSeconds(0.5f); // Brief pause to show completion
+        
+        // Hide loading screen
+        HideLoadingScreen();
         
         Debug.Log("Scene load completed");
     }    

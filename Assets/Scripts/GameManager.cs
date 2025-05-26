@@ -128,7 +128,16 @@ public class GameManager : MonoBehaviour
         SelectedTrackIndex = trackIndex;
         string sceneName = $"RaceTrack{trackIndex}";
         Debug.Log($"Loading race scene: {sceneName}");
-        UnityEngine.SceneManagement.SceneManager.LoadScene(sceneName);
+        
+        // Use UIManager loading screen if available, otherwise load normally
+        if (UIManager.Instance != null)
+        {
+            StartCoroutine(LoadSceneWithLoadingScreen(sceneName, "Loading Race Track..."));
+        }
+        else
+        {
+            UnityEngine.SceneManagement.SceneManager.LoadScene(sceneName);
+        }
     }
 
     public void LoadMainMenu()
@@ -138,7 +147,52 @@ public class GameManager : MonoBehaviour
         // Restore cursor when going back to menu
         RestoreCursorState();
         
-        UnityEngine.SceneManagement.SceneManager.LoadScene("MainMenu");
+        // Use UIManager loading screen if available, otherwise load normally
+        if (UIManager.Instance != null)
+        {
+            StartCoroutine(LoadSceneWithLoadingScreen("MainMenu", "Returning to Main Menu..."));
+        }
+        else
+        {
+            UnityEngine.SceneManagement.SceneManager.LoadScene("MainMenu");
+        }
+    }
+    
+    // Generic method to load any scene with loading screen
+    private IEnumerator LoadSceneWithLoadingScreen(string sceneName, string loadingMessage)
+    {
+        // Show loading screen through UIManager
+        if (UIManager.Instance != null)
+        {
+            UIManager.Instance.ShowLoadingScreen(loadingMessage);
+            yield return new WaitForSeconds(0.1f); // Brief delay to show loading screen
+        }
+        
+        // Begin loading the scene
+        AsyncOperation asyncLoad = UnityEngine.SceneManagement.SceneManager.LoadSceneAsync(sceneName);
+        
+        // Update progress while loading
+        while (!asyncLoad.isDone)
+        {
+            float progress = Mathf.Clamp01(asyncLoad.progress / 0.9f);
+            
+            if (UIManager.Instance != null)
+            {
+                UIManager.Instance.UpdateLoadingProgress(progress, $"{loadingMessage} {(progress * 100):0}%");
+            }
+            
+            yield return null;
+        }
+        
+        // Final progress and brief completion display
+        if (UIManager.Instance != null)
+        {
+            UIManager.Instance.UpdateLoadingProgress(1f, "Loading Complete!");
+            yield return new WaitForSeconds(0.3f);
+            UIManager.Instance.HideLoadingScreen();
+        }
+        
+        Debug.Log($"Scene '{sceneName}' loaded successfully");
     }
     
     // Restore cursor to visible and unlocked
