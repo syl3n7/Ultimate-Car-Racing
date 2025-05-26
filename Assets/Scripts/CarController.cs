@@ -18,6 +18,11 @@ public class CarController : MonoBehaviour
     public float steeringSpeed = 10f; // How quickly steering responds
     public float returnToZeroSpeed = 15f; // How quickly steering returns to center
     
+    [Header("Steering Settings")]
+    public float ackermannFactor = 0.85f; // How much the outer wheel turns relative to inner wheel (0.8-1.0)
+    public float centeringDeadzone = 0.1f; // Angle below which wheels snap to center
+    public float steeringInputDeadzone = 0.01f; // Input threshold for steering
+    
     // Engine properties
     [Header("Engine Settings")]
     [SerializeField] private float maxRPM = 8800f;
@@ -252,7 +257,7 @@ public class CarController : MonoBehaviour
         float targetSteerAngle = moveInput.x * maxSteer;
         
         // Smoothly interpolate current steering angle toward target
-        if (Mathf.Abs(moveInput.x) > 0.01f)
+        if (Mathf.Abs(moveInput.x) > steeringInputDeadzone)
         {
             // Moving toward the target steering angle
             currentSteerAngle = Mathf.Lerp(currentSteerAngle, targetSteerAngle, Time.fixedDeltaTime * steeringSpeed);
@@ -263,29 +268,42 @@ public class CarController : MonoBehaviour
             currentSteerAngle = Mathf.Lerp(currentSteerAngle, 0, Time.fixedDeltaTime * returnToZeroSpeed);
         }
         
-        // Apply Ackermann steering geometry for realistic turning
-        if (currentSteerAngle > 0) { // Turning right
-            // Left wheel (index 0) gets the outer angle
-            wheels[0].collider.steerAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / 
-                (trackwidth + Mathf.Tan(Mathf.Deg2Rad * currentSteerAngle) * wheelbase));
-                
-            // Right wheel (index 1) gets the inner angle (full steer)
-            wheels[1].collider.steerAngle = currentSteerAngle;
-        } 
-        else if (currentSteerAngle < 0) { // Turning left
-            // Left wheel (index 0) gets the inner angle (full steer)
-            wheels[0].collider.steerAngle = currentSteerAngle;
+        // Apply simplified Ackermann steering geometry
+        // For most cars, the difference between inner and outer wheel angles is small
+        // We'll use a simplified approach that's more stable
+        
+        if (Mathf.Abs(currentSteerAngle) < centeringDeadzone)
+        {
+            // When steering angle is very small, set both wheels to zero
+            // This ensures proper return to center
+            foreach (var wheel in wheels)
+            {
+                if (wheel.wheelType == WheelType.front)
+                {
+                    wheel.collider.steerAngle = 0f;
+                }
+            }
+        }
+        else
+        {
+            // Apply Ackermann steering with simplified calculation
+            float innerWheelAngle = currentSteerAngle;
+            float outerWheelAngle = currentSteerAngle * ackermannFactor; // Outer wheel turns less (simplified Ackermann)
             
-            // Right wheel (index 1) gets the outer angle
-            float outerAngle = Mathf.Rad2Deg * Mathf.Atan(wheelbase / 
-                (trackwidth + Mathf.Tan(Mathf.Deg2Rad * Mathf.Abs(currentSteerAngle)) * wheelbase));
-                
-            wheels[1].collider.steerAngle = -outerAngle; // Negative sign for left turn on right wheel
-        } 
-        else {
-            // No steering - both wheels straight
-            wheels[0].collider.steerAngle = 0;
-            wheels[1].collider.steerAngle = 0;
+            if (currentSteerAngle > 0) // Turning right
+            {
+                // Left wheel (outer) gets reduced angle
+                wheels[0].collider.steerAngle = outerWheelAngle;
+                // Right wheel (inner) gets full angle
+                wheels[1].collider.steerAngle = innerWheelAngle;
+            }
+            else // Turning left
+            {
+                // Left wheel (inner) gets full angle
+                wheels[0].collider.steerAngle = innerWheelAngle;
+                // Right wheel (outer) gets reduced angle
+                wheels[1].collider.steerAngle = outerWheelAngle;
+            }
         }
     }
     

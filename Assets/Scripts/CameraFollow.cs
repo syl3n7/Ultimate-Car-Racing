@@ -2,61 +2,51 @@ using UnityEngine;
 
 public class CameraFollow : MonoBehaviour
 {
-    [Header("Follow Settings")]
+    [Header("GTA V Style Camera Settings")]
     public Transform target;
-    public float smoothSpeed = 5f;
-    public Vector3 offset = new Vector3(0, 5, -10);
-    public bool lookAtTarget = true;
+    
+    [Header("Follow Distance & Position")]
+    public float followDistance = 8f;
+    public float followHeight = 3f;
+    public float heightOffset = 1.5f; // How much higher to look at on the car
+    
+    [Header("Smoothing")]
+    public float positionSmoothing = 3f;
+    public float rotationSmoothing = 2f;
+    public float bankingSmoothing = 1.5f;
+    
+    [Header("Banking & Tilting")]
+    public float maxBankAngle = 8f; // Maximum banking when turning
+    public float bankingSensitivity = 1f;
+    
+    [Header("Speed Effects")]
+    public float speedPullbackMultiplier = 0.02f; // How much further back at high speed
+    public float maxSpeedPullback = 3f;
     
     [Header("Mouse Control")]
     public float mouseSensitivity = 2f;
-    public float mouseControlTimeout = 5f;
-    public float maxVerticalAngle = 80f;
-    public float minVerticalAngle = -20f;
-    public bool invertMouseY = false; // Option to invert Y axis
-    
-    [Header("Advanced Follow")]
-    public float distanceDamping = 0.2f;
-    public float heightDamping = 0.2f;
-    public float rotationDamping = 1f;
-    public float speedInfluence = 0.1f;
-    public float maxSpeedForCameraPullback = 50f;
-    
-    [Header("Deadzone Settings")]
-    public float positionDeadzone = 0.05f;
-    public float rotationDeadzone = 0.5f;
-    public float velocityDeadzone = 0.01f;
-    
-    [Header("Stabilization")]
-    public float maxCameraTiltAngle = 5f;
+    public float mouseControlTimeout = 3f;
+    public float maxVerticalAngle = 45f;
+    public float minVerticalAngle = -15f;
+    public bool invertMouseY = false;
     
     [Header("Mouse Cursor")]
     public bool lockCursorInGame = true;
     public KeyCode unlockCursorKey = KeyCode.Escape;
 
+    // Private variables
     private float lastMouseInputTime;
-    private float currentRotationX;
-    private float currentRotationY;
-    private Vector3 initialOffset;
-    private Vector3 velocity = Vector3.zero;
-    private Vector3 lastTargetPosition;
-    private Quaternion lastTargetRotation;
+    private float currentMouseX;
+    private float currentMouseY;
     private bool useMouseControl;
     private bool cursorLocked = false;
     private CarController targetCarController;
+    private float currentBankAngle = 0f;
+    private Vector3 velocity = Vector3.zero;
     
     void Start()
     {
-        initialOffset = offset;
-        currentRotationX = transform.eulerAngles.y;
-        currentRotationY = transform.eulerAngles.x;
-        if (target != null)
-        {
-            lastTargetPosition = target.position;
-            lastTargetRotation = target.rotation;
-        }
-        
-        // At start, make sure we're following the local player
+        // Find and set the local player as target
         FindAndSetLocalPlayerTarget();
         
         // Lock cursor at start if option is enabled
@@ -64,9 +54,14 @@ public class CameraFollow : MonoBehaviour
         {
             LockCursor();
         }
+        
+        // Initialize camera position if we have a target
+        if (target != null)
+        {
+            PositionCameraBehindTarget();
+        }
     }
     
-    // Find and set the local player as the camera target
     void FindAndSetLocalPlayerTarget()
     {
         // Find local player object with tag
@@ -78,13 +73,6 @@ public class CameraFollow : MonoBehaviour
             
             // Cache reference to car controller
             targetCarController = localPlayerObj.GetComponent<CarController>();
-            
-            // Initialize last positions after finding target
-            if (target != null)
-            {
-                lastTargetPosition = target.position;
-                lastTargetRotation = target.rotation;
-            }
         }
         else
         {
@@ -139,8 +127,7 @@ public class CameraFollow : MonoBehaviour
         }
         else
         {
-            AutoFollowCamera();
-            StabilizeCamera();
+            GTAStyleAutoFollow();
         }
     }
     
@@ -163,70 +150,94 @@ public class CameraFollow : MonoBehaviour
         else
             mouseY = -mouseY; // Default behavior is already inverted
             
-        currentRotationX += mouseX;
-        currentRotationY += mouseY;
-        currentRotationY = Mathf.Clamp(currentRotationY, minVerticalAngle, maxVerticalAngle);
+        currentMouseX += mouseX;
+        currentMouseY += mouseY;
+        currentMouseY = Mathf.Clamp(currentMouseY, minVerticalAngle, maxVerticalAngle);
         
-        Quaternion rotation = Quaternion.Euler(currentRotationY, currentRotationX, 0);
-        Vector3 desiredPosition = target.position + rotation * initialOffset;
+        // Calculate position based on mouse rotation
+        Quaternion rotation = Quaternion.Euler(currentMouseY, currentMouseX, 0);
+        Vector3 desiredPosition = target.position + rotation * new Vector3(0, followHeight, -followDistance);
         
-        transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, distanceDamping);
+        transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, 1f / positionSmoothing);
         
-        // Look directly at target without smoothing during mouse control
-        transform.LookAt(target);
+        // Look at target with height offset
+        Vector3 lookTarget = target.position + Vector3.up * heightOffset;
+        transform.LookAt(lookTarget);
     }
     
-    void AutoFollowCamera()
+    void GTAStyleAutoFollow()
     {
-        // Always update position regardless of deadzone for smooth movement
+        // Get car's velocity for speed-based effects
+        float carSpeed = 0f;
+        Vector3 carVelocity = Vector3.zero;
+        if (targetCarController != null && targetCarController.GetComponent<Rigidbody>() != null)
+        {
+            carVelocity = targetCarController.GetComponent<Rigidbody>().linearVelocity;
+            carSpeed = carVelocity.magnitude;
+        }
+        
+        // Calculate dynamic follow distance based on speed
+        float dynamicDistance = followDistance + Mathf.Min(carSpeed * speedPullbackMultiplier, maxSpeedPullback);
+        
+        // Calculate banking angle based on car's turning
+        float targetBankAngle = 0f;
+        if (targetCarController != null)
+        {
+            // Use the car's angular velocity to determine banking
+            Vector3 angularVel = targetCarController.GetComponent<Rigidbody>().angularVelocity;
+            targetBankAngle = -angularVel.y * bankingSensitivity * maxBankAngle;
+            targetBankAngle = Mathf.Clamp(targetBankAngle, -maxBankAngle, maxBankAngle);
+        }
+        
+        // Smooth the banking angle
+        currentBankAngle = Mathf.Lerp(currentBankAngle, targetBankAngle, bankingSmoothing * Time.deltaTime);
+        
+        // Calculate desired position behind the car
         Vector3 targetForward = target.forward;
-        targetForward.y = 0;
-        targetForward.Normalize();
-
-        // Calculate desired position
-        Vector3 desiredPosition = target.position 
-            - targetForward * initialOffset.z 
-            + Vector3.up * offset.y 
-            + target.right * initialOffset.x;
-
-        // Apply smoothing
-        transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, 
-            ref velocity, distanceDamping);
-
-        // Handle rotation
-        if (lookAtTarget)
+        Vector3 desiredPosition = target.position - targetForward * dynamicDistance + Vector3.up * followHeight;
+        
+        // Smooth position movement
+        transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, 1f / positionSmoothing);
+        
+        // Calculate look target with slight anticipation
+        Vector3 lookTarget = target.position + Vector3.up * heightOffset;
+        
+        // Add slight forward anticipation based on car velocity
+        if (carVelocity.magnitude > 5f)
         {
-            Vector3 lookTarget = target.position + Vector3.up * (offset.y * 0.3f);
-            Vector3 lookDirection = lookTarget - transform.position;
+            Vector3 anticipation = carVelocity.normalized * Mathf.Min(carSpeed * 0.1f, 2f);
+            lookTarget += anticipation;
+        }
+        
+        // Calculate rotation with banking
+        Vector3 lookDirection = lookTarget - transform.position;
+        if (lookDirection != Vector3.zero)
+        {
+            Quaternion targetRotation = Quaternion.LookRotation(lookDirection);
             
-            if (lookDirection != Vector3.zero)
-            {
-                Quaternion targetRotation = Quaternion.LookRotation(lookDirection);
-                transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, 
-                    rotationDamping * Time.deltaTime * 5f);
-            }
+            // Apply banking (roll rotation)
+            targetRotation *= Quaternion.Euler(0, 0, currentBankAngle);
+            
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSmoothing * Time.deltaTime);
         }
-        else
-        {
-            // Match target's y rotation only
-            float targetYRotation = target.eulerAngles.y;
-            transform.rotation = Quaternion.Slerp(transform.rotation, 
-                Quaternion.Euler(transform.eulerAngles.x, targetYRotation, transform.eulerAngles.z), 
-                rotationDamping * Time.deltaTime * 5f);
-        }
-
-        // Update last known positions
-        lastTargetPosition = target.position;
-        lastTargetRotation = target.rotation;
     }
     
-    void StabilizeCamera()
+    void PositionCameraBehindTarget()
     {
-        // Keep camera relatively level by zeroing out roll
-        transform.rotation = Quaternion.Euler(
-            transform.eulerAngles.x,
-            transform.eulerAngles.y,
-            0);
+        if (target == null) return;
+        
+        Vector3 targetForward = target.forward;
+        transform.position = target.position - targetForward * followDistance + Vector3.up * followHeight;
+        
+        Vector3 lookTarget = target.position + Vector3.up * heightOffset;
+        transform.LookAt(lookTarget);
+        
+        // Reset mouse control values
+        currentMouseX = transform.eulerAngles.y;
+        currentMouseY = transform.eulerAngles.x;
+        
+        velocity = Vector3.zero;
+        currentBankAngle = 0f;
     }
     
     public void SetTarget(Transform newTarget)
@@ -240,25 +251,7 @@ public class CameraFollow : MonoBehaviour
         
         if (target != null)
         {
-            // Initialize camera position based on target's current orientation
-            Vector3 targetForward = target.forward;
-            targetForward.y = 0;
-            targetForward.Normalize();
-            
-            transform.position = target.position 
-                - targetForward * initialOffset.z 
-                + Vector3.up * offset.y 
-                + target.right * initialOffset.x;
-                
-            transform.LookAt(target.position + Vector3.up * (offset.y * 0.3f));
-            
-            lastTargetPosition = target.position;
-            lastTargetRotation = target.rotation;
-            velocity = Vector3.zero;
-            
-            // Reset camera control values
-            currentRotationX = transform.eulerAngles.y;
-            currentRotationY = transform.eulerAngles.x;
+            PositionCameraBehindTarget();
         }
     }
     
