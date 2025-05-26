@@ -18,9 +18,21 @@ The camera system has been completely rewritten to behave like GTA V's third-per
 ### ⚙️ **Camera Settings (Inspector)**
 
 #### **Follow Distance & Position**
-- `Follow Distance` (8f): How far behind the car the camera sits
-- `Follow Height` (3f): Height of camera above ground
-- `Height Offset` (1.5f): How much higher to look at on the car
+- `Horizontal Distance` (8f): How far behind the car the camera sits
+- `Vertical Height` (3f): Height of camera above the car/ground
+- `Look At Height Offset` (1.5f): How much higher to look at on the car
+
+#### **Car Following Behavior (NEW)**
+- `Rotation Follow Strength` (0-1): How much camera follows car's rotation (1 = fully attached, 0 = world space)
+- `Use Local Space` (true): Use car's coordinate system for positioning (more "attached" feel)
+- `Show Debug Info` (false): Enable console debug output for troubleshooting
+
+#### **Runtime Controls (Optional)**
+- `Increase Distance Key` (Plus): Key to increase horizontal distance while playing
+- `Decrease Distance Key` (Minus): Key to decrease horizontal distance while playing
+- `Increase Height Key` (PageUp): Key to increase vertical height while playing
+- `Decrease Height Key` (PageDown): Key to decrease vertical height while playing
+- `Adjustment Step` (0.5f): How much to adjust distance/height per keypress
 
 #### **Smoothing**
 - `Position Smoothing` (3f): How smoothly camera follows car position
@@ -39,6 +51,30 @@ The camera system has been completely rewritten to behave like GTA V's third-per
 - **Temporary Override**: Move mouse to temporarily control camera manually
 - **Auto Return**: Camera returns to auto-follow after 3 seconds of no mouse input
 - **Smooth Transitions**: No jarring switches between manual and auto modes
+
+## 🎛️ **NEW: Separate Horizontal & Vertical Controls**
+
+### Why This Matters
+Previously, adjusting the "follow distance" would affect both how far back AND how high the camera was positioned, which caused unwanted vertical movement when you only wanted to adjust horizontal distance.
+
+### New Independent Controls
+- **Horizontal Distance**: Controls ONLY how far back behind the car the camera sits
+- **Vertical Height**: Controls ONLY how high above the car the camera is positioned  
+- **Look At Height Offset**: Controls where on the car the camera looks (separate from camera height)
+
+### Runtime Adjustment (While Playing)
+You can now adjust camera positioning while driving:
+- **+ / =**: Increase horizontal distance (camera moves further back)
+- **- / _**: Decrease horizontal distance (camera moves closer)
+- **Page Up**: Increase vertical height (camera moves higher)
+- **Page Down**: Decrease vertical height (camera moves lower)
+
+### Benefits
+- ✅ **FIXED**: When stopped, adjusting distance only moves camera horizontally (no more weird vertical movement!)
+- ✅ **Independent Control**: Vertical height stays constant when adjusting horizontal distance
+- ✅ **Real-time Tuning**: Fine-tune camera position while driving without stopping
+- ✅ **Range Sliders**: Inspector now has range sliders to prevent extreme values
+- ✅ **Visual Feedback**: Console shows current values when adjusting (can be disabled)
 
 ## How It Works
 
@@ -82,3 +118,41 @@ The camera system has been completely rewritten to behave like GTA V's third-per
 - Banking calculated from car's `angularVelocity.y` component
 - Smooth interpolation using `Vector3.SmoothDamp` and `Quaternion.Slerp`
 - Velocity-based anticipation for natural look-ahead behavior
+
+## 🔧 **NEW: Car Attachment System**
+
+### The Problem
+The previous camera system calculated positions in world space, which caused the camera to not follow the car's orientation changes smoothly. This made it feel detached from the car.
+
+### The Solution
+The new system uses the car's **local coordinate system** to position the camera, making it behave like it's "attached" to the car horizontally while still operating in world space to avoid Unity parenting issues.
+
+### New Controls
+
+#### **Use Local Space** (Default: ON)
+- **ON**: Camera uses car's coordinate system - feels "attached" to the car
+- **OFF**: Camera uses world space positioning - more detached feeling
+
+#### **Rotation Follow Strength** (Default: 1.0)
+- **1.0**: Camera fully follows car's rotation (most "attached" feeling)
+- **0.5**: Blends between attached and world-space behavior
+- **0.0**: Pure world-space positioning (least attached)
+
+### How It Works
+```
+Car's Local Space:
+- X axis: Left/Right
+- Y axis: Up/Down  
+- Z axis: Forward/Back
+
+Camera Offset: (0, verticalHeight, -horizontalDistance)
+- 0 on X = stay centered behind car
+- verticalHeight on Y = height above car
+- -horizontalDistance on Z = distance behind car
+```
+
+### Benefits of Local Space
+- ✅ **Perfect Following**: Camera stays exactly behind the car regardless of car rotation
+- ✅ **Smooth Turns**: Camera naturally follows when car turns or rotates
+- ✅ **Consistent Distance**: Horizontal/vertical distances remain constant relative to car
+- ✅ **No Drift**: Camera won't "drift away" from the car over time

@@ -6,9 +6,27 @@ public class CameraFollow : MonoBehaviour
     public Transform target;
     
     [Header("Follow Distance & Position")]
-    public float followDistance = 8f;
-    public float followHeight = 3f;
-    public float heightOffset = 1.5f; // How much higher to look at on the car
+    [Range(2f, 20f)]
+    public float horizontalDistance = 8f; // How far back behind the car
+    [Range(0.5f, 10f)]
+    public float verticalHeight = 3f; // How high above the car
+    [Range(0f, 5f)]
+    public float lookAtHeightOffset = 1.5f; // How much higher to look at on the car
+    
+    [Header("Simple Offset-Based Following")]
+    public bool useSimpleOffset = true; // Use the simple, reliable TransformPoint method
+    public Vector3 cameraOffset = new Vector3(0, 3f, -8f); // Local offset from car (X, Y, Z)
+    
+    [Header("Debug")]
+    public bool showDebugInfo = false; // Show debug information in console
+    
+    [Header("Runtime Controls (Optional)")]
+    public KeyCode increaseDistanceKey = KeyCode.Plus;
+    public KeyCode decreaseDistanceKey = KeyCode.Minus;
+    public KeyCode increaseHeightKey = KeyCode.PageUp;
+    public KeyCode decreaseHeightKey = KeyCode.PageDown;
+    public float adjustmentStep = 0.5f;
+    public bool showAdjustmentFeedback = true;
     
     [Header("Smoothing")]
     public float positionSmoothing = 3f;
@@ -46,6 +64,16 @@ public class CameraFollow : MonoBehaviour
     
     void Start()
     {
+        // IMPORTANT: Detach camera from any parent to ensure world space operation
+        if (transform.parent != null)
+        {
+            Debug.Log($"Camera was parented to {transform.parent.name}. Detaching to ensure world space operation.");
+            transform.SetParent(null);
+        }
+        
+        // Initialize camera offset to match current settings
+        cameraOffset = new Vector3(0, verticalHeight, -horizontalDistance);
+        
         // Find and set the local player as target
         FindAndSetLocalPlayerTarget();
         
@@ -90,6 +118,9 @@ public class CameraFollow : MonoBehaviour
             else
                 LockCursor();
         }
+        
+        // Handle runtime camera adjustments
+        HandleRuntimeCameraAdjustments();
         
         // Check for active input fields before processing mouse input
         if (UnityEngine.EventSystems.EventSystem.current != null && 
@@ -156,17 +187,27 @@ public class CameraFollow : MonoBehaviour
         
         // Calculate position based on mouse rotation
         Quaternion rotation = Quaternion.Euler(currentMouseY, currentMouseX, 0);
-        Vector3 desiredPosition = target.position + rotation * new Vector3(0, followHeight, -followDistance);
+        // Simple positioning: always behind and above the car
+        Vector3 offset = new Vector3(0, verticalHeight, horizontalDistance);
+        Vector3 desiredPosition = target.position + rotation * offset;
         
         transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, 1f / positionSmoothing);
         
         // Look at target with height offset
-        Vector3 lookTarget = target.position + Vector3.up * heightOffset;
+        Vector3 lookTarget = target.position + Vector3.up * lookAtHeightOffset;
         transform.LookAt(lookTarget);
     }
     
     void GTAStyleAutoFollow()
     {
+        // INTELLIGENT FAILSAFE: Only detach if camera is actually a child of the target car
+        // This prevents the camera from being incorrectly parented but allows intentional setups
+        if (transform.parent == target)
+        {
+            Debug.LogWarning("Camera was directly parented to target car - detaching for independent operation");
+            transform.SetParent(null);
+        }
+        
         // Get car's velocity for speed-based effects
         float carSpeed = 0f;
         Vector3 carVelocity = Vector3.zero;
@@ -177,7 +218,7 @@ public class CameraFollow : MonoBehaviour
         }
         
         // Calculate dynamic follow distance based on speed
-        float dynamicDistance = followDistance + Mathf.Min(carSpeed * speedPullbackMultiplier, maxSpeedPullback);
+        float dynamicDistance = horizontalDistance + Mathf.Min(carSpeed * speedPullbackMultiplier, maxSpeedPullback);
         
         // Calculate banking angle based on car's turning
         float targetBankAngle = 0f;
@@ -192,15 +233,29 @@ public class CameraFollow : MonoBehaviour
         // Smooth the banking angle
         currentBankAngle = Mathf.Lerp(currentBankAngle, targetBankAngle, bankingSmoothing * Time.deltaTime);
         
-        // Calculate desired position behind the car
-        Vector3 targetForward = target.forward;
-        Vector3 desiredPosition = target.position - targetForward * dynamicDistance + Vector3.up * followHeight;
+        // SIMPLE & RELIABLE: Use TransformPoint method like your example
+        Vector3 desiredPosition;
         
-        // Smooth position movement
+        if (useSimpleOffset)
+        {
+            // Method 1: Your simple, reliable approach using TransformPoint
+            // Update the offset based on current settings
+            Vector3 dynamicOffset = new Vector3(cameraOffset.x, verticalHeight, -dynamicDistance);
+            desiredPosition = target.TransformPoint(dynamicOffset);
+        }
+        else
+        {
+            // Method 2: Fallback to manual calculation if needed
+            Vector3 backwardDirection = -target.forward;
+            Vector3 horizontalPosition = target.position + backwardDirection * dynamicDistance;
+            desiredPosition = horizontalPosition + Vector3.up * verticalHeight;
+        }
+        
+        // Apply smooth movement
         transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, 1f / positionSmoothing);
         
         // Calculate look target with slight anticipation
-        Vector3 lookTarget = target.position + Vector3.up * heightOffset;
+        Vector3 lookTarget = target.position + Vector3.up * lookAtHeightOffset;
         
         // Add slight forward anticipation based on car velocity
         if (carVelocity.magnitude > 5f)
@@ -226,10 +281,20 @@ public class CameraFollow : MonoBehaviour
     {
         if (target == null) return;
         
-        Vector3 targetForward = target.forward;
-        transform.position = target.position - targetForward * followDistance + Vector3.up * followHeight;
+        // Use simple and reliable positioning like your example
+        if (useSimpleOffset)
+        {
+            Vector3 initialOffset = new Vector3(cameraOffset.x, verticalHeight, -horizontalDistance);
+            transform.position = target.TransformPoint(initialOffset);
+        }
+        else
+        {
+            Vector3 backwardDirection = -target.forward;
+            Vector3 horizontalPosition = target.position + backwardDirection * horizontalDistance;
+            transform.position = horizontalPosition + Vector3.up * verticalHeight;
+        }
         
-        Vector3 lookTarget = target.position + Vector3.up * heightOffset;
+        Vector3 lookTarget = target.position + Vector3.up * lookAtHeightOffset;
         transform.LookAt(lookTarget);
         
         // Reset mouse control values
@@ -243,6 +308,13 @@ public class CameraFollow : MonoBehaviour
     public void SetTarget(Transform newTarget)
     {
         if (newTarget == null) return;
+        
+        // IMPORTANT: Ensure camera is never parented to the target
+        if (transform.parent != null)
+        {
+            Debug.Log($"Camera was parented to {transform.parent.name}. Detaching for independent operation.");
+            transform.SetParent(null);
+        }
         
         target = newTarget;
         
@@ -281,5 +353,56 @@ public class CameraFollow : MonoBehaviour
     {
         // Ensure cursor is restored when component is destroyed
         RestoreCursor();
+    }
+
+    void HandleRuntimeCameraAdjustments()
+    {
+        // Adjust horizontal distance (how far back behind the car)
+        if (Input.GetKeyDown(increaseDistanceKey))
+        {
+            if (useSimpleOffset)
+            {
+                horizontalDistance = Mathf.Clamp(horizontalDistance + adjustmentStep, 2f, 20f);
+                cameraOffset.z = -horizontalDistance; // Update the offset
+            }
+            else
+            {
+                horizontalDistance = Mathf.Clamp(horizontalDistance + adjustmentStep, 2f, 20f);
+            }
+            if (showAdjustmentFeedback)
+                Debug.Log($"📹 Camera Distance: {horizontalDistance:F1}m (+ / - to adjust)");
+        }
+        if (Input.GetKeyDown(decreaseDistanceKey))
+        {
+            if (useSimpleOffset)
+            {
+                horizontalDistance = Mathf.Clamp(horizontalDistance - adjustmentStep, 2f, 20f);
+                cameraOffset.z = -horizontalDistance; // Update the offset
+            }
+            else
+            {
+                horizontalDistance = Mathf.Clamp(horizontalDistance - adjustmentStep, 2f, 20f);
+            }
+            if (showAdjustmentFeedback)
+                Debug.Log($"📹 Camera Distance: {horizontalDistance:F1}m (+ / - to adjust)");
+        }
+        
+        // Adjust vertical height (how high above the car)
+        if (Input.GetKeyDown(increaseHeightKey))
+        {
+            verticalHeight = Mathf.Clamp(verticalHeight + adjustmentStep, 0.5f, 10f);
+            if (useSimpleOffset)
+                cameraOffset.y = verticalHeight; // Update the offset
+            if (showAdjustmentFeedback)
+                Debug.Log($"📹 Camera Height: {verticalHeight:F1}m (PgUp / PgDn to adjust)");
+        }
+        if (Input.GetKeyDown(decreaseHeightKey))
+        {
+            verticalHeight = Mathf.Clamp(verticalHeight - adjustmentStep, 0.5f, 10f);
+            if (useSimpleOffset)
+                cameraOffset.y = verticalHeight; // Update the offset
+            if (showAdjustmentFeedback)
+                Debug.Log($"📹 Camera Height: {verticalHeight:F1}m (PgUp / PgDn to adjust)");
+        }
     }
 }
