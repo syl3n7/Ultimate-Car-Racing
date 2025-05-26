@@ -58,6 +58,28 @@ public class UIManager : MonoBehaviour
     public Button loginButton;
     public TextMeshProUGUI authStatusText;
     
+    [Header("Button References")]
+    [Header("Main Menu Buttons")]
+    public Button playButton;
+    public Button instructionsButton;
+    public Button creditsButton;
+    public Button profileButton;
+    public Button exitButton;
+    
+    [Header("Profile Panel Buttons")]
+    public Button createProfileButton;
+    public Button backToMainButton;
+    
+    [Header("Multiplayer Panel Buttons")]
+    public Button createGameButton;
+    public Button joinGameButton;
+    public Button backFromMultiplayerButton;
+    
+    [Header("Room List Panel Buttons")]
+    public Button createRoomButton;
+    public Button joinRoomButton;
+    public Button backFromRoomListButton;
+    
     [Header("Car UI")]
     public TextMeshProUGUI speedText;
     public TextMeshProUGUI rpmText;
@@ -172,17 +194,6 @@ public class UIManager : MonoBehaviour
         // Initialize max players text
         OnMaxPlayersSliderChanged(maxPlayersSlider.value);
 
-        // After your existing ConnectAllUIButtons call
-    
-        // Explicitly connect the Create Room button for certainty
-        Button createRoomButton = FindFirstObjectByType<Button>();
-        if (createRoomButton != null && createRoomButton.name == "CreateRoomButton")
-        {
-            createRoomButton.onClick.RemoveAllListeners();
-            createRoomButton.onClick.AddListener(CreateRoom);
-            Debug.Log("Explicitly connected CreateRoomButton");
-        }
-
         CheckPanelReferences();
 
         // Connect auth panel buttons
@@ -193,131 +204,68 @@ public class UIManager : MonoBehaviour
         }
     }
     
-    // Update the ConnectAllUIButtons method to use explicit BackFromMultiplayer method
+    // Connect all UI buttons using Inspector references
     private void ConnectAllUIButtons()
     {
-        Debug.Log("Connecting all UI buttons automatically");
-        
-        // Debug: List all buttons found in the scene
-        DebugListAllButtons();
+        Debug.Log("Connecting all UI buttons using Inspector references");
         
         // Main Menu buttons
-        ConnectButton("PlayButton", OnPlayButtonClicked);
-        ConnectButton("InstructionsButton", ShowInstructions);
-        ConnectButton("CreditsButton", ShowCredits);
-        ConnectButton("ProfileButton", ShowProfilePanel);
-        ConnectButton("ExitButton", ExitGame);
+        ConnectButtonDirect(playButton, OnPlayButtonClicked, "PlayButton");
+        ConnectButtonDirect(instructionsButton, ShowInstructions, "InstructionsButton");
+        ConnectButtonDirect(creditsButton, ShowCredits, "CreditsButton");
+        ConnectButtonDirect(profileButton, ShowProfilePanel, "ProfileButton");
+        ConnectButtonDirect(exitButton, ExitGame, "ExitButton");
         
         // Profile panel buttons
-        ConnectButton("CreateProfileButton", CreateNewProfile);
-        ConnectButton("BackToMainButton", ShowMainMenu);
+        ConnectButtonDirect(createProfileButton, CreateNewProfile, "CreateProfileButton");
+        ConnectButtonDirect(backToMainButton, ShowMainMenu, "BackToMainButton");
         
         // Multiplayer panel buttons
-        ConnectButton("CreateGameButton", ShowRoomListPanel);
-        ConnectButton("JoinGameButton", ShowRoomListPanel);
-        ConnectButton("BackFromMultiplayerButton", BackFromMultiplayer);  // Use explicit method
+        ConnectButtonDirect(createGameButton, ShowRoomListPanel, "CreateGameButton");
+        ConnectButtonDirect(joinGameButton, ShowRoomListPanel, "JoinGameButton");
+        ConnectButtonDirect(backFromMultiplayerButton, BackFromMultiplayer, "BackFromMultiplayerButton");
         
         // Room list panel buttons
-        ConnectButton("CreateRoomButton", CreateRoom);
-        ConnectButton("JoinRoomButton", JoinSelectedRoom);
-        ConnectButton("RefreshRoomsButton", RefreshRoomList);
-        ConnectButton("BackFromRoomListButton", ShowMultiplayerPanel);
-        
-        // Add explicit listener to Refresh button if it exists in Inspector
-        if (refreshRoomsButton != null)
-        {
-            refreshRoomsButton.onClick.RemoveAllListeners();
-            refreshRoomsButton.onClick.AddListener(RefreshRoomList);
-            Debug.Log("Explicitly connected RefreshRoomsButton from inspector reference");
-        }
+        ConnectButtonDirect(createRoomButton, CreateRoom, "CreateRoomButton");
+        ConnectButtonDirect(joinRoomButton, JoinSelectedRoom, "JoinRoomButton");
+        ConnectButtonDirect(refreshRoomsButton, RefreshRoomList, "RefreshRoomsButton");
+        ConnectButtonDirect(backFromRoomListButton, ShowMultiplayerPanel, "BackFromRoomListButton");
         
         // Room lobby panel buttons
-        ConnectButton("StartGameButton", StartGame);
-        ConnectButton("LeaveRoomButton", LeaveRoom);
+        ConnectButtonDirect(startGameButton, StartGame, "StartGameButton");
+        ConnectButtonDirect(leaveGameButton, LeaveRoom, "LeaveGameButton");
         
         // Auth panel buttons
-        ConnectButton("LoginButton", OnLoginButtonClicked);
+        ConnectButtonDirect(loginButton, OnLoginButtonClicked, "LoginButton");
         
-        // Find and connect sliders
-        Slider[] allSliders = FindObjectsByType<Slider>(FindObjectsSortMode.None);
-        foreach (var slider in allSliders)
+        // Connect max players slider if assigned
+        if (maxPlayersSlider != null)
         {
-            if (slider.name == "MaxPlayersSlider")
-            {
-                Debug.Log("Found MaxPlayersSlider, connecting onValueChanged event");
-                slider.onValueChanged.RemoveAllListeners();
-                slider.onValueChanged.AddListener(OnMaxPlayersSliderChanged);
-                
-                // Set max value to 20
-                slider.maxValue = 20;
-                
-                // Make sure the text is updated with the initial value
-                OnMaxPlayersSliderChanged(slider.value);
-            }
+            maxPlayersSlider.onValueChanged.RemoveAllListeners();
+            maxPlayersSlider.onValueChanged.AddListener(OnMaxPlayersSliderChanged);
+            maxPlayersSlider.maxValue = 20;
+            OnMaxPlayersSliderChanged(maxPlayersSlider.value);
+            Debug.Log("Connected MaxPlayersSlider from Inspector reference");
+        }
+        else
+        {
+            Debug.LogWarning("MaxPlayersSlider not assigned in Inspector!");
         }
     }
 
-    // Debug method to list all buttons in the scene
-    private void DebugListAllButtons()
+    // Helper method for direct button connections using Inspector references
+    private void ConnectButtonDirect(Button button, UnityEngine.Events.UnityAction action, string buttonName)
     {
-        Debug.Log("=== Listing all buttons in the scene ===");
-        Button[] allButtons = FindObjectsByType<Button>(FindObjectsSortMode.None);
-        foreach (var button in allButtons)
+        if (button != null)
         {
-            Debug.Log($"Found button: {button.name} at path: {GetGameObjectPath(button.gameObject)}");
+            button.onClick.RemoveAllListeners();
+            button.onClick.AddListener(action);
+            Debug.Log($"Connected button: {buttonName}");
         }
-        Debug.Log($"Total buttons found: {allButtons.Length}");
-    }
-
-    // Helper method to get the full path of a GameObject
-    private string GetGameObjectPath(GameObject obj)
-    {
-        string path = obj.name;
-        Transform parent = obj.transform.parent;
-        while (parent != null)
+        else
         {
-            path = parent.name + "/" + path;
-            parent = parent.parent;
+            Debug.LogWarning($"Button not assigned in Inspector: {buttonName}");
         }
-        return path;
-    }
-
-    private void ConnectButton(string buttonName, UnityEngine.Events.UnityAction action)
-    {
-        // Find all buttons in the scene, including those nested in children
-        Button[] allButtons = FindObjectsByType<Button>(FindObjectsSortMode.None);
-        
-        foreach (var button in allButtons)
-        {
-            if (button.name == buttonName)
-            {
-                Debug.Log($"Connected button: {buttonName}");
-                button.onClick.RemoveAllListeners();
-                button.onClick.AddListener(action);
-                return;
-            }
-        }
-        
-        // If not found with standard search, try searching recursively through all GameObjects
-        // This will find buttons even if they're deeply nested in UI panels
-        GameObject[] allGameObjects = FindObjectsByType<GameObject>(FindObjectsSortMode.None);
-        foreach (var go in allGameObjects)
-        {
-            if (go.name == buttonName)
-            {
-                Button button = go.GetComponent<Button>();
-                if (button != null)
-                {
-                    Debug.Log($"Connected nested button: {buttonName}");
-                    button.onClick.RemoveAllListeners();
-                    button.onClick.AddListener(action);
-                    return;
-                }
-            }
-        }
-        
-        // If we get here, the button wasn't found
-        Debug.LogWarning($"Button not found: {buttonName}");
     }
     
     // In OnDestroy method - replace NetworkClient references with SecureNetworkManager
