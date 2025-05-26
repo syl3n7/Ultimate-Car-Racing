@@ -1347,58 +1347,79 @@ public async void CreateRoom()
         
         Debug.Log($"OnGameStarted received with message: {JsonConvert.SerializeObject(message)}");
         
-        if (message.ContainsKey("spawn_position"))
+        // Check for spawn_positions (plural, snake_case) as sent by SecureNetworkManager
+        if (message.ContainsKey("spawn_positions"))
         {
-            var spawnPosObj = message["spawn_position"] as Newtonsoft.Json.Linq.JObject;
+            var spawnPositionsObj = message["spawn_positions"] as Newtonsoft.Json.Linq.JObject;
             
-            // Extract spawn position
-            Vector3 spawnPosition = new Vector3(
-                Convert.ToSingle(spawnPosObj["x"]),
-                Convert.ToSingle(spawnPosObj["y"]),
-                Convert.ToSingle(spawnPosObj["z"])
-            );
-            
-            // Extract spawn index if available
-            int spawnIndex = 0;
-            if (spawnPosObj.ContainsKey("index"))
+            // Get the current client's ID to find their spawn position
+            string clientId = SecureNetworkManager.Instance?.GetClientId();
+            if (string.IsNullOrEmpty(clientId))
             {
-                spawnIndex = Convert.ToInt32(spawnPosObj["index"]);
+                Debug.LogError("Client ID is null or empty when trying to get spawn position!");
+                ShowNotification("Error: Client ID not found. Please restart the game.");
+                return;
             }
             
-            Debug.Log($"Game started with spawn position: {spawnPosition}, index: {spawnIndex}");
-            
-            // Request the player list before loading the scene
-            if (SecureNetworkManager.Instance != null && !string.IsNullOrEmpty(currentRoomId))
+            // Look for this client's spawn position in the spawn_positions object
+            if (spawnPositionsObj != null && spawnPositionsObj.ContainsKey(clientId))
             {
-                // Use the proper helper method
-                _ = SecureNetworkManager.Instance.GetRoomPlayers(currentRoomId);
-            }
+                var spawnPosObj = spawnPositionsObj[clientId] as Newtonsoft.Json.Linq.JObject;
+                
+                // Extract spawn position
+                Vector3 spawnPosition = new Vector3(
+                    Convert.ToSingle(spawnPosObj["x"]),
+                    Convert.ToSingle(spawnPosObj["y"]),
+                    Convert.ToSingle(spawnPosObj["z"])
+                );
+                
+                // Extract spawn index if available (assign index based on player order for now)
+                int spawnIndex = 0;
+                if (spawnPosObj.ContainsKey("index"))
+                {
+                    spawnIndex = Convert.ToInt32(spawnPosObj["index"]);
+                }
+                
+                Debug.Log($"Game started with spawn position: {spawnPosition}, index: {spawnIndex} for client: {clientId}");
+                
+                // Request the player list before loading the scene
+                if (SecureNetworkManager.Instance != null && !string.IsNullOrEmpty(currentRoomId))
+                {
+                    // Use the proper helper method
+                    _ = SecureNetworkManager.Instance.GetRoomPlayers(currentRoomId);
+                }
 
-            // Hide UI and ensure all panels are disabled before loading scene
-            HideAllPanels();
-            
-            // IMPORTANT: Set spawn position in GameManager BEFORE loading scene
-            if (GameManager.Instance != null)
-            {
-                // Set the spawn position and index before loading the scene
-                GameManager.Instance.SetMultiplayerSpawnPosition(spawnPosition, spawnIndex);
+                // Hide UI and ensure all panels are disabled before loading scene
+                HideAllPanels();
                 
-                // Load the race track scene - use the correct scene name
-                // FIXED: Use the generic "RaceTrack" scene name instead of track-specific
-                string sceneName = "RaceTrack";
-                
-                Debug.Log($"Loading race scene: {sceneName} (immediate scene transition)");
-                
-                // Force GC collection before loading scene to reduce potential stutter
-                System.GC.Collect();
-                
-                // Use the LoadSceneAsync method with an immediate callback to ensure the scene loads
-                StartCoroutine(LoadRaceSceneAsync(sceneName));
+                // IMPORTANT: Set spawn position in GameManager BEFORE loading scene
+                if (GameManager.Instance != null)
+                {
+                    // Set the spawn position and index before loading the scene
+                    GameManager.Instance.SetMultiplayerSpawnPosition(spawnPosition, spawnIndex);
+                    
+                    // Load the race track scene - use the correct scene name
+                    // FIXED: Use the generic "RaceTrack" scene name instead of track-specific
+                    string sceneName = "RaceTrack";
+                    
+                    Debug.Log($"Loading race scene: {sceneName} (immediate scene transition)");
+                    
+                    // Force GC collection before loading scene to reduce potential stutter
+                    System.GC.Collect();
+                    
+                    // Use the LoadSceneAsync method with an immediate callback to ensure the scene loads
+                    StartCoroutine(LoadRaceSceneAsync(sceneName));
+                }
+                else
+                {
+                    Debug.LogError("GameManager.Instance is null when trying to start game!");
+                    ShowNotification("Error: Game manager not found. Please restart the game.");
+                }
             }
             else
             {
-                Debug.LogError("GameManager.Instance is null when trying to start game!");
-                ShowNotification("Error: Game manager not found. Please restart the game.");
+                Debug.LogError($"Spawn position not found for client ID: {clientId} in spawn positions object!");
+                ShowNotification("Error: Your spawn position was not assigned. Please try again.");
             }
         }
         else
