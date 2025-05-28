@@ -1127,7 +1127,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: -0.00004863739, y: 23.01928}
+  m_AnchoredPosition: {x: -0.00004863739, y: 23.019037}
   m_SizeDelta: {x: 0, y: 300}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &240730155
@@ -3995,7 +3995,7 @@ MonoBehaviour:
   commandInput: {fileID: 0}
   outputText: {fileID: 1000918048}
   toggleButton: {fileID: 0}
-  toggleKey: 96
+  toggleKey: 289
   maxOutputLines: 20
 --- !u!1 &747916235
 GameObject:
@@ -4413,8 +4413,8 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 1995559424}
   m_HandleRect: {fileID: 1995559423}
   m_Direction: 2
-  m_Value: 0.9999996
-  m_Size: 0.7501299
+  m_Value: 1.0000004
+  m_Size: 0.7501998
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
@@ -9205,7 +9205,7 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 41.15
+  m_fontSize: 41.1
   m_fontSizeBase: 36
   m_fontWeight: 400
   m_enableAutoSizing: 1
@@ -10272,10 +10272,6 @@ PrefabInstance:
       propertyPath: m_Name
       value: SecureNetworkManager
       objectReference: {fileID: 0}
-    - target: {fileID: 1457017774786166952, guid: 31303a106cb5f40c29beef94406698a6, type: 3}
-      propertyPath: serverHost
-      value: 192.168.3.41
-      objectReference: {fileID: 0}
     - target: {fileID: 8901063129558861309, guid: 31303a106cb5f40c29beef94406698a6, type: 3}
       propertyPath: m_LocalPosition.x
       value: 1123.1765
@@ -11066,8 +11062,8 @@ MonoBehaviour:
   m_TargetGraphic: {fileID: 2116467349}
   m_HandleRect: {fileID: 2116467348}
   m_Direction: 2
-  m_Value: -0.000010606057
-  m_Size: 0.92327005
+  m_Value: -0.0000013257571
+  m_Size: 0.92038566
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:

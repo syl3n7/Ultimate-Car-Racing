@@ -1154,27 +1154,36 @@ public async void CreateRoom()
                     }
                     
                     try {
-                        string roomId = room["room_id"].ToString();
-                        string roomName = room["name"].ToString();
+                        // Extract room data with correct field names from server
+                        string roomId = room.ContainsKey("id") ? room["id"].ToString() : "";
+                        string roomName = room.ContainsKey("name") ? room["name"].ToString() : "Unknown Room";
                         
-                        // Handle player_count numeric conversion safely
+                        // Handle playerCount numeric conversion safely
                         int playerCount = 0;
-                        if (room.ContainsKey("player_count"))
+                        if (room.ContainsKey("playerCount"))
                         {
-                            if (room["player_count"] is int intVal)
+                            if (room["playerCount"] is int intVal)
                                 playerCount = intVal;
                             else
-                                int.TryParse(room["player_count"].ToString(), out playerCount);
+                                int.TryParse(room["playerCount"].ToString(), out playerCount);
                         }
                         
-                        // Handle max_players numeric conversion safely  
-                        int maxPlayers = 20;
-                        if (room.ContainsKey("max_players"))
+                        // Handle maxPlayers numeric conversion safely  
+                        int maxPlayers = 20; // Default max players
+                        if (room.ContainsKey("maxPlayers"))
                         {
-                            if (room["max_players"] is int intVal)
+                            if (room["maxPlayers"] is int intVal)
                                 maxPlayers = intVal;
                             else
-                                int.TryParse(room["max_players"].ToString(), out maxPlayers);
+                                int.TryParse(room["maxPlayers"].ToString(), out maxPlayers);
+                        }
+                        
+                        // Skip empty room IDs
+                        if (string.IsNullOrEmpty(roomId))
+                        {
+                            Debug.LogWarning("Skipping room with empty ID");
+                            Destroy(roomItem);
+                            continue;
                         }
                         
                         Debug.Log($"Initializing room UI: ID={roomId}, Name={roomName}, Players={playerCount}/{maxPlayers}");
