@@ -126,8 +126,8 @@ public class GameManager : MonoBehaviour
     public void LoadRaceScene(int trackIndex)
     {
         SelectedTrackIndex = trackIndex;
-        string sceneName = $"RaceTrack{trackIndex}";
-        Debug.Log($"Loading race scene: {sceneName}");
+        string sceneName = "RaceTrack"; // Only one race scene available
+        Debug.Log($"Loading race scene: {sceneName} (track index: {trackIndex})");
         
         // Use UIManager loading screen if available, otherwise load normally
         if (UIManager.Instance != null)

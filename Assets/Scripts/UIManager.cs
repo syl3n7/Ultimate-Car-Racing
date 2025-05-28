@@ -1356,20 +1356,32 @@ public async void CreateRoom()
     {
         HideConnectionPanel();
 
-        if (message.ContainsKey("room_id") && message.ContainsKey("host_id"))
+        if (message.ContainsKey("room_id"))
         {
             currentRoomId = message["room_id"].ToString();
 
             // Determine if we're the host
-            string hostId = message["host_id"].ToString();
+            string hostId = "";
             string clientId = SecureNetworkManager.Instance.GetClientId();
-            isHost = (hostId == clientId);
+            
+            if (message.ContainsKey("host_id") && message["host_id"] != null && message["host_id"].ToString() != "unknown")
+            {
+                hostId = message["host_id"].ToString();
+                isHost = (hostId == clientId);
+            }
+            else
+            {
+                // Fallback: if we can't determine host, assume we're not the host
+                // We can update this later when we get room players information
+                isHost = false;
+                Debug.LogWarning("Could not determine host status from join response, assuming not host");
+            }
             
             Debug.Log($"Joined room: ID={currentRoomId}, ClientID={clientId}, HostID={hostId}, isHost={isHost}");
 
-            // CHANGE: Don't clear the player list, and request player list from server
+            // Clear the player list and add ourselves
             playersInRoom.Clear();
-            playersInRoom.Add(clientId); // Add self
+            playersInRoom.Add(clientId);
 
             // Request the complete player list from the server
             if (SecureNetworkManager.Instance != null)
@@ -1382,6 +1394,10 @@ public async void CreateRoom()
             ShowRoomLobbyPanel();
             UpdateRoomInfo();
             ShowNotification("Joined room successfully");
+        }
+        else
+        {
+            Debug.LogError("OnJoinedGame message missing room_id!");
         }
     }
     

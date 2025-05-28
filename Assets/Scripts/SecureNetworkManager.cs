@@ -46,6 +46,9 @@ public class SecureNetworkManager : MonoBehaviour
     private string _currentRoomHostId;  // Add room host ID field
     private UdpEncryption _udpCrypto;
     
+    // Room cache to store host information
+    private Dictionary<string, string> _roomHostCache = new Dictionary<string, string>();
+    
     // UDP endpoint
     private IPEndPoint _serverUdpEndpoint;
     
@@ -602,11 +605,37 @@ public class SecureNetworkManager : MonoBehaviour
             {
                 _currentRoomHostId = root["hostId"].ToString();
             }
+            else
+            {
+                // Try to get host ID from cached room information
+                if (_roomHostCache.ContainsKey(_currentRoomId))
+                {
+                    _currentRoomHostId = _roomHostCache[_currentRoomId];
+                    if (enableDebugLogs)
+                        Debug.Log($"Using cached host ID for room {_currentRoomId}: {_currentRoomHostId}");
+                }
+                else
+                {
+                    Debug.LogWarning($"JOIN_OK response missing hostId and no cached info for room {_currentRoomId}");
+                }
+            }
             
             var joinData = new Dictionary<string, object>
             {
                 { "room_id", _currentRoomId }
             };
+            
+            // Add host_id if we have it
+            if (!string.IsNullOrEmpty(_currentRoomHostId))
+            {
+                joinData["host_id"] = _currentRoomHostId;
+            }
+            else
+            {
+                // Fallback: assume we're not the host if we can't determine
+                joinData["host_id"] = "unknown";
+                Debug.LogWarning("Unable to determine host_id for joined room, setting to 'unknown'");
+            }
             
             OnRoomJoined?.Invoke(joinData);
         }
@@ -616,6 +645,34 @@ public class SecureNetworkManager : MonoBehaviour
     {
         if (root.ContainsKey("rooms"))
         {
+            // Cache room host information for later use
+            try
+            {
+                var roomsData = root["rooms"];
+                if (roomsData is Newtonsoft.Json.Linq.JArray roomsArray)
+                {
+                    foreach (var room in roomsArray)
+                    {
+                        if (room is Newtonsoft.Json.Linq.JObject roomObj)
+                        {
+                            var roomId = roomObj["id"]?.ToString();
+                            var hostId = roomObj["hostId"]?.ToString();
+                            
+                            if (!string.IsNullOrEmpty(roomId) && !string.IsNullOrEmpty(hostId))
+                            {
+                                _roomHostCache[roomId] = hostId;
+                                if (enableDebugLogs)
+                                    Debug.Log($"Cached host info: Room {roomId} -> Host {hostId}");
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Failed to cache room host information: {ex.Message}");
+            }
+            
             OnRoomListReceived?.Invoke(root);
         }
     }
