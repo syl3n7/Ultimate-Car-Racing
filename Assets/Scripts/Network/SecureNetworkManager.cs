@@ -87,7 +87,28 @@ public class SecureNetworkManager : MonoBehaviour
     
     void Start()
     {
-        _serverUdpEndpoint = new IPEndPoint(IPAddress.Parse(serverHost), serverPort);
+        // Resolve server host to IP address
+        try
+        {
+            if (IPAddress.TryParse(serverHost, out IPAddress ipAddress))
+            {
+                _serverUdpEndpoint = new IPEndPoint(ipAddress, serverPort);
+            }
+            else
+            {
+                // Resolve hostname to IP address
+                var hostEntry = System.Net.Dns.GetHostEntry(serverHost);
+                _serverUdpEndpoint = new IPEndPoint(hostEntry.AddressList[0], serverPort);
+            }
+            Log($"Server endpoint resolved to: {_serverUdpEndpoint}");
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to resolve server host '{serverHost}': {ex.Message}");
+            // Fallback to localhost
+            _serverUdpEndpoint = new IPEndPoint(IPAddress.Loopback, serverPort);
+        }
+        
         LoadSavedCredentials();
     }
     
@@ -551,19 +572,38 @@ public class SecureNetworkManager : MonoBehaviour
     
     private void HandleNameOk(Dictionary<string, object> root)
     {
+        Log("Received NAME_OK response from server");
+        
         if (root.ContainsKey("authenticated") && Convert.ToBoolean(root["authenticated"]))
         {
             _isAuthenticated = true;
             OnAuthenticationChanged?.Invoke(true);
+            Log("✅ Player authenticated successfully");
             
             // Setup UDP encryption if available
             if (root.ContainsKey("udpEncryption") && Convert.ToBoolean(root["udpEncryption"]))
             {
-                _udpCrypto = new UdpEncryption(_sessionId);
-                SetupUdpClient();
+                Log("Server supports UDP encryption - initializing...");
+                try
+                {
+                    _udpCrypto = new UdpEncryption(_sessionId);
+                    SetupUdpClient();
+                    Log("✅ UDP encryption initialized successfully");
+                }
+                catch (Exception ex)
+                {
+                    LogError($"❌ Failed to initialize UDP encryption: {ex.Message}");
+                }
             }
-            
-            Log("Successfully authenticated with UDP encryption enabled");
+            else
+            {
+                LogError("⚠️ Server response missing udpEncryption=true - UDP will not be encrypted!");
+                SetupUdpClient(); // Setup UDP without encryption as fallback
+            }
+        }
+        else
+        {
+            LogError("❌ Authentication failed - server did not confirm authentication");
         }
     }
     
@@ -732,8 +772,12 @@ public class SecureNetworkManager : MonoBehaviour
     public async Task SendPositionUpdate(Vector3 position, Quaternion rotation)
     {
         if (!_isAuthenticated || _udpClient == null || string.IsNullOrEmpty(_currentRoomId))
+        {
+            if (enableDebugLogs)
+                Log($"Cannot send position update - Auth: {_isAuthenticated}, UDP: {_udpClient != null}, Room: {!string.IsNullOrEmpty(_currentRoomId)}");
             return;
-        
+        }
+
         try
         {
             var update = new
@@ -743,21 +787,25 @@ public class SecureNetworkManager : MonoBehaviour
                 position = new { x = position.x, y = position.y, z = position.z },
                 rotation = new { x = rotation.x, y = rotation.y, z = rotation.z, w = rotation.w }
             };
-            
+
             byte[] data;
-            
+
             if (_udpCrypto != null)
             {
                 // Send encrypted packet
                 data = _udpCrypto.CreatePacket(update);
+                if (enableDebugLogs)
+                    Log($"🔒 Sending encrypted position update ({data.Length} bytes)");
             }
             else
             {
                 // Fallback to plain text
                 string json = JsonConvert.SerializeObject(update);
                 data = Encoding.UTF8.GetBytes(json);
+                if (enableDebugLogs)
+                    LogError($"🔓 Sending UNENCRYPTED position update ({data.Length} bytes) - Security Risk!");
             }
-            
+
             await _udpClient.SendAsync(data, data.Length, _serverUdpEndpoint);
         }
         catch (Exception ex)
@@ -765,12 +813,15 @@ public class SecureNetworkManager : MonoBehaviour
             LogError($"Failed to send position update: {ex.Message}");
         }
     }
-    
-    public async Task SendInputUpdate(float steering, float throttle, float brake)
+     public async Task SendInputUpdate(float steering, float throttle, float brake)
     {
         if (!_isAuthenticated || _udpClient == null || string.IsNullOrEmpty(_currentRoomId))
+        {
+            if (enableDebugLogs)
+                Log($"Cannot send input update - Auth: {_isAuthenticated}, UDP: {_udpClient != null}, Room: {!string.IsNullOrEmpty(_currentRoomId)}");
             return;
-        
+        }
+
         try
         {
             var input = new
@@ -787,19 +838,23 @@ public class SecureNetworkManager : MonoBehaviour
                 },
                 client_id = _sessionId
             };
-            
+
             byte[] data;
-            
+
             if (_udpCrypto != null)
             {
                 data = _udpCrypto.CreatePacket(input);
+                if (enableDebugLogs)
+                    Log($"🔒 Sending encrypted input update ({data.Length} bytes)");
             }
             else
             {
                 string json = JsonConvert.SerializeObject(input);
                 data = Encoding.UTF8.GetBytes(json);
+                if (enableDebugLogs)
+                    LogError($"🔓 Sending UNENCRYPTED input update ({data.Length} bytes) - Security Risk!");
             }
-            
+
             await _udpClient.SendAsync(data, data.Length, _serverUdpEndpoint);
         }
         catch (Exception ex)
@@ -831,7 +886,7 @@ public class SecureNetworkManager : MonoBehaviour
         try
         {
             Dictionary<string, object> update;
-            
+
             // Try to decrypt if possible
             if (_udpCrypto != null && data.Length >= 4)
             {
@@ -839,12 +894,16 @@ public class SecureNetworkManager : MonoBehaviour
                 if (parsedData != null)
                 {
                     update = parsedData;
+                    if (enableDebugLogs)
+                        Log($"🔒 Received encrypted UDP message ({data.Length} bytes)");
                 }
                 else
                 {
                     // Fallback to plain text
                     string json = Encoding.UTF8.GetString(data);
                     update = JsonConvert.DeserializeObject<Dictionary<string, object>>(json);
+                    if (enableDebugLogs)
+                        LogError($"🔓 Received UNENCRYPTED UDP message ({data.Length} bytes) - Security Risk!");
                 }
             }
             else
@@ -852,13 +911,18 @@ public class SecureNetworkManager : MonoBehaviour
                 // Plain text packet
                 string json = Encoding.UTF8.GetString(data);
                 update = JsonConvert.DeserializeObject<Dictionary<string, object>>(json);
+                if (_udpCrypto != null && enableDebugLogs)
+                    LogError($"🔓 Received plain text UDP when encryption available - packet too small or malformed");
             }
-            
+
             if (update == null || !update.ContainsKey("command"))
+            {
+                LogError("Received malformed UDP message - missing command field");
                 return;
-            
+            }
+
             string command = update["command"].ToString();
-            
+
             if (command == "UPDATE")
             {
                 HandlePositionUpdate(update);
@@ -866,6 +930,11 @@ public class SecureNetworkManager : MonoBehaviour
             else if (command == "INPUT")
             {
                 HandleInputUpdate(update);
+            }
+            else
+            {
+                if (enableDebugLogs)
+                    Log($"Received unknown UDP command: {command}");
             }
         }
         catch (Exception ex)
