@@ -2,64 +2,49 @@ using UnityEngine;
 
 public class CameraFollow : MonoBehaviour
 {
-    [Header("GTA V Style Camera Settings")]
+    [Header("Camera Target")]
     public Transform target;
     
-    [Header("Follow Distance & Position")]
-    [Range(2f, 20f)]
-    public float horizontalDistance = 8f; // How far back behind the car
-    [Range(0.5f, 10f)]
-    public float verticalHeight = 3f; // How high above the car
-    [Range(0f, 5f)]
-    public float lookAtHeightOffset = 1.5f; // How much higher to look at on the car
+    [Header("GTA V Style Camera Offset (Easy 3-Axis Control)")]
+    [Tooltip("Camera position relative to car: X=Left/Right, Y=Up/Down, Z=Forward/Back")]
+    public Vector3 cameraOffset = new Vector3(0, 1.8f, -3.5f); // X, Y, Z offset from car
     
-    [Header("Simple Offset-Based Following")]
-    public bool useSimpleOffset = true; // Use the simple, reliable TransformPoint method
-    public Vector3 cameraOffset = new Vector3(0, 3f, -8f); // Local offset from car (X, Y, Z)
+    [Header("Look At Settings")]
+    [Range(0f, 3f)]
+    public float lookAtHeightOffset = 0.5f; // How much higher to look at on the car
     
-    [Header("Debug")]
-    public bool showDebugInfo = false; // Show debug information in console
+    [Header("Camera Behavior")]
+    public bool useFixedGTACamera = true; // Use completely fixed GTA V style camera
+    public float positionSmoothing = 10f; // How smooth the camera movement is
+    public float rotationSmoothing = 8f; // How smooth the camera rotation is
     
-    [Header("Runtime Controls (Optional)")]
-    public KeyCode increaseDistanceKey = KeyCode.Plus;
-    public KeyCode decreaseDistanceKey = KeyCode.Minus;
-    public KeyCode increaseHeightKey = KeyCode.PageUp;
-    public KeyCode decreaseHeightKey = KeyCode.PageDown;
-    public float adjustmentStep = 0.5f;
+    [Header("Ground Protection")]
+    public float minimumHeightAboveGround = 0.8f;
+    public LayerMask groundLayerMask = 1;
+    
+    [Header("Runtime Controls")]
+    [Tooltip("Keys to adjust camera offset in real-time")]
+    public KeyCode resetCameraKey = KeyCode.R;
+    public KeyCode adjustModeKey = KeyCode.C; // Hold to enable adjustment mode
+    
+    // Adjustment keys for 3-axis control
+    [Header("3-Axis Adjustment Keys (Hold C + Key)")]
+    public KeyCode moveForwardKey = KeyCode.W;    // Decrease Z (move closer)
+    public KeyCode moveBackwardKey = KeyCode.S;   // Increase Z (move further)
+    public KeyCode moveLeftKey = KeyCode.A;       // Decrease X (move left)
+    public KeyCode moveRightKey = KeyCode.D;      // Increase X (move right)
+    public KeyCode moveUpKey = KeyCode.Q;         // Increase Y (move up)
+    public KeyCode moveDownKey = KeyCode.E;       // Decrease Y (move down)
+    
+    public float adjustmentStep = 0.1f;
     public bool showAdjustmentFeedback = true;
     
-    [Header("Smoothing")]
-    public float positionSmoothing = 3f;
-    public float rotationSmoothing = 2f;
-    public float bankingSmoothing = 1.5f;
-    
-    [Header("Banking & Tilting")]
-    public float maxBankAngle = 8f; // Maximum banking when turning
-    public float bankingSensitivity = 1f;
-    
-    [Header("Speed Effects")]
-    public float speedPullbackMultiplier = 0.02f; // How much further back at high speed
-    public float maxSpeedPullback = 3f;
-    
-    [Header("Mouse Control")]
-    public float mouseSensitivity = 2f;
-    public float mouseControlTimeout = 3f;
-    public float maxVerticalAngle = 45f;
-    public float minVerticalAngle = -15f;
-    public bool invertMouseY = false;
-    
-    [Header("Mouse Cursor")]
-    public bool lockCursorInGame = true;
-    public KeyCode unlockCursorKey = KeyCode.Escape;
+    [Header("Debug")]
+    public bool showCameraDistance = false;
+    public bool showDebugInfo = false;
 
     // Private variables
-    private float lastMouseInputTime;
-    private float currentMouseX;
-    private float currentMouseY;
-    private bool useMouseControl;
-    private bool cursorLocked = false;
     private CarController targetCarController;
-    private float currentBankAngle = 0f;
     private Vector3 velocity = Vector3.zero;
     
     void Start()
@@ -67,21 +52,12 @@ public class CameraFollow : MonoBehaviour
         // IMPORTANT: Detach camera from any parent to ensure world space operation
         if (transform.parent != null)
         {
-            Debug.Log($"Camera was parented to {transform.parent.name}. Detaching to ensure world space operation.");
+            Debug.Log($"📹 Camera was parented to {transform.parent.name}. Detaching to ensure world space operation.");
             transform.SetParent(null);
         }
         
-        // Initialize camera offset to match current settings
-        cameraOffset = new Vector3(0, verticalHeight, -horizontalDistance);
-        
         // Find and set the local player as target
         FindAndSetLocalPlayerTarget();
-        
-        // Lock cursor at start if option is enabled
-        if (lockCursorInGame)
-        {
-            LockCursor();
-        }
         
         // Initialize camera position if we have a target
         if (target != null)
@@ -92,187 +68,177 @@ public class CameraFollow : MonoBehaviour
     
     void FindAndSetLocalPlayerTarget()
     {
-        // Find local player object with tag
-        GameObject localPlayerObj = GameObject.FindWithTag("Player");
+        // Find the CORRECT player object - must have CarController component and be on Player layer (7)
+        GameObject[] allPlayerTaggedObjects = GameObject.FindGameObjectsWithTag("Player");
+        GameObject localPlayerObj = null;
+        
+        Debug.Log($"📹 Found {allPlayerTaggedObjects.Length} objects with 'Player' tag. Searching for the main car object...");
+        
+        foreach (GameObject obj in allPlayerTaggedObjects)
+        {
+            // Check if this object has CarController component AND is on the Player layer (layer 7)
+            CarController carController = obj.GetComponent<CarController>();
+            if (carController != null && obj.layer == 7)
+            {
+                localPlayerObj = obj;
+                Debug.Log($"📹 Found MAIN player car object: {obj.name} (has CarController and is on Player layer)");
+                break;
+            }
+            else
+            {
+                Debug.Log($"📹 Skipping '{obj.name}' - CarController: {(carController != null ? "YES" : "NO")}, Layer: {obj.layer} (need layer 7)");
+            }
+        }
+        
         if (localPlayerObj != null)
         {
-            target = localPlayerObj.transform;
-            Debug.Log($"Camera set to follow local player: {localPlayerObj.name}");
-            
-            // Cache reference to car controller
-            targetCarController = localPlayerObj.GetComponent<CarController>();
+            SetTarget(localPlayerObj.transform);
+            Debug.Log($"📹 ✅ Successfully set camera target to: {localPlayerObj.name}");
         }
         else
         {
-            Debug.LogWarning("Cannot find a GameObject tagged as 'Player'!");
+            Debug.LogWarning("📹 ⚠️ No suitable player car object found! Make sure your player car has 'Player' tag, CarController component, and is on layer 7.");
         }
     }
     
     void Update()
     {
-        // Handle cursor locking/unlocking
-        if (Input.GetKeyDown(unlockCursorKey))
+        if (target == null)
         {
-            if (cursorLocked)
-                UnlockCursor();
-            else
-                LockCursor();
+            FindAndSetLocalPlayerTarget();
+            return;
         }
         
-        // Handle runtime camera adjustments
-        HandleRuntimeCameraAdjustments();
+        // Handle runtime controls
+        HandleRuntimeControls();
         
-        // Check for active input fields before processing mouse input
-        if (UnityEngine.EventSystems.EventSystem.current != null && 
-            UnityEngine.EventSystems.EventSystem.current.currentSelectedGameObject != null)
+        // Update camera position and rotation
+        UpdateCameraPosition();
+        
+        if (showCameraDistance)
         {
-            // Check if selected object has an input field component
-            if (UnityEngine.EventSystems.EventSystem.current.currentSelectedGameObject.GetComponent<UnityEngine.UI.InputField>() != null ||
-                UnityEngine.EventSystems.EventSystem.current.currentSelectedGameObject.GetComponent<TMPro.TMP_InputField>() != null)
+            DisplayCameraInfo();
+        }
+    }
+    
+    void HandleRuntimeControls()
+    {
+        // Reset camera
+        if (Input.GetKeyDown(resetCameraKey))
+        {
+            ResetToGTAVPosition();
+        }
+        
+        // 3-Axis adjustment mode (hold C + WASD/QE)
+        if (Input.GetKey(adjustModeKey))
+        {
+            bool adjustmentMade = false;
+            Vector3 originalOffset = cameraOffset;
+            
+            // Forward/Backward (Z-axis)
+            if (Input.GetKey(moveForwardKey))
             {
-                // If an input field is active, don't process mouse input for camera
-                return;
+                cameraOffset.z += adjustmentStep; // Move closer (less negative)
+                adjustmentMade = true;
+            }
+            if (Input.GetKey(moveBackwardKey))
+            {
+                cameraOffset.z -= adjustmentStep; // Move further (more negative)
+                adjustmentMade = true;
+            }
+            
+            // Left/Right (X-axis)
+            if (Input.GetKey(moveLeftKey))
+            {
+                cameraOffset.x -= adjustmentStep; // Move left
+                adjustmentMade = true;
+            }
+            if (Input.GetKey(moveRightKey))
+            {
+                cameraOffset.x += adjustmentStep; // Move right
+                adjustmentMade = true;
+            }
+            
+            // Up/Down (Y-axis)
+            if (Input.GetKey(moveUpKey))
+            {
+                cameraOffset.y += adjustmentStep; // Move up
+                adjustmentMade = true;
+            }
+            if (Input.GetKey(moveDownKey))
+            {
+                cameraOffset.y -= adjustmentStep; // Move down
+                adjustmentMade = true;
+            }
+            
+            // Apply constraints
+            cameraOffset.y = Mathf.Clamp(cameraOffset.y, 0.2f, 10f); // Keep reasonable height
+            cameraOffset.z = Mathf.Clamp(cameraOffset.z, -15f, 2f); // Keep reasonable distance
+            cameraOffset.x = Mathf.Clamp(cameraOffset.x, -5f, 5f); // Keep reasonable side offset
+            
+            // Show feedback
+            if (adjustmentMade && showAdjustmentFeedback)
+            {
+                Debug.Log($"📹 Camera Offset: X={cameraOffset.x:F1} Y={cameraOffset.y:F1} Z={cameraOffset.z:F1}");
             }
         }
     }
     
-    void LateUpdate()
+    void UpdateCameraPosition()
     {
-        // If target is null or tagged as remote player, try to find local player again
-        if (target == null || (target != null && target.CompareTag("RemotePlayer")))
-        {
-            FindAndSetLocalPlayerTarget();
-            
-            // If still no target, exit early
-            if (target == null)
-                return;
-        }
-            
-        HandleMouseInput();
+        if (target == null) return;
         
-        useMouseControl = Time.time - lastMouseInputTime < mouseControlTimeout;
-        
-        if (useMouseControl)
+        if (useFixedGTACamera)
         {
-            MouseControlCamera();
+            UpdateGTAVStyleCamera();
         }
         else
         {
-            GTAStyleAutoFollow();
+            UpdateTraditionalCamera();
         }
     }
     
-    void HandleMouseInput()
+    void UpdateGTAVStyleCamera()
     {
-        if (Input.GetAxis("Mouse X") != 0 || Input.GetAxis("Mouse Y") != 0)
+        // Calculate desired position based on car's transform and offset
+        Vector3 desiredPosition = target.TransformPoint(cameraOffset);
+        
+        // Ground protection
+        if (Physics.Raycast(desiredPosition, Vector3.down, out RaycastHit hit, 100f, groundLayerMask))
         {
-            lastMouseInputTime = Time.time;
+            float groundHeight = hit.point.y + minimumHeightAboveGround;
+            if (desiredPosition.y < groundHeight)
+            {
+                desiredPosition.y = groundHeight;
+            }
         }
-    }
-    
-    void MouseControlCamera()
-    {
-        float mouseX = Input.GetAxis("Mouse X") * mouseSensitivity;
-        float mouseY = Input.GetAxis("Mouse Y") * mouseSensitivity;
         
-        // Apply inversion if enabled
-        if (invertMouseY)
-            mouseY = -mouseY;
-        else
-            mouseY = -mouseY; // Default behavior is already inverted
-            
-        currentMouseX += mouseX;
-        currentMouseY += mouseY;
-        currentMouseY = Mathf.Clamp(currentMouseY, minVerticalAngle, maxVerticalAngle);
-        
-        // Calculate position based on mouse rotation
-        Quaternion rotation = Quaternion.Euler(currentMouseY, currentMouseX, 0);
-        // Simple positioning: always behind and above the car
-        Vector3 offset = new Vector3(0, verticalHeight, horizontalDistance);
-        Vector3 desiredPosition = target.position + rotation * offset;
-        
+        // Smooth movement
         transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, 1f / positionSmoothing);
         
-        // Look at target with height offset
-        Vector3 lookTarget = target.position + Vector3.up * lookAtHeightOffset;
-        transform.LookAt(lookTarget);
+        // Calculate look at position
+        Vector3 lookAtPosition = target.position + Vector3.up * lookAtHeightOffset;
+        
+        // Smooth rotation to look at target
+        Vector3 direction = (lookAtPosition - transform.position).normalized;
+        if (direction != Vector3.zero)
+        {
+            Quaternion targetRotation = Quaternion.LookRotation(direction);
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSmoothing * Time.deltaTime);
+        }
     }
     
-    void GTAStyleAutoFollow()
+    void UpdateTraditionalCamera()
     {
-        // INTELLIGENT FAILSAFE: Only detach if camera is actually a child of the target car
-        // This prevents the camera from being incorrectly parented but allows intentional setups
-        if (transform.parent == target)
+        // Traditional camera follow logic (fallback)
+        Vector3 targetPosition = target.position + target.TransformDirection(cameraOffset);
+        transform.position = Vector3.SmoothDamp(transform.position, targetPosition, ref velocity, 1f / positionSmoothing);
+        
+        Vector3 lookAtPosition = target.position + Vector3.up * lookAtHeightOffset;
+        Vector3 direction = (lookAtPosition - transform.position).normalized;
+        if (direction != Vector3.zero)
         {
-            Debug.LogWarning("Camera was directly parented to target car - detaching for independent operation");
-            transform.SetParent(null);
-        }
-        
-        // Get car's velocity for speed-based effects
-        float carSpeed = 0f;
-        Vector3 carVelocity = Vector3.zero;
-        if (targetCarController != null && targetCarController.GetComponent<Rigidbody>() != null)
-        {
-            carVelocity = targetCarController.GetComponent<Rigidbody>().linearVelocity;
-            carSpeed = carVelocity.magnitude;
-        }
-        
-        // Calculate dynamic follow distance based on speed
-        float dynamicDistance = horizontalDistance + Mathf.Min(carSpeed * speedPullbackMultiplier, maxSpeedPullback);
-        
-        // Calculate banking angle based on car's turning
-        float targetBankAngle = 0f;
-        if (targetCarController != null)
-        {
-            // Use the car's angular velocity to determine banking
-            Vector3 angularVel = targetCarController.GetComponent<Rigidbody>().angularVelocity;
-            targetBankAngle = -angularVel.y * bankingSensitivity * maxBankAngle;
-            targetBankAngle = Mathf.Clamp(targetBankAngle, -maxBankAngle, maxBankAngle);
-        }
-        
-        // Smooth the banking angle
-        currentBankAngle = Mathf.Lerp(currentBankAngle, targetBankAngle, bankingSmoothing * Time.deltaTime);
-        
-        // SIMPLE & RELIABLE: Use TransformPoint method like your example
-        Vector3 desiredPosition;
-        
-        if (useSimpleOffset)
-        {
-            // Method 1: Your simple, reliable approach using TransformPoint
-            // Update the offset based on current settings
-            Vector3 dynamicOffset = new Vector3(cameraOffset.x, verticalHeight, -dynamicDistance);
-            desiredPosition = target.TransformPoint(dynamicOffset);
-        }
-        else
-        {
-            // Method 2: Fallback to manual calculation if needed
-            Vector3 backwardDirection = -target.forward;
-            Vector3 horizontalPosition = target.position + backwardDirection * dynamicDistance;
-            desiredPosition = horizontalPosition + Vector3.up * verticalHeight;
-        }
-        
-        // Apply smooth movement
-        transform.position = Vector3.SmoothDamp(transform.position, desiredPosition, ref velocity, 1f / positionSmoothing);
-        
-        // Calculate look target with slight anticipation
-        Vector3 lookTarget = target.position + Vector3.up * lookAtHeightOffset;
-        
-        // Add slight forward anticipation based on car velocity
-        if (carVelocity.magnitude > 5f)
-        {
-            Vector3 anticipation = carVelocity.normalized * Mathf.Min(carSpeed * 0.1f, 2f);
-            lookTarget += anticipation;
-        }
-        
-        // Calculate rotation with banking
-        Vector3 lookDirection = lookTarget - transform.position;
-        if (lookDirection != Vector3.zero)
-        {
-            Quaternion targetRotation = Quaternion.LookRotation(lookDirection);
-            
-            // Apply banking (roll rotation)
-            targetRotation *= Quaternion.Euler(0, 0, currentBankAngle);
-            
+            Quaternion targetRotation = Quaternion.LookRotation(direction);
             transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, rotationSmoothing * Time.deltaTime);
         }
     }
@@ -281,128 +247,98 @@ public class CameraFollow : MonoBehaviour
     {
         if (target == null) return;
         
-        // Use simple and reliable positioning like your example
-        if (useSimpleOffset)
-        {
-            Vector3 initialOffset = new Vector3(cameraOffset.x, verticalHeight, -horizontalDistance);
-            transform.position = target.TransformPoint(initialOffset);
-        }
-        else
-        {
-            Vector3 backwardDirection = -target.forward;
-            Vector3 horizontalPosition = target.position + backwardDirection * horizontalDistance;
-            transform.position = horizontalPosition + Vector3.up * verticalHeight;
-        }
+        // Position camera immediately behind the target
+        Vector3 initialPosition = target.TransformPoint(cameraOffset);
+        transform.position = initialPosition;
         
-        Vector3 lookTarget = target.position + Vector3.up * lookAtHeightOffset;
-        transform.LookAt(lookTarget);
+        // Look at the target
+        Vector3 lookAtPosition = target.position + Vector3.up * lookAtHeightOffset;
+        transform.LookAt(lookAtPosition);
         
-        // Reset mouse control values
-        currentMouseX = transform.eulerAngles.y;
-        currentMouseY = transform.eulerAngles.x;
-        
-        velocity = Vector3.zero;
-        currentBankAngle = 0f;
+        Debug.Log($"📹 Positioned camera behind target at: {initialPosition}");
     }
     
     public void SetTarget(Transform newTarget)
     {
-        if (newTarget == null) return;
-        
-        // IMPORTANT: Ensure camera is never parented to the target
-        if (transform.parent != null)
+        if (newTarget == null)
         {
-            Debug.Log($"Camera was parented to {transform.parent.name}. Detaching for independent operation.");
-            transform.SetParent(null);
+            Debug.LogWarning("📹 ⚠️ Attempted to set null target!");
+            return;
+        }
+        
+        // Enhanced validation: Check if the target has CarController component
+        CarController carController = newTarget.GetComponent<CarController>();
+        if (carController == null)
+        {
+            Debug.LogWarning($"📹 ⚠️ Target '{newTarget.name}' doesn't have CarController component! This might be a child object instead of the main car.");
+            Debug.LogWarning("📹 Attempting to find the correct target...");
+            FindAndSetLocalPlayerTarget();
+            return;
         }
         
         target = newTarget;
+        targetCarController = carController;
         
-        // Cache reference to car controller
-        targetCarController = target.GetComponent<CarController>();
+        // Position camera properly
+        PositionCameraBehindTarget();
         
-        if (target != null)
+        Debug.Log($"📹 ✅ Camera target set to: {newTarget.name} with CarController");
+    }
+    
+    public void ResetToGTAVPosition()
+    {
+        // Enhanced validation: verify target is correct
+        if (target == null || target.GetComponent<CarController>() == null)
         {
-            PositionCameraBehindTarget();
+            Debug.LogWarning("📹 ⚠️ Current target is invalid. Searching for correct target...");
+            FindAndSetLocalPlayerTarget();
+            if (target == null) return;
         }
+        
+        // Reset to GTA V style settings
+        useFixedGTACamera = true;
+        cameraOffset = new Vector3(0, 1.8f, -3.5f);
+        
+        // Position camera immediately
+        PositionCameraBehindTarget();
+        
+        Debug.Log("📹 ✅ Camera reset to GTA V style position");
     }
     
-    // Lock cursor to game window
-    private void LockCursor()
-    {
-        Cursor.lockState = CursorLockMode.Locked;
-        Cursor.visible = false;
-        cursorLocked = true;
-    }
-    
-    // Unlock cursor
-    private void UnlockCursor()
-    {
-        Cursor.lockState = CursorLockMode.None;
-        Cursor.visible = true;
-        cursorLocked = false;
-    }
-    
-    // Call this when exiting game or returning to menu
     public void RestoreCursor()
     {
-        UnlockCursor();
+        // Restore cursor to normal state (unlocked and visible)
+        Cursor.lockState = CursorLockMode.None;
+        Cursor.visible = true;
+        Debug.Log("📹 Cursor state restored to normal");
     }
     
-    void OnDestroy()
+    void DisplayCameraInfo()
     {
-        // Ensure cursor is restored when component is destroyed
-        RestoreCursor();
+        if (target != null)
+        {
+            float distance = Vector3.Distance(transform.position, target.position);
+            Debug.Log($"📹 Distance to target: {distance:F1}m | Offset: {cameraOffset}");
+        }
     }
-
-    void HandleRuntimeCameraAdjustments()
+    
+    void OnDrawGizmosSelected()
     {
-        // Adjust horizontal distance (how far back behind the car)
-        if (Input.GetKeyDown(increaseDistanceKey))
+        if (target != null && showDebugInfo)
         {
-            if (useSimpleOffset)
-            {
-                horizontalDistance = Mathf.Clamp(horizontalDistance + adjustmentStep, 2f, 20f);
-                cameraOffset.z = -horizontalDistance; // Update the offset
-            }
-            else
-            {
-                horizontalDistance = Mathf.Clamp(horizontalDistance + adjustmentStep, 2f, 20f);
-            }
-            if (showAdjustmentFeedback)
-                Debug.Log($"📹 Camera Distance: {horizontalDistance:F1}m (+ / - to adjust)");
-        }
-        if (Input.GetKeyDown(decreaseDistanceKey))
-        {
-            if (useSimpleOffset)
-            {
-                horizontalDistance = Mathf.Clamp(horizontalDistance - adjustmentStep, 2f, 20f);
-                cameraOffset.z = -horizontalDistance; // Update the offset
-            }
-            else
-            {
-                horizontalDistance = Mathf.Clamp(horizontalDistance - adjustmentStep, 2f, 20f);
-            }
-            if (showAdjustmentFeedback)
-                Debug.Log($"📹 Camera Distance: {horizontalDistance:F1}m (+ / - to adjust)");
-        }
-        
-        // Adjust vertical height (how high above the car)
-        if (Input.GetKeyDown(increaseHeightKey))
-        {
-            verticalHeight = Mathf.Clamp(verticalHeight + adjustmentStep, 0.5f, 10f);
-            if (useSimpleOffset)
-                cameraOffset.y = verticalHeight; // Update the offset
-            if (showAdjustmentFeedback)
-                Debug.Log($"📹 Camera Height: {verticalHeight:F1}m (PgUp / PgDn to adjust)");
-        }
-        if (Input.GetKeyDown(decreaseHeightKey))
-        {
-            verticalHeight = Mathf.Clamp(verticalHeight - adjustmentStep, 0.5f, 10f);
-            if (useSimpleOffset)
-                cameraOffset.y = verticalHeight; // Update the offset
-            if (showAdjustmentFeedback)
-                Debug.Log($"📹 Camera Height: {verticalHeight:F1}m (PgUp / PgDn to adjust)");
+            // Draw connection line
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawLine(transform.position, target.position);
+            
+            // Draw offset position
+            Gizmos.color = Color.red;
+            Vector3 offsetPos = target.TransformPoint(cameraOffset);
+            Gizmos.DrawWireSphere(offsetPos, 0.5f);
+            
+            // Draw look at position
+            Gizmos.color = Color.green;
+            Vector3 lookAtPos = target.position + Vector3.up * lookAtHeightOffset;
+            Gizmos.DrawWireSphere(lookAtPos, 0.3f);
         }
     }
 }

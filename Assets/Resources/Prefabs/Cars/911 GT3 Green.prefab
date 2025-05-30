@@ -11,7 +11,7 @@ GameObject:
   - component: {fileID: 5219021614657296848}
   m_Layer: 7
   m_Name: movsteer_dummy
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -43,7 +43,7 @@ GameObject:
   - component: {fileID: 6112319609067923628}
   m_Layer: 7
   m_Name: engine
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -75,7 +75,7 @@ GameObject:
   - component: {fileID: 2438635774539514614}
   m_Layer: 7
   m_Name: wheel_RR
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -146,7 +146,7 @@ GameObject:
   - component: {fileID: 7662835294089755570}
   m_Layer: 7
   m_Name: bonnet_dummy
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -178,7 +178,7 @@ GameObject:
   - component: {fileID: 4465495425970564274}
   m_Layer: 7
   m_Name: bump_rear_dummy
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -300,7 +300,7 @@ GameObject:
   - component: {fileID: 4199976463140182880}
   m_Layer: 7
   m_Name: caliper_rr
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -384,7 +384,7 @@ GameObject:
   - component: {fileID: 8779080304748309449}
   m_Layer: 7
   m_Name: ped_arm
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -418,7 +418,7 @@ GameObject:
   - component: {fileID: 9046136957240274577}
   m_Layer: 7
   m_Name: comet.dff.comet_col.ColMesh
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -525,7 +525,7 @@ GameObject:
   - component: {fileID: 8820770750737261554}
   m_Layer: 7
   m_Name: CenterOfMass
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -558,7 +558,7 @@ GameObject:
   - component: {fileID: 2634672928429326221}
   m_Layer: 7
   m_Name: RearFends2
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -647,7 +647,7 @@ GameObject:
   - component: {fileID: 2820203689587196623}
   m_Layer: 7
   m_Name: headlights.001
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -678,7 +678,7 @@ GameObject:
   - component: {fileID: 4563179417509542349}
   m_Layer: 7
   m_Name: windscreen_dummy
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -712,7 +712,7 @@ GameObject:
   - component: {fileID: 1682671102489775914}
   m_Layer: 7
   m_Name: chassis
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -801,7 +801,7 @@ GameObject:
   - component: {fileID: 252537792864321681}
   m_Layer: 7
   m_Name: taillights
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -832,7 +832,7 @@ GameObject:
   - component: {fileID: 6602482800286126821}
   m_Layer: 7
   m_Name: door_lf_dummy
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -1039,7 +1039,7 @@ GameObject:
   - component: {fileID: 2052365325015685197}
   m_Layer: 7
   m_Name: FrontBump2
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -1132,7 +1132,7 @@ GameObject:
   - component: {fileID: 6896497967257870453}
   m_Layer: 7
   m_Name: rims
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -1221,7 +1221,7 @@ GameObject:
   - component: {fileID: 2837481276254934645}
   m_Layer: 7
   m_Name: rims
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -1310,7 +1310,7 @@ GameObject:
   - component: {fileID: 1614377091053240766}
   m_Layer: 7
   m_Name: chasti
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -1493,7 +1493,7 @@ GameObject:
   - component: {fileID: 5840714317915042252}
   m_Layer: 7
   m_Name: wheel_FR
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -1586,6 +1586,7 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
+  - {fileID: 9099786315227546162}
   - {fileID: 4229868549348491121}
   - {fileID: 5120210797587228801}
   - {fileID: 6112319609067923628}
@@ -1598,7 +1599,6 @@ Transform:
   - {fileID: 9217154305903094410}
   - {fileID: 4769267801851842278}
   - {fileID: 847290326021959498}
-  - {fileID: 9099786315227546162}
   - {fileID: 8820770750737261554}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
@@ -1817,7 +1817,7 @@ GameObject:
   - component: {fileID: 2539118299598985056}
   m_Layer: 7
   m_Name: model
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -1849,7 +1849,7 @@ GameObject:
   - component: {fileID: 2647179489149104385}
   m_Layer: 7
   m_Name: wheel_rf_dummy
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -1881,7 +1881,7 @@ GameObject:
   - component: {fileID: 5120210797587228801}
   m_Layer: 7
   m_Name: chassis_dummy
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -1935,7 +1935,7 @@ GameObject:
   - component: {fileID: 3703941678862277382}
   m_Layer: 7
   m_Name: Main Camera
-  m_TagString: MainCamera
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -2071,30 +2071,27 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   target: {fileID: 0}
-  horizontalDistance: 8
-  verticalHeight: 3
-  lookAtHeightOffset: 1.5
-  showDebugInfo: 0
-  increaseDistanceKey: 43
-  decreaseDistanceKey: 45
-  increaseHeightKey: 280
-  decreaseHeightKey: 281
-  adjustmentStep: 0.5
-  showAdjustmentFeedback: 1
+  cameraOffset: {x: 0, y: 2.6999998, z: -7}
+  lookAtHeightOffset: 0
+  useFixedGTACamera: 1
   positionSmoothing: 3
   rotationSmoothing: 2
-  bankingSmoothing: 1.5
-  maxBankAngle: 8
-  bankingSensitivity: 1
-  speedPullbackMultiplier: 0.02
-  maxSpeedPullback: 3
-  mouseSensitivity: 2
-  mouseControlTimeout: 3
-  maxVerticalAngle: 45
-  minVerticalAngle: -15
-  invertMouseY: 0
-  lockCursorInGame: 1
-  unlockCursorKey: 27
+  minimumHeightAboveGround: 1
+  groundLayerMask:
+    serializedVersion: 2
+    m_Bits: 8
+  resetCameraKey: 114
+  adjustModeKey: 99
+  moveForwardKey: 119
+  moveBackwardKey: 115
+  moveLeftKey: 97
+  moveRightKey: 100
+  moveUpKey: 113
+  moveDownKey: 101
+  adjustmentStep: 0.5
+  showAdjustmentFeedback: 1
+  showCameraDistance: 1
+  showDebugInfo: 0
 --- !u!1 &4130333239285054592
 GameObject:
   m_ObjectHideFlags: 0
@@ -2106,7 +2103,7 @@ GameObject:
   - component: {fileID: 353608359336795636}
   m_Layer: 7
   m_Name: model
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -2140,7 +2137,7 @@ GameObject:
   - component: {fileID: 6964964497225514414}
   m_Layer: 7
   m_Name: caliper_lr
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -2225,7 +2222,7 @@ GameObject:
   - component: {fileID: 5579520465180962469}
   m_Layer: 7
   m_Name: wheel_RL
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -2298,7 +2295,7 @@ GameObject:
   - component: {fileID: 4570193335123266874}
   m_Layer: 7
   m_Name: Spoilers1
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -2383,7 +2380,7 @@ GameObject:
   - component: {fileID: 4247339367480759189}
   m_Layer: 7
   m_Name: model
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -2415,7 +2412,7 @@ GameObject:
   - component: {fileID: 1240913501124166988}
   m_Layer: 7
   m_Name: ped_frontseat
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -2448,7 +2445,7 @@ GameObject:
   - component: {fileID: 5681904469561570944}
   m_Layer: 7
   m_Name: headlightsr
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -2545,7 +2542,7 @@ GameObject:
   - component: {fileID: 3941955225177775510}
   m_Layer: 7
   m_Name: exhaust
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -2576,7 +2573,7 @@ GameObject:
   - component: {fileID: 2005699961349201039}
   m_Layer: 7
   m_Name: wheel_rf_dummy
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -2789,7 +2786,7 @@ GameObject:
   - component: {fileID: 2008652445743731319}
   m_Layer: 7
   m_Name: seats
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -2982,7 +2979,7 @@ GameObject:
   - component: {fileID: 2328455993507754050}
   m_Layer: 7
   m_Name: door_rf_dummy
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -3016,7 +3013,7 @@ GameObject:
   - component: {fileID: 3244280862944829210}
   m_Layer: 7
   m_Name: wheel_FL
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -3089,7 +3086,7 @@ GameObject:
   - component: {fileID: 7274007433434195562}
   m_Layer: 7
   m_Name: interior
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -3190,7 +3187,7 @@ GameObject:
   - component: {fileID: 1086512019617242340}
   m_Layer: 7
   m_Name: wheel_rf_dummy
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -3222,7 +3219,7 @@ GameObject:
   - component: {fileID: 8962649172702981797}
   m_Layer: 7
   m_Name: bump_front_dummy
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -3255,7 +3252,7 @@ GameObject:
   - component: {fileID: 553856140396417685}
   m_Layer: 7
   m_Name: rims
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -3344,7 +3341,7 @@ GameObject:
   - component: {fileID: 8318831712779706985}
   m_Layer: 7
   m_Name: rims
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -3519,7 +3516,7 @@ GameObject:
   - component: {fileID: 5870132979765062847}
   m_Layer: 7
   m_Name: f_shake_mu=0.46
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -3705,7 +3702,7 @@ GameObject:
   - component: {fileID: 3693863734304848267}
   m_Layer: 7
   m_Name: model
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -3918,7 +3915,7 @@ GameObject:
   - component: {fileID: 5387761731761203557}
   m_Layer: 7
   m_Name: RearBump2
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -4011,7 +4008,7 @@ GameObject:
   - component: {fileID: 6277772719555104019}
   m_Layer: 7
   m_Name: wheel_rf_dummy
-  m_TagString: Player
+  m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0

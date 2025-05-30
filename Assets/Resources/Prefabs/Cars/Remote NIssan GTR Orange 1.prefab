@@ -2821,11 +2821,10 @@ GameObject:
   m_Component:
   - component: {fileID: 6989094847141354928}
   - component: {fileID: 4848783751939332194}
-  - component: {fileID: 8461955430043698849}
   - component: {fileID: 5044303739473749021}
-  - component: {fileID: -6481538350933440471}
+  - component: {fileID: 941320746836106449}
   m_Layer: 0
-  m_Name: NIssan GTR Orange
+  m_Name: Remote NIssan GTR Orange 1
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -2881,36 +2880,6 @@ Rigidbody:
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
---- !u!114 &8461955430043698849
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 8645995862949699220}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 62899f850307741f2a39c98a8b639597, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  m_Actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
-  m_NotificationBehavior: 0
-  m_UIInputModule: {fileID: 0}
-  m_DeviceLostEvent:
-    m_PersistentCalls:
-      m_Calls: []
-  m_DeviceRegainedEvent:
-    m_PersistentCalls:
-      m_Calls: []
-  m_ControlsChangedEvent:
-    m_PersistentCalls:
-      m_Calls: []
-  m_ActionEvents: []
-  m_NeverAutoSwitchControlSchemes: 0
-  m_DefaultControlScheme: 
-  m_DefaultActionMap: Player
-  m_SplitScreenIndex: -1
-  m_Camera: {fileID: 0}
 --- !u!82 &5044303739473749021
 AudioSource:
   m_ObjectHideFlags: 0
@@ -3008,7 +2977,7 @@ AudioSource:
     m_PreInfinity: 2
     m_PostInfinity: 2
     m_RotationOrder: 4
---- !u!114 &-6481538350933440471
+--- !u!114 &941320746836106449
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -3017,47 +2986,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 8645995862949699220}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d219e4322dfdb63deabccd7b5a9e4300, type: 3}
+  m_Script: {fileID: 11500000, guid: 5d71451faab844cd3a4920f11a5e8ff8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  wheels:
-  - collider: {fileID: 5091273896336413105}
-    wheelType: 0
-  - collider: {fileID: 7274956767940136545}
-    wheelType: 0
-  - collider: {fileID: 7615202945640936133}
-    wheelType: 1
-  - collider: {fileID: 710846778994940542}
-    wheelType: 1
-  moveInput: {x: 0, y: 0}
-  maxSteer: 30
-  wheelbase: 2.5
-  trackwidth: 1.5
-  powerMultiplier: 3000
-  brakeForce: 6000
-  steeringSpeed: 10
-  returnToZeroSpeed: 15
-  ackermannFactor: 0.85
-  centeringDeadzone: 0.1
-  steeringInputDeadzone: 0.01
-  maxRPM: 9000
-  idleRPM: 1200
-  gearRatios:
-  - 3.5
-  - 2.5
-  - 1.8
-  - 1.3
-  - 1
-  finalDriveRatio: 3.5
-  reverseGearRatio: 3
-  useManualTransmission: 1
-  allowReverseFromNeutral: 1
-  engineIdleClip: {fileID: 8300000, guid: 0c61060f0c07041938101d54b2a9c66b, type: 3}
-  engineRunningClip: {fileID: 8300000, guid: 8cd8a661c6877405f95a10fcd63b8522, type: 3}
-  gearShiftClip: {fileID: 0}
-  minPitch: 0.7
-  maxPitch: 1.5
-  pitchMultiplier: 1
+  positionLerpSpeed: 10
+  rotationLerpSpeed: 8
+  velocityLerpSpeed: 5
+  updateDistanceThreshold: 0.05
+  maxInterpolationTime: 1
 --- !u!1 &8690439574129201461
 GameObject:
   m_ObjectHideFlags: 0
@@ -3327,27 +3263,36 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   target: {fileID: 0}
-  cameraOffset: {x: 0, y: 2.6999998, z: -7}
-  lookAtHeightOffset: 0
-  useFixedGTACamera: 1
-  positionSmoothing: 3
-  rotationSmoothing: 2
+  horizontalDistance: 8
+  verticalHeight: 3
+  lookAtHeightOffset: 1.5
+  useSimpleOffset: 1
+  cameraOffset: {x: 0, y: 3, z: -8}
   minimumHeightAboveGround: 1
   groundLayerMask:
     serializedVersion: 2
-    m_Bits: 8
-  resetCameraKey: 114
-  adjustModeKey: 99
-  moveForwardKey: 119
-  moveBackwardKey: 115
-  moveLeftKey: 97
-  moveRightKey: 100
-  moveUpKey: 113
-  moveDownKey: 101
+    m_Bits: 1
+  showDebugInfo: 0
+  increaseDistanceKey: 43
+  decreaseDistanceKey: 45
+  increaseHeightKey: 280
+  decreaseHeightKey: 281
   adjustmentStep: 0.5
   showAdjustmentFeedback: 1
-  showCameraDistance: 1
-  showDebugInfo: 0
+  positionSmoothing: 3
+  rotationSmoothing: 2
+  bankingSmoothing: 1.5
+  maxBankAngle: 8
+  bankingSensitivity: 1
+  speedPullbackMultiplier: 0.02
+  maxSpeedPullback: 3
+  mouseSensitivity: 2
+  mouseControlTimeout: 3
+  maxVerticalAngle: 45
+  minVerticalAngle: -15
+  invertMouseY: 0
+  lockCursorInGame: 1
+  unlockCursorKey: 27
 --- !u!1 &8986729074315007363
 GameObject:
   m_ObjectHideFlags: 0
