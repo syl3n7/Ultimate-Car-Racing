@@ -215,6 +215,9 @@ public class UIManager : MonoBehaviour
     {
         Debug.Log("Connecting all UI buttons using Inspector references");
         
+        // First, try to find any missing button references automatically
+        FindMissingButtonReferences();
+        
         // Main Menu buttons
         ConnectButtonDirect(playButton, OnPlayButtonClicked, "PlayButton");
         ConnectButtonDirect(instructionsButton, ShowInstructions, "InstructionsButton");
@@ -259,6 +262,111 @@ public class UIManager : MonoBehaviour
         }
     }
 
+    // Automatically find missing button references by searching the scene
+    private void FindMissingButtonReferences()
+    {
+        Debug.Log("Checking for missing button references and attempting to find them automatically...");
+        
+        // Find back buttons by searching for likely GameObject names
+        if (backToMainButton == null)
+        {
+            backToMainButton = FindButtonByNames("BackToMainButton", "Back to Main", "MainMenuBack", "BackButton");
+            if (backToMainButton != null) Debug.Log("Auto-found backToMainButton");
+        }
+        
+        if (backFromMultiplayerButton == null)
+        {
+            backFromMultiplayerButton = FindButtonByNames("BackFromMultiplayerButton", "Back from Multiplayer", "MultiplayerBack", "BackFromMP");
+            if (backFromMultiplayerButton != null) Debug.Log("Auto-found backFromMultiplayerButton");
+        }
+        
+        if (backFromRoomListButton == null)
+        {
+            backFromRoomListButton = FindButtonByNames("BackFromRoomListButton", "Back from Room List", "RoomListBack", "BackFromRooms");
+            if (backFromRoomListButton != null) Debug.Log("Auto-found backFromRoomListButton");
+        }
+
+        // Also check for any buttons that might be in panels and have "back" in their name
+        if (backToMainButton == null || backFromMultiplayerButton == null || backFromRoomListButton == null)
+        {
+            FindBackButtonsInPanels();
+        }
+    }
+
+    // Helper method to find a button by multiple possible names
+    private Button FindButtonByNames(params string[] possibleNames)
+    {
+        foreach (string name in possibleNames)
+        {
+            GameObject buttonObj = GameObject.Find(name);
+            if (buttonObj != null)
+            {
+                Button button = buttonObj.GetComponent<Button>();
+                if (button != null)
+                {
+                    Debug.Log($"Found button with name: {name}");
+                    return button;
+                }
+            }
+        }
+        return null;
+    }
+
+    // Search for back buttons within UI panels
+    private void FindBackButtonsInPanels()
+    {
+        Debug.Log("Searching for back buttons within UI panels...");
+        
+        // Get all buttons in the scene
+        Button[] allButtons = FindObjectsOfType<Button>(true); // Include inactive objects
+        
+        foreach (Button button in allButtons)
+        {
+            string buttonName = button.gameObject.name.ToLower();
+            
+            // Look for buttons with "back" in the name
+            if (buttonName.Contains("back"))
+            {
+                Debug.Log($"Found potential back button: {button.gameObject.name} in {GetPanelName(button.transform)}");
+                
+                // Try to determine which back button this should be based on its parent panel
+                string panelName = GetPanelName(button.transform).ToLower();
+                
+                if (backFromMultiplayerButton == null && (panelName.Contains("multiplayer") || panelName.Contains("mp")))
+                {
+                    backFromMultiplayerButton = button;
+                    Debug.Log($"Auto-assigned {button.gameObject.name} as backFromMultiplayerButton");
+                }
+                else if (backFromRoomListButton == null && (panelName.Contains("room") || panelName.Contains("list")))
+                {
+                    backFromRoomListButton = button;
+                    Debug.Log($"Auto-assigned {button.gameObject.name} as backFromRoomListButton");
+                }
+                else if (backToMainButton == null && (panelName.Contains("profile") || panelName.Contains("main")))
+                {
+                    backToMainButton = button;
+                    Debug.Log($"Auto-assigned {button.gameObject.name} as backToMainButton");
+                }
+            }
+        }
+    }
+
+    // Helper to get the panel name for a button
+    private string GetPanelName(Transform buttonTransform)
+    {
+        Transform current = buttonTransform;
+        while (current != null)
+        {
+            string name = current.gameObject.name.ToLower();
+            if (name.Contains("panel") || name.Contains("menu"))
+            {
+                return current.gameObject.name;
+            }
+            current = current.parent;
+        }
+        return "Unknown Panel";
+    }
+
     // Helper method for direct button connections using Inspector references
     private void ConnectButtonDirect(Button button, UnityEngine.Events.UnityAction action, string buttonName)
     {
@@ -266,11 +374,18 @@ public class UIManager : MonoBehaviour
         {
             button.onClick.RemoveAllListeners();
             button.onClick.AddListener(action);
-            Debug.Log($"Connected button: {buttonName}");
+            Debug.Log($"✓ Connected button: {buttonName}");
         }
         else
         {
-            Debug.LogWarning($"Button not assigned in Inspector: {buttonName}");
+            Debug.LogError($"✗ Button not assigned in Inspector: {buttonName} - This will cause non-functional navigation!");
+            
+            // For back buttons, provide additional guidance
+            if (buttonName.Contains("Back"))
+            {
+                Debug.LogError($"BACK BUTTON MISSING: {buttonName} needs to be connected in Unity Inspector!");
+                Debug.LogError("To fix: Select UIManager in MainMenu scene → Drag the correct back button to the missing field");
+            }
         }
     }
     
@@ -1587,6 +1702,58 @@ public async void CreateRoom()
         if (roomLobbyPanel == null) Debug.LogError("roomLobbyPanel is null!");
         if (connectionPanel == null) Debug.LogError("connectionPanel is null!");
         if (notificationPanel == null) Debug.LogError("notificationPanel is null!");
+        
+        // Add comprehensive button reference check
+        CheckButtonReferences();
+    }
+
+    // Comprehensive button reference validation
+    private void CheckButtonReferences()
+    {
+        Debug.Log("=== BUTTON REFERENCE VALIDATION ===");
+        
+        // Check main menu buttons
+        ValidateButtonReference(playButton, "playButton");
+        ValidateButtonReference(instructionsButton, "instructionsButton");
+        ValidateButtonReference(creditsButton, "creditsButton");
+        ValidateButtonReference(profileButton, "profileButton");
+        ValidateButtonReference(exitButton, "exitButton");
+        
+        // Check back buttons (these are the problematic ones)
+        ValidateButtonReference(backToMainButton, "backToMainButton", true);
+        ValidateButtonReference(backFromMultiplayerButton, "backFromMultiplayerButton", true);
+        ValidateButtonReference(backFromRoomListButton, "backFromRoomListButton", true);
+        
+        // Check other buttons
+        ValidateButtonReference(createProfileButton, "createProfileButton");
+        ValidateButtonReference(createGameButton, "createGameButton");
+        ValidateButtonReference(joinGameButton, "joinGameButton");
+        ValidateButtonReference(createRoomButton, "createRoomButton");
+        ValidateButtonReference(joinRoomButton, "joinRoomButton");
+        ValidateButtonReference(startGameButton, "startGameButton");
+        ValidateButtonReference(leaveGameButton, "leaveGameButton");
+        ValidateButtonReference(loginButton, "loginButton");
+        
+        Debug.Log("=== END BUTTON VALIDATION ===");
+    }
+
+    // Helper method to validate individual button references
+    private void ValidateButtonReference(Button button, string buttonName, bool isCritical = false)
+    {
+        if (button != null)
+        {
+            Debug.Log($"✓ {buttonName}: Connected to '{button.gameObject.name}'");
+        }
+        else
+        {
+            string severity = isCritical ? "CRITICAL" : "WARNING";
+            Debug.LogError($"✗ {severity}: {buttonName} is NULL - Navigation will be broken!");
+            
+            if (isCritical)
+            {
+                Debug.LogError($"SOLUTION: In Unity Editor, select UIManager and drag the {buttonName} from scene hierarchy to Inspector");
+            }
+        }
     }
 
     // Add a periodic refresh of the player list to catch any updates

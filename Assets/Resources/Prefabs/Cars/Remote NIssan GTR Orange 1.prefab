@@ -2893,7 +2893,7 @@ AudioSource:
   m_audioClip: {fileID: 0}
   m_Resource: {fileID: 0}
   m_PlayOnAwake: 1
-  m_Volume: 1
+  m_Volume: 0.4
   m_Pitch: 1
   Loop: 0
   Mute: 0
@@ -3263,36 +3263,27 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   target: {fileID: 0}
-  horizontalDistance: 8
-  verticalHeight: 3
-  lookAtHeightOffset: 1.5
-  useSimpleOffset: 1
   cameraOffset: {x: 0, y: 3, z: -8}
+  lookAtHeightOffset: 1.5
+  useFixedGTACamera: 1
+  positionSmoothing: 3
+  rotationSmoothing: 2
   minimumHeightAboveGround: 1
   groundLayerMask:
     serializedVersion: 2
     m_Bits: 1
-  showDebugInfo: 0
-  increaseDistanceKey: 43
-  decreaseDistanceKey: 45
-  increaseHeightKey: 280
-  decreaseHeightKey: 281
+  resetCameraKey: 114
+  adjustModeKey: 99
+  moveForwardKey: 119
+  moveBackwardKey: 115
+  moveLeftKey: 97
+  moveRightKey: 100
+  moveUpKey: 113
+  moveDownKey: 101
   adjustmentStep: 0.5
   showAdjustmentFeedback: 1
-  positionSmoothing: 3
-  rotationSmoothing: 2
-  bankingSmoothing: 1.5
-  maxBankAngle: 8
-  bankingSensitivity: 1
-  speedPullbackMultiplier: 0.02
-  maxSpeedPullback: 3
-  mouseSensitivity: 2
-  mouseControlTimeout: 3
-  maxVerticalAngle: 45
-  minVerticalAngle: -15
-  invertMouseY: 0
-  lockCursorInGame: 1
-  unlockCursorKey: 27
+  showCameraDistance: 0
+  showDebugInfo: 0
 --- !u!1 &8986729074315007363
 GameObject:
   m_ObjectHideFlags: 0
