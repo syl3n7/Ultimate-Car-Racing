@@ -46,11 +46,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   playerCarPrefabs:
   - {fileID: 2511016263285469459, guid: 102fee037e35aafc0a13666fe87352ca, type: 3}
-  - {fileID: 2511016263285469459, guid: a62c7a4f6320df5e4afcd444253d23a5, type: 3}
-  - {fileID: 2511016263285469459, guid: d7460a2f9ba94803ab9d6da08bee1645, type: 3}
-  - {fileID: 2511016263285469459, guid: 773c89253dbe8fa22aeb4ffe82de9a2d, type: 3}
   - {fileID: 8645995862949699220, guid: c2b3a78a35b3638548537ceda42dbbb8, type: 3}
-  remoteCarPrefab: {fileID: 2511016263285469459, guid: 0205fe074236b9e23b8650fc21299425, type: 3}
+  remoteCarPrefab: {fileID: 2511016263285469459, guid: 10e05736cc2ec81e89646d953191242b, type: 3}
   spawnPoints: []
   respawnHeight: 4
   syncInterval: 0.05
