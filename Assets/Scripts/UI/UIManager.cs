@@ -76,6 +76,9 @@ public class UIManager : MonoBehaviour
     public Button createProfileButton;
     public Button backToMainButton;
     
+    [Header("Instructions Panel Buttons")]
+    public Button backFromInstructionsButton;
+    
     [Header("Multiplayer Panel Buttons")]
     public Button createGameButton;
     public Button joinGameButton;
@@ -229,6 +232,9 @@ public class UIManager : MonoBehaviour
         ConnectButtonDirect(createProfileButton, CreateNewProfile, "CreateProfileButton");
         ConnectButtonDirect(backToMainButton, ShowMainMenu, "BackToMainButton");
         
+        // Instructions panel buttons
+        ConnectButtonDirect(backFromInstructionsButton, ShowMainMenu, "BackFromInstructionsButton");
+        
         // Multiplayer panel buttons
         ConnectButtonDirect(createGameButton, ShowRoomListPanel, "CreateGameButton");
         ConnectButtonDirect(joinGameButton, ShowRoomListPanel, "JoinGameButton");
@@ -285,9 +291,15 @@ public class UIManager : MonoBehaviour
             backFromRoomListButton = FindButtonByNames("BackFromRoomListButton", "Back from Room List", "RoomListBack", "BackFromRooms");
             if (backFromRoomListButton != null) Debug.Log("Auto-found backFromRoomListButton");
         }
+        
+        if (backFromInstructionsButton == null)
+        {
+            backFromInstructionsButton = FindButtonByNames("BackFromInstructionsButton", "Back from Instructions", "InstructionsBack", "BackFromInstructions");
+            if (backFromInstructionsButton != null) Debug.Log("Auto-found backFromInstructionsButton");
+        }
 
         // Also check for any buttons that might be in panels and have "back" in their name
-        if (backToMainButton == null || backFromMultiplayerButton == null || backFromRoomListButton == null)
+        if (backToMainButton == null || backFromMultiplayerButton == null || backFromRoomListButton == null || backFromInstructionsButton == null)
         {
             FindBackButtonsInPanels();
         }
@@ -317,8 +329,8 @@ public class UIManager : MonoBehaviour
     {
         Debug.Log("Searching for back buttons within UI panels...");
         
-        // Get all buttons in the scene
-        Button[] allButtons = FindObjectsOfType<Button>(true); // Include inactive objects
+        // Get all buttons in the scene - using new Unity 2023.1+ API
+        Button[] allButtons = FindObjectsByType<Button>(FindObjectsSortMode.None); // Include all objects
         
         foreach (Button button in allButtons)
         {
@@ -346,6 +358,11 @@ public class UIManager : MonoBehaviour
                 {
                     backToMainButton = button;
                     Debug.Log($"Auto-assigned {button.gameObject.name} as backToMainButton");
+                }
+                else if (backFromInstructionsButton == null && (panelName.Contains("instructions") || panelName.Contains("instruction")))
+                {
+                    backFromInstructionsButton = button;
+                    Debug.Log($"Auto-assigned {button.gameObject.name} as backFromInstructionsButton");
                 }
             }
         }
@@ -1723,6 +1740,7 @@ public async void CreateRoom()
         ValidateButtonReference(backToMainButton, "backToMainButton", true);
         ValidateButtonReference(backFromMultiplayerButton, "backFromMultiplayerButton", true);
         ValidateButtonReference(backFromRoomListButton, "backFromRoomListButton", true);
+        ValidateButtonReference(backFromInstructionsButton, "backFromInstructionsButton", true);
         
         // Check other buttons
         ValidateButtonReference(createProfileButton, "createProfileButton");
