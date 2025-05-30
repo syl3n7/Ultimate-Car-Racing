@@ -787,6 +787,10 @@ MonoBehaviour:
   passwordInput: {fileID: 902718504}
   loginButton: {fileID: 1625091139}
   authStatusText: {fileID: 425488996}
+  networkInfoPanel: {fileID: 1979019095}
+  extraInfoHUD: {fileID: 1355974894}
+  raceHUD: {fileID: 2024558282}
+  consolePanel: {fileID: 732438997}
   playButton: {fileID: 1646967546}
   instructionsButton: {fileID: 21789493}
   creditsButton: {fileID: 510571443}
@@ -801,6 +805,9 @@ MonoBehaviour:
   createRoomButton: {fileID: 1260892500}
   joinRoomButton: {fileID: 2061225408}
   backFromRoomListButton: {fileID: 1747287606}
+  backFromCreditsButton: {fileID: 315423983}
+  backFromProfileButton: {fileID: 1661420335}
+  backFromRoomLobbyButton: {fileID: 1739683868}
   speedText: {fileID: 698476462}
   rpmText: {fileID: 528195192}
   gearText: {fileID: 747916237}
