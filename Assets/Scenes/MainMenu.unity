@@ -794,6 +794,7 @@ MonoBehaviour:
   exitButton: {fileID: 2032474029}
   createProfileButton: {fileID: 23200889}
   backToMainButton: {fileID: 1661420335}
+  backFromInstructionsButton: {fileID: 1444857536}
   createGameButton: {fileID: 1037228526}
   joinGameButton: {fileID: 230269489}
   backFromMultiplayerButton: {fileID: 2009137139}

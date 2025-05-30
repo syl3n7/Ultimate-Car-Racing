@@ -64,6 +64,12 @@ public class UIManager : MonoBehaviour
     public Button loginButton;
     public TextMeshProUGUI authStatusText;
     
+    [Header("Additional UI Panels")]
+    public GameObject networkInfoPanel;
+    public GameObject extraInfoHUD;
+    public GameObject raceHUD;
+    public GameObject consolePanel;
+    
     [Header("Button References")]
     [Header("Main Menu Buttons")]
     public Button playButton;
@@ -88,6 +94,15 @@ public class UIManager : MonoBehaviour
     public Button createRoomButton;
     public Button joinRoomButton;
     public Button backFromRoomListButton;
+    
+    [Header("Credits Panel Buttons")]
+    public Button backFromCreditsButton;
+    
+    [Header("Profile Panel Buttons - Additional")]
+    public Button backFromProfileButton;
+    
+    [Header("Room Lobby Panel Buttons")]
+    public Button backFromRoomLobbyButton;
     
     [Header("Car UI")]
     public TextMeshProUGUI speedText;
@@ -188,22 +203,9 @@ public class UIManager : MonoBehaviour
             networkManager.OnServerMessage += OnServerMessage;
             networkManager.OnRoomPlayersReceived += OnRoomPlayersReceived;
         }
-        
-        // Verify required references
-        if (profileListContent == null)
-        {
-            Debug.LogError("Profile list content is not assigned in the Inspector!");
-        }
-        
-        if (profileListItemPrefab == null)
-        {
-            Debug.LogError("Profile list item prefab is not assigned in the Inspector!");
-        }
 
         // Initialize max players text
         OnMaxPlayersSliderChanged(maxPlayersSlider.value);
-
-        CheckPanelReferences();
 
         // Connect auth panel buttons
         if (loginButton != null)
@@ -216,8 +218,6 @@ public class UIManager : MonoBehaviour
     // Connect all UI buttons using Inspector references
     private void ConnectAllUIButtons()
     {
-        Debug.Log("Connecting all UI buttons using Inspector references");
-        
         // Main Menu buttons
         ConnectButtonDirect(playButton, OnPlayButtonClicked, "PlayButton");
         ConnectButtonDirect(instructionsButton, ShowInstructions, "InstructionsButton");
@@ -230,7 +230,13 @@ public class UIManager : MonoBehaviour
         ConnectButtonDirect(backToMainButton, ShowMainMenu, "BackToMainButton");
         
         // Instructions panel buttons
-        ConnectButtonDirect(backFromInstructionsButton, ShowMainMenu, "BackFromInstructionsButton");
+        ConnectButtonDirect(backFromInstructionsButton, BackFromInstructions, "BackFromInstructionsButton");
+        
+        // Credits panel buttons
+        ConnectButtonDirect(backFromCreditsButton, BackFromCredits, "BackFromCreditsButton");
+        
+        // Profile panel buttons (additional)
+        ConnectButtonDirect(backFromProfileButton, BackFromProfile, "BackFromProfileButton");
         
         // Multiplayer panel buttons
         ConnectButtonDirect(createGameButton, ShowRoomListPanel, "CreateGameButton");
@@ -241,11 +247,12 @@ public class UIManager : MonoBehaviour
         ConnectButtonDirect(createRoomButton, CreateRoom, "CreateRoomButton");
         ConnectButtonDirect(joinRoomButton, JoinSelectedRoom, "JoinRoomButton");
         ConnectButtonDirect(refreshRoomsButton, RefreshRoomList, "RefreshRoomsButton");
-        ConnectButtonDirect(backFromRoomListButton, ShowMultiplayerPanel, "BackFromRoomListButton");
+        ConnectButtonDirect(backFromRoomListButton, BackFromRoomList, "BackFromRoomListButton");
         
         // Room lobby panel buttons
         ConnectButtonDirect(startGameButton, StartGame, "StartGameButton");
         ConnectButtonDirect(leaveGameButton, LeaveRoom, "LeaveGameButton");
+        ConnectButtonDirect(backFromRoomLobbyButton, BackFromRoomLobby, "BackFromRoomLobbyButton");
         
         // Auth panel buttons
         ConnectButtonDirect(loginButton, OnLoginButtonClicked, "LoginButton");
@@ -257,11 +264,6 @@ public class UIManager : MonoBehaviour
             maxPlayersSlider.onValueChanged.AddListener(OnMaxPlayersSliderChanged);
             maxPlayersSlider.maxValue = 20;
             OnMaxPlayersSliderChanged(maxPlayersSlider.value);
-            Debug.Log("Connected MaxPlayersSlider from Inspector reference");
-        }
-        else
-        {
-            Debug.LogWarning("MaxPlayersSlider not assigned in Inspector!");
         }
     }
 
@@ -274,18 +276,6 @@ public class UIManager : MonoBehaviour
         {
             button.onClick.RemoveAllListeners();
             button.onClick.AddListener(action);
-            Debug.Log($"✓ Connected button: {buttonName}");
-        }
-        else
-        {
-            Debug.LogError($"✗ Button not assigned in Inspector: {buttonName} - This will cause non-functional navigation!");
-            
-            // For back buttons, provide additional guidance
-            if (buttonName.Contains("Back"))
-            {
-                Debug.LogError($"BACK BUTTON MISSING: {buttonName} needs to be connected in Unity Inspector!");
-                Debug.LogError("To fix: Select UIManager in MainMenu scene → Drag the correct back button to the missing field");
-            }
         }
     }
     
@@ -317,10 +307,8 @@ public class UIManager : MonoBehaviour
     
     public void ShowMainMenu()
     {
-        Debug.Log("ShowMainMenu called - transitioning to main menu");
         HideAllPanels();
         mainMenuPanel.SetActive(true);
-        Debug.Log($"Main menu panel active: {mainMenuPanel.activeSelf}");
     }
     
     public void ShowInstructions()
@@ -404,27 +392,14 @@ public class UIManager : MonoBehaviour
     
     public void ShowRoomLobbyPanel()
     {
-        Debug.Log("ShowRoomLobbyPanel called - transitioning to lobby view");
-    
         // Check if the panel exists
         if (roomLobbyPanel == null)
         {
-            Debug.LogError("roomLobbyPanel is null! Cannot show room lobby panel.");
             return;
         }
         
         HideAllPanels();
         roomLobbyPanel.SetActive(true);
-        
-        // Verify activation
-        if (!roomLobbyPanel.activeSelf)
-        {
-            Debug.LogError("Failed to activate roomLobbyPanel!");
-        }
-        else
-        {
-            Debug.Log("Room lobby panel is now active");
-        }
         
         // Update room info
         UpdateRoomInfo();
@@ -521,16 +496,37 @@ public class UIManager : MonoBehaviour
         connectionPanel.SetActive(false);
         notificationPanel.SetActive(false);
         
-        // Also hide auth panel if it exists
+        // Hide auth panel if it exists
         if (authPanel != null)
         {
             authPanel.SetActive(false);
         }
         
-        // Also hide loading panel if it exists
+        // Hide loading panel if it exists
         if (loadingPanel != null)
         {
             loadingPanel.SetActive(false);
+        }
+        
+        // Hide additional UI panels if they exist
+        if (networkInfoPanel != null)
+        {
+            networkInfoPanel.SetActive(false);
+        }
+        
+        if (extraInfoHUD != null)
+        {
+            extraInfoHUD.SetActive(false);
+        }
+        
+        if (raceHUD != null)
+        {
+            raceHUD.SetActive(false);
+        }
+        
+        if (consolePanel != null)
+        {
+            consolePanel.SetActive(false);
         }
         
         // Don't hide race UI panels here - they're controlled by scene changes
@@ -540,7 +536,6 @@ public class UIManager : MonoBehaviour
     {
         if (authPanel == null)
         {
-            Debug.LogError("Auth panel is not assigned in the Inspector!");
             return;
         }
         
@@ -598,8 +593,32 @@ public class UIManager : MonoBehaviour
     // Add explicit method for back button functionality
     public void BackFromMultiplayer()
     {
-        Debug.Log("BackFromMultiplayer called");
         ShowMainMenu();
+    }
+    
+    public void BackFromInstructions()
+    {
+        ShowMainMenu();
+    }
+    
+    public void BackFromCredits()
+    {
+        ShowMainMenu();
+    }
+    
+    public void BackFromProfile()
+    {
+        ShowMainMenu();
+    }
+    
+    public void BackFromRoomList()
+    {
+        ShowMultiplayerPanel();
+    }
+    
+    public void BackFromRoomLobby()
+    {
+        ShowRoomListPanel();
     }
     
     #endregion
@@ -608,16 +627,12 @@ public class UIManager : MonoBehaviour
     
     public void CreateNewProfile()
     {
-        Debug.Log("CreateNewProfile called");
         string name = playerNameInput.text;
         if (string.IsNullOrEmpty(name))
         {
             ShowNotification("Please enter a name");
-            Debug.Log("Name was empty");
             return;
         }
-        
-        Debug.Log($"Creating profile for: {name}");
         
         // Generate a player ID
         string id = GenerateUniquePlayerId(name);
@@ -631,8 +646,6 @@ public class UIManager : MonoBehaviour
         
         // Set as current profile
         SelectProfile(profile);
-        
-        Debug.Log("Profile created, showing multiplayer panel");
         
         // Show multiplayer panel
         ShowMultiplayerPanel();
@@ -669,14 +682,12 @@ private void RefreshProfileList()
     // Check if profileListContent is assigned
     if (profileListContent == null)
     {
-        Debug.LogError("Profile list content transform is not assigned in the Inspector!");
         return;
     }
     
     // Check if profileListItemPrefab is assigned
     if (profileListItemPrefab == null)
     {
-        Debug.LogError("Profile list item prefab is not assigned in the Inspector!");
         return;
     }
     
@@ -695,14 +706,12 @@ private void RefreshProfileList()
         Transform nameTextTransform = profileItem.transform.Find("NameText");
         if (nameTextTransform == null)
         {
-            Debug.LogError("NameText child object not found in profile item prefab!");
             continue;
         }
         
         TextMeshProUGUI nameText = nameTextTransform.GetComponent<TextMeshProUGUI>();
         if (nameText == null)
         {
-            Debug.LogError("TextMeshProUGUI component not found on NameText child!");
             continue;
         }
         nameText.text = profile.name;
@@ -710,14 +719,12 @@ private void RefreshProfileList()
         Transform infoTextTransform = profileItem.transform.Find("InfoText");
         if (infoTextTransform == null)
         {
-            Debug.LogError("InfoText child object not found in profile item prefab!");
             continue;
         }
         
         TextMeshProUGUI infoText = infoTextTransform.GetComponent<TextMeshProUGUI>();
         if (infoText == null)
         {
-            Debug.LogError("TextMeshProUGUI component not found on InfoText child!");
             continue;
         }
         infoText.text = $"Last played: {profile.lastPlayed}";
@@ -731,10 +738,6 @@ private void RefreshProfileList()
                 SelectProfile(profileCopy);
                 ShowMultiplayerPanel();
             });
-        }
-        else
-        {
-            Debug.LogError("Button component not found on profile item prefab!");
         }
     }
 }
@@ -770,8 +773,6 @@ private void RefreshProfileList()
     
 public async void CreateRoom()
 {
-    Debug.Log("CreateRoom function called");
-
     // Make sure we have a valid track selected
     if (GameManager.SelectedTrackIndex < 0)
     {
@@ -780,7 +781,6 @@ public async void CreateRoom()
     
     if (SecureNetworkManager.Instance == null)
     {
-        Debug.LogError("SecureNetworkManager.Instance is null");
         ShowNotification("Network manager not available");
         return;
     }
@@ -788,7 +788,6 @@ public async void CreateRoom()
     // Check authentication first
     if (!SecureNetworkManager.Instance.IsAuthenticated())
     {
-        Debug.LogWarning("User must authenticate before creating a room");
         ShowNotification("Please log in before creating a room");
         ShowAuthPanel();
         return;
@@ -800,7 +799,6 @@ public async void CreateRoom()
     // Make sure we're connected before attempting to create a room
     if (!SecureNetworkManager.Instance.IsConnected())
     {
-        Debug.Log("Not connected, connecting first...");
         ShowConnectionPanel("Connecting to server...");
         
         try {
@@ -815,7 +813,6 @@ public async void CreateRoom()
             }
         }
         catch (Exception e) {
-            Debug.LogError($"Connection error: {e.Message}");
             ShowNotification("Connection error: " + e.Message);
             HideConnectionPanel();
             return;
@@ -828,7 +825,6 @@ public async void CreateRoom()
         
     int maxPlayers = (int)maxPlayersSlider.value;
     
-    Debug.Log($"Creating room: {roomName}, Max players: {maxPlayers}");
     try {
         // HostGame is not async and doesn't return a value, it just calls CreateRoom internally
         SecureNetworkManager.Instance.HostGame(roomName, maxPlayers);
@@ -837,7 +833,6 @@ public async void CreateRoom()
         // We don't need to do anything else here, the event system handles it
     }
     catch (Exception e) {
-        Debug.LogError($"Exception during room creation: {e.Message}");
         ShowNotification("Error creating room: " + e.Message);
         HideConnectionPanel();
     }
@@ -880,15 +875,12 @@ public async void CreateRoom()
                 return;
             }
             
-            Debug.Log($"Host is starting game for room: {currentRoomId} with {playersInRoom.Count} players");
-            
             // Send the start game command according to server documentation
             _ = SecureNetworkManager.Instance.StartGame();
         }
         else
         {
             ShowNotification("Cannot start game - connection issue");
-            Debug.LogError("Start game failed: Not connected or no room ID");
         }
     }
     
@@ -919,11 +911,8 @@ public async void CreateRoom()
     // In RefreshRoomList method - update to use NetworkManager
     public async void RefreshRoomList()
     {
-        Debug.Log("RefreshRoomList called");
-        
         if (SecureNetworkManager.Instance == null)
         {
-            Debug.LogError("SecureNetworkManager.Instance is null");
             ShowNotification("Network manager not available");
             return;
         }
@@ -931,7 +920,6 @@ public async void CreateRoom()
         // Check if we're connected to the server
         if (!SecureNetworkManager.Instance.IsConnected())
         {
-            Debug.LogWarning("Not connected to server, attempting to connect...");
             ShowConnectionPanel("Connecting to server...");
             
             try {
@@ -947,7 +935,6 @@ public async void CreateRoom()
                 }
             }
             catch (Exception e) {
-                Debug.LogError($"Connection error: {e.Message}");
                 ShowNotification("Connection error: " + e.Message);
                 HideConnectionPanel();
                 return;
@@ -971,7 +958,6 @@ public async void CreateRoom()
     
     private void ClearRoomList()
     {
-        Debug.Log("Clearing room list UI");
         foreach (Transform child in roomListContent)
         {
             Destroy(child.gameObject);
@@ -985,37 +971,29 @@ public async void CreateRoom()
     
     private void UpdateRoomInfo()
     {
-        // Debug log commented for cleaner console
-        // Debug.Log($"UpdateRoomInfo called - Room: {currentRoomName}, Players: {playersInRoom.Count}, isHost: {isHost}");
-    
         // Check references
         if (roomInfoText == null)
         {
-            Debug.LogError("roomInfoText is null! Cannot update room info text.");
             return;
         }
     
         if (playerCountText == null)
         {
-            Debug.LogError("playerCountText is null! Cannot update player count text.");
             return;
         }
     
         if (startGameButton == null)
         {
-            Debug.LogError("startGameButton is null! Cannot update start game button visibility.");
             return;
         }
     
         if (playerListContent == null)
         {
-            Debug.LogError("playerListContent is null! Cannot update player list.");
             return;
         }
     
         if (playerListItemPrefab == null)
         {
-            Debug.LogError("playerListItemPrefab is null! Cannot create player list items.");
             return;
         }
     
@@ -1025,7 +1003,6 @@ public async void CreateRoom()
     
         // Show/hide start game button based on host status
         startGameButton.gameObject.SetActive(isHost);
-        // Debug.Log($"Start game button visibility set to {isHost} (isHost={isHost})");
         
         // Make sure button is properly interactive
         if (isHost)
@@ -1045,26 +1022,21 @@ public async void CreateRoom()
         }
     
         // Populate player list
-        // Debug.Log($"Adding {playersInRoom.Count} players to player list UI");
         foreach (string playerId in playersInRoom)
         {
-            // Debug.Log($"Creating player item for: {playerId}");
             GameObject playerItem = Instantiate(playerListItemPrefab, playerListContent);
             TextMeshProUGUI playerText = playerItem.GetComponentInChildren<TextMeshProUGUI>();
     
             if (playerText == null)
             {
-                Debug.LogError("TextMeshProUGUI component not found on player list item!");
                 continue;
-            }            string playerDisplayName = playerId;
+            }            
+            string playerDisplayName = playerId;
             if (SecureNetworkManager.Instance != null && playerId == SecureNetworkManager.Instance.GetClientId())
                 playerDisplayName += " (You)";
 
             playerText.text = playerDisplayName;
-            // Debug.Log($"Added player to UI: {playerDisplayName}");
         }
-    
-        // Debug.Log("Room info updated successfully");
     }
     
     #endregion
@@ -1590,72 +1562,6 @@ public async void CreateRoom()
     }
     
     #endregion
-
-    // Add explicit check for panel references
-    private void CheckPanelReferences()
-    {
-        Debug.Log("Checking UI panel references...");
-        
-        if (mainMenuPanel == null) Debug.LogError("mainMenuPanel is null!");
-        if (multiplayerPanel == null) Debug.LogError("multiplayerPanel is null!");
-        if (roomListPanel == null) Debug.LogError("roomListPanel is null!");
-        if (roomLobbyPanel == null) Debug.LogError("roomLobbyPanel is null!");
-        if (connectionPanel == null) Debug.LogError("connectionPanel is null!");
-        if (notificationPanel == null) Debug.LogError("notificationPanel is null!");
-        
-        // Add comprehensive button reference check
-        CheckButtonReferences();
-    }
-
-    // Comprehensive button reference validation
-    private void CheckButtonReferences()
-    {
-        Debug.Log("=== BUTTON REFERENCE VALIDATION ===");
-        
-        // Check main menu buttons
-        ValidateButtonReference(playButton, "playButton");
-        ValidateButtonReference(instructionsButton, "instructionsButton");
-        ValidateButtonReference(creditsButton, "creditsButton");
-        ValidateButtonReference(profileButton, "profileButton");
-        ValidateButtonReference(exitButton, "exitButton");
-        
-        // Check back buttons (these are the problematic ones)
-        ValidateButtonReference(backToMainButton, "backToMainButton", true);
-        ValidateButtonReference(backFromMultiplayerButton, "backFromMultiplayerButton", true);
-        ValidateButtonReference(backFromRoomListButton, "backFromRoomListButton", true);
-        ValidateButtonReference(backFromInstructionsButton, "backFromInstructionsButton", true);
-        
-        // Check other buttons
-        ValidateButtonReference(createProfileButton, "createProfileButton");
-        ValidateButtonReference(createGameButton, "createGameButton");
-        ValidateButtonReference(joinGameButton, "joinGameButton");
-        ValidateButtonReference(createRoomButton, "createRoomButton");
-        ValidateButtonReference(joinRoomButton, "joinRoomButton");
-        ValidateButtonReference(startGameButton, "startGameButton");
-        ValidateButtonReference(leaveGameButton, "leaveGameButton");
-        ValidateButtonReference(loginButton, "loginButton");
-        
-        Debug.Log("=== END BUTTON VALIDATION ===");
-    }
-
-    // Helper method to validate individual button references
-    private void ValidateButtonReference(Button button, string buttonName, bool isCritical = false)
-    {
-        if (button != null)
-        {
-            Debug.Log($"✓ {buttonName}: Connected to '{button.gameObject.name}'");
-        }
-        else
-        {
-            string severity = isCritical ? "CRITICAL" : "WARNING";
-            Debug.LogError($"✗ {severity}: {buttonName} is NULL - Navigation will be broken!");
-            
-            if (isCritical)
-            {
-                Debug.LogError($"SOLUTION: In Unity Editor, select UIManager and drag the {buttonName} from scene hierarchy to Inspector");
-            }
-        }
-    }
 
     // Add a periodic refresh of the player list to catch any updates
     private float lastPlayerListRefreshTime = 0f;
