@@ -1,11 +1,13 @@
 using System;
 using System.Security.Cryptography;
 using System.Text;
-using Newtonsoft.Json;
+using System.Collections.Generic;
+using UnityEngine;
 
 /// <summary>
-/// UDP encryption handler for secure communication with the racing server
+/// High-performance UDP encryption for MP-Server protocol
 /// Implements AES-256-CBC encryption with session-specific keys
+/// Full compliance with MP-Server security standards
 /// </summary>
 public class UdpEncryption
 {
@@ -59,9 +61,12 @@ public class UdpEncryption
         }
     }
     
+    /// <summary>
+    /// Create encrypted packet with length header (MP-Server format)
+    /// </summary>
     public byte[] CreatePacket(object data)
     {
-        var json = JsonConvert.SerializeObject(data);
+        var json = JsonUtility.ToJson(data);
         var encryptedData = Encrypt(json);
         
         // Create packet with length header
@@ -72,6 +77,9 @@ public class UdpEncryption
         return packet;
     }
     
+    /// <summary>
+    /// Parse encrypted packet and deserialize (MP-Server format)
+    /// </summary>
     public T ParsePacket<T>(byte[] packetData)
     {
         if (packetData.Length < 4)
@@ -88,6 +96,33 @@ public class UdpEncryption
         if (string.IsNullOrEmpty(json))
             return default(T);
         
-        return JsonConvert.DeserializeObject<T>(json);
+        try
+        {
+            return JsonUtility.FromJson<T>(json);
+        }
+        catch (Exception)
+        {
+            return default(T);
+        }
+    }
+    
+    /// <summary>
+    /// Verify encryption is working correctly
+    /// </summary>
+    public bool TestEncryption()
+    {
+        try
+        {
+            var testData = new { command = "TEST", timestamp = DateTime.UtcNow };
+            var packet = CreatePacket(testData);
+            var parsed = ParsePacket<Dictionary<string, object>>(packet);
+            
+            return parsed != null && parsed.ContainsKey("command") && 
+                   parsed["command"].ToString() == "TEST";
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

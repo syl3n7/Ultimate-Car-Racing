@@ -103,6 +103,9 @@ public class GameManager : MonoBehaviour
             Instance = this;
             DontDestroyOnLoad(gameObject);
             Debug.Log("GameManager initialized as singleton");
+            
+            // Subscribe to network events
+            SetupNetworkEventSubscriptions();
         }
         else if (Instance != this)
         {
@@ -115,11 +118,38 @@ public class GameManager : MonoBehaviour
         UnityEngine.SceneManagement.SceneManager.sceneLoaded += OnSceneLoaded;
     }
 
+    private void SetupNetworkEventSubscriptions()
+    {
+        // Wait a frame to ensure SecureNetworkManager instance is available
+        StartCoroutine(DelayedNetworkSubscription());
+    }
+
+    private IEnumerator DelayedNetworkSubscription()
+    {
+        yield return null; // Wait one frame
+        
+        if (SecureNetworkManager.Instance != null)
+        {
+            SecureNetworkManager.Instance.OnPlayerPositionUpdate += HandlePlayerPositionUpdate;
+            SecureNetworkManager.Instance.OnPlayerInputUpdate += HandlePlayerInputUpdate;
+            SecureNetworkManager.Instance.OnGameStarted += HandleGameStarted;
+            Debug.Log("GameManager subscribed to network events");
+        }
+    }
+
     void OnDestroy()
     {
         if (Instance == this)
         {
             UnityEngine.SceneManagement.SceneManager.sceneLoaded -= OnSceneLoaded;
+            
+            // Unsubscribe from network events
+            if (SecureNetworkManager.Instance != null)
+            {
+                SecureNetworkManager.Instance.OnPlayerPositionUpdate -= HandlePlayerPositionUpdate;
+                SecureNetworkManager.Instance.OnPlayerInputUpdate -= HandlePlayerInputUpdate;
+                SecureNetworkManager.Instance.OnGameStarted -= HandleGameStarted;
+            }
         }
     }
 
@@ -262,28 +292,18 @@ public class GameManager : MonoBehaviour
         // Broadcast "scene ready" message to other players
         if (NetworkManager != null && isMultiplayerGame)
         {
-            string currentRoomId = NetworkManager.GetCurrentRoomId();
+            string currentRoomId = NetworkManager.CurrentRoomId;
             
             if (!string.IsNullOrEmpty(currentRoomId))
             {
-                Dictionary<string, object> getPlayersMsg = new Dictionary<string, object>
-                {
-                    { "command", "GET_ROOM_PLAYERS" },
-                    { "roomId", currentRoomId }
-                };
-                
-                _ = NetworkManager.SendTcpMessage(getPlayersMsg);
                 yield return new WaitForSeconds(0.5f);
                 
-                Dictionary<string, object> readyMessage = new Dictionary<string, object>
+                string hostId = NetworkManager.CurrentRoomHostId;
+                if (!string.IsNullOrEmpty(hostId))
                 {
-                    { "command", "RELAY_MESSAGE" },
-                    { "targetId", NetworkManager.GetRoomHostId() },
-                    { "message", $"SCENE_READY:{localPlayerId}" }
-                };
-                
-                _ = NetworkManager.SendTcpMessage(readyMessage);
-                Debug.Log($"Sent SCENE_READY message to room host");
+                    _ = NetworkManager.SendMessageAsync(hostId, $"SCENE_READY:{localPlayerId}");
+                    Debug.Log($"Sent SCENE_READY message to room host");
+                }
             }
             else
             {
@@ -295,7 +315,7 @@ public class GameManager : MonoBehaviour
     // In Update method - update to use NetworkManager
     void Update()
     {
-        if (isMultiplayerGame && NetworkManager != null && NetworkManager.IsConnected() && sceneFullyLoaded)
+        if (isMultiplayerGame && NetworkManager != null && NetworkManager.IsConnected && sceneFullyLoaded)
         {
             // Only sync state when scene is fully loaded
             if (Time.time - lastStateSyncTime > syncInterval)
@@ -331,7 +351,7 @@ public class GameManager : MonoBehaviour
             var stateData = GetPlayerState(localPlayerId);
             if (stateData != null && NetworkManager != null)
             {
-                NetworkManager.SendPlayerState(stateData);
+                _ = NetworkManager.SendPositionUpdateAsync(stateData.position, stateData.rotation);
             }
         }
     }
@@ -354,7 +374,7 @@ public class GameManager : MonoBehaviour
             var stateData = GetPlayerState(localPlayerId);
             if (stateData != null && NetworkManager != null)
             {
-                NetworkManager.SendPlayerState(stateData);
+                _ = NetworkManager.SendPositionUpdateAsync(stateData.position, stateData.rotation);
                 Debug.Log($"Sent state update to newly ready player {playerId}");
             }
         }
@@ -366,7 +386,7 @@ public class GameManager : MonoBehaviour
             var inputData = GetPlayerInput(localPlayerId);
             if (inputData != null && NetworkManager != null)
             {
-                NetworkManager.SendPlayerInput(inputData);
+                _ = NetworkManager.SendInputUpdateAsync(inputData.steering, inputData.throttle, inputData.brake);
             }
         }
     }
@@ -390,7 +410,7 @@ public class GameManager : MonoBehaviour
         // Check if we're in a multiplayer game
         if (isMultiplayerGame && NetworkManager != null)
         {
-            localPlayerId = NetworkManager.GetClientId();
+            localPlayerId = NetworkManager.SessionId;
             
             // Use multiplayer spawn position - ADD RESPAWN HEIGHT to Y value
             Vector3 spawnPosition = new Vector3(
@@ -628,10 +648,10 @@ public class GameManager : MonoBehaviour
     private void DisableInputComponents(GameObject carObject)
     {
         // Disable PlayerInput component if it exists
-        PlayerInput playerInput = carObject.GetComponent<PlayerInput>();
-        if (playerInput != null)
+        var playerInputComponent = carObject.GetComponent<UnityEngine.InputSystem.PlayerInput>();
+        if (playerInputComponent != null)
         {
-            playerInput.enabled = false;
+            playerInputComponent.enabled = false;
         }
         
         // Disable any input-related script components
@@ -945,4 +965,60 @@ public class GameManager : MonoBehaviour
             activePlayers.Remove(playerId);
         }
     }
+    
+    #region Network Event Handlers
+    
+    private void HandlePlayerPositionUpdate(PlayerUpdate playerUpdate)
+    {
+        if (playerUpdate.SessionId == localPlayerId)
+            return; // Skip our own updates
+            
+        // Convert PlayerUpdate to PlayerStateData for compatibility
+        var stateData = new PlayerStateData
+        {
+            playerId = playerUpdate.SessionId,
+            position = playerUpdate.Position,
+            rotation = playerUpdate.Rotation,
+            velocity = Vector3.zero, // Not provided in new structure
+            angularVelocity = Vector3.zero, // Not provided in new structure
+            timestamp = playerUpdate.Timestamp
+        };
+        
+        ApplyPlayerState(stateData);
+    }
+    
+    private void HandlePlayerInputUpdate(PlayerInput playerInput)
+    {
+        if (playerInput.SessionId == localPlayerId)
+            return; // Skip our own updates
+            
+        // Convert PlayerInput to PlayerInputData for compatibility
+        var inputData = new PlayerInputData
+        {
+            playerId = playerInput.SessionId,
+            steering = playerInput.Steering,
+            throttle = playerInput.Throttle,
+            brake = playerInput.Brake,
+            timestamp = playerInput.Timestamp
+        };
+        
+        ApplyPlayerInput(inputData);
+    }
+    
+    private void HandleGameStarted(GameStartData gameData)
+    {
+        Debug.Log($"Game started in room {gameData.RoomId}");
+        
+        // Set spawn positions for all players
+        if (gameData.SpawnPositions != null && gameData.SpawnPositions.ContainsKey(localPlayerId))
+        {
+            var spawnPos = gameData.SpawnPositions[localPlayerId];
+            SetMultiplayerSpawnPosition(spawnPos);
+        }
+        
+        // Load the race scene
+        LoadRaceScene(SelectedTrackIndex);
+    }
+    
+    #endregion
 }

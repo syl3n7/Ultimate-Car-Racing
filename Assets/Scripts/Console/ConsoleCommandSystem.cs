@@ -204,9 +204,9 @@ public class ConsoleCommandSystem : MonoBehaviour
     {
         if (SecureNetworkManager.Instance != null)
         {
-            if (SecureNetworkManager.Instance.IsConnected())
+            if (SecureNetworkManager.Instance.IsConnected)
             {
-                _ = SecureNetworkManager.Instance.Disconnect();
+                _ = SecureNetworkManager.Instance.DisconnectAsync();
                 AddOutput("Disconnecting from server...");
             }
             else
@@ -224,7 +224,7 @@ public class ConsoleCommandSystem : MonoBehaviour
     {
         if (SecureNetworkManager.Instance != null)
         {
-            SecureNetworkManager.Instance.serverHost = address;
+            SecureNetworkManager.Instance.ServerHost = address;
             AddOutput("Note: Changes will take effect on next connection.");
         }
         else
@@ -237,7 +237,7 @@ public class ConsoleCommandSystem : MonoBehaviour
     {
         if (SecureNetworkManager.Instance != null)
         {
-            SecureNetworkManager.Instance.serverPort = port;
+            SecureNetworkManager.Instance.ServerPort = port;
             AddOutput("Note: Changes will take effect on next connection.");
         }
         else
@@ -284,15 +284,14 @@ public class ConsoleCommandSystem : MonoBehaviour
         {
             var networkManager = SecureNetworkManager.Instance;
             AddOutput("=== Connection Status ===");
-            AddOutput($"Server: {networkManager.serverHost}:{networkManager.serverPort}");
-            AddOutput($"Connected: {networkManager.IsConnected()}");
-            AddOutput($"Authenticated: {networkManager.IsAuthenticated()}");
-            AddOutput($"Player: {networkManager.playerName}");
+            AddOutput($"Connected: {networkManager.IsConnected}");
+            AddOutput($"Authenticated: {networkManager.IsAuthenticated}");
+            AddOutput($"Player: {networkManager.PlayerName}");
             
-            if (networkManager.IsConnected())
+            if (networkManager.IsConnected)
             {
-                AddOutput($"Session ID: {networkManager.GetClientId()}");
-                string roomId = networkManager.GetCurrentRoomId();
+                AddOutput($"Session ID: {networkManager.SessionId}");
+                string roomId = networkManager.CurrentRoomId;
                 if (!string.IsNullOrEmpty(roomId))
                 {
                     AddOutput($"Room: {roomId}");

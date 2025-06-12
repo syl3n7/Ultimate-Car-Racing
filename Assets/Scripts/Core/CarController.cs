@@ -132,10 +132,10 @@ public class CarController : MonoBehaviour
             moveInput = Vector2.zero;
         }
         
-        PlayerInput playerInput = GetComponent<PlayerInput>();
-        if (playerInput != null)
+        var playerInputComponent = GetComponent<UnityEngine.InputSystem.PlayerInput>();
+        if (playerInputComponent != null)
         {
-            playerInput.enabled = enabled;
+            playerInputComponent.enabled = enabled;
         }
     }
 

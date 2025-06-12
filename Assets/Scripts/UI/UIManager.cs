@@ -6,7 +6,6 @@ using UnityEngine.UI;
 using TMPro;
 using UnityEngine.SceneManagement;
 using System.IO;
-using Newtonsoft.Json;
 
 public class UIManager : MonoBehaviour
 {
@@ -64,6 +63,23 @@ public class UIManager : MonoBehaviour
     public Button loginButton;
     public TextMeshProUGUI authStatusText;
     
+    [Header("Profile Management UI")]
+    public GameObject registerPanel;
+    public TMP_InputField registerUsernameInput;
+    public TMP_InputField registerPasswordInput;
+    public TMP_InputField registerConfirmPasswordInput;
+    public Button registerButton;
+    public Button backFromRegisterButton;
+    public TextMeshProUGUI registerStatusText;
+    
+    [Header("Login UI")]
+    public GameObject loginPanel;
+    public TMP_InputField loginUsernameInput;
+    public TMP_InputField loginPasswordInput;
+    public Button loginSubmitButton;
+    public Button backFromLoginButton;
+    public TextMeshProUGUI loginStatusText;
+    
     [Header("Additional UI Panels")]
     public GameObject networkInfoPanel;
     public GameObject extraInfoHUD;
@@ -99,6 +115,7 @@ public class UIManager : MonoBehaviour
     public Button backFromCreditsButton;
     
     [Header("Profile Panel Buttons - Additional")]
+    public Button deleteProfileButton;
     public Button backFromProfileButton;
     
     [Header("Room Lobby Panel Buttons")]
@@ -123,16 +140,29 @@ public class UIManager : MonoBehaviour
     public GameObject networkStatsPanel;  // Panel specifically for network stats
     private bool isRaceUIVisible = false;
 
+    [Header("Confirmation Dialog")]
+    public GameObject confirmationPanel;
+    public TextMeshProUGUI confirmationText;
+    public Button confirmYesButton;
+    public Button confirmNoButton;
+    
+    // Profile management state
+    private ProfileData selectedProfile;
+
     private CarController playerCarController;
     private bool carUIInitialized = false;
+    
+    // Profile management state
+    private ProfileData selectedProfile;
+    private bool isFirstTimeRegistration = false;
     
     // Player profile data
     private string playerName = "Player";
     private string playerId;
     private List<ProfileData> savedProfiles = new List<ProfileData>();
     
-    // Room management
-    private List<Dictionary<string, object>> roomList = new List<Dictionary<string, object>>();
+    // Room management - Updated for MP-Server protocol
+    private List<RoomInfo> roomList = new List<RoomInfo>();
     private List<string> playersInRoom = new List<string>();
     private string currentRoomId;
     private string currentRoomName;
@@ -144,11 +174,35 @@ public class UIManager : MonoBehaviour
         public string name;
         public string id;
         public string lastPlayed;
+        public string password; // Store encrypted password for local profile management
+        public bool hasPassword; // Flag to indicate if password is set
         
         public ProfileData(string name, string id)
         {
             this.name = name;
             this.id = id;
+            this.lastPlayed = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            this.password = "";
+            this.hasPassword = false;
+        }
+        
+        public ProfileData(string name, string id, string password)
+        {
+            this.name = name;
+            this.id = id;
+            this.lastPlayed = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            this.password = password;
+            this.hasPassword = !string.IsNullOrEmpty(password);
+        }
+        
+        public void SetPassword(string encryptedPassword)
+        {
+            this.password = encryptedPassword;
+            this.hasPassword = !string.IsNullOrEmpty(encryptedPassword);
+        }
+        
+        public void UpdateLastPlayed()
+        {
             this.lastPlayed = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
         }
     }
@@ -187,21 +241,22 @@ public class UIManager : MonoBehaviour
         // Auto-connect all UI buttons
         ConnectAllUIButtons();
         
-        // Register for network events
+        // Register for network events - MP-Server protocol events
         SecureNetworkManager networkManager = SecureNetworkManager.Instance;
         if (networkManager != null)
         {
-            networkManager.OnConnected += (msg) => OnConnected();
-            networkManager.OnDisconnected += (msg) => OnDisconnected();
-            networkManager.OnConnectionFailed += (msg) => OnConnectionFailed();
+            networkManager.OnConnected += OnConnected;
+            networkManager.OnDisconnected += OnDisconnected;
+            networkManager.OnConnectionFailed += OnConnectionFailed;
+            networkManager.OnAuthenticationChanged += OnAuthenticationChanged;
+            networkManager.OnRoomCreated += OnRoomCreated;
+            networkManager.OnRoomJoined += OnRoomJoined;
             networkManager.OnRoomListReceived += OnRoomListReceived;
-            networkManager.OnGameHosted += OnGameHosted;
-            networkManager.OnRoomJoined += OnJoinedGame;
-            networkManager.OnPlayerJoined += OnPlayerJoined;
-            networkManager.OnPlayerDisconnected += OnPlayerLeftRoom;
             networkManager.OnGameStarted += OnGameStarted;
-            networkManager.OnServerMessage += OnServerMessage;
-            networkManager.OnRoomPlayersReceived += OnRoomPlayersReceived;
+            networkManager.OnPlayerPositionUpdate += OnPlayerPositionUpdate;
+            networkManager.OnPlayerInputUpdate += OnPlayerInputUpdate;
+            networkManager.OnMessageReceived += OnMessageReceived;
+            networkManager.OnError += OnNetworkError;
         }
 
         // Initialize max players text
@@ -223,7 +278,7 @@ public class UIManager : MonoBehaviour
         ConnectButtonDirect(instructionsButton, ShowInstructions, "InstructionsButton");
         ConnectButtonDirect(creditsButton, ShowCredits, "CreditsButton");
         ConnectButtonDirect(profileButton, ShowProfilePanel, "ProfileButton");
-        ConnectButtonDirect(exitButton, ExitGame, "ExitButton");
+        ConnectButtonDirect(exitButton, Application.Quit, "ExitButton");
         
         // Profile panel buttons
         ConnectButtonDirect(createProfileButton, CreateNewProfile, "CreateProfileButton");
@@ -237,6 +292,16 @@ public class UIManager : MonoBehaviour
         
         // Profile panel buttons (additional)
         ConnectButtonDirect(backFromProfileButton, BackFromProfile, "BackFromProfileButton");
+        ConnectButtonDirect(deleteProfileButton, DeleteSelectedProfile, "DeleteProfileButton");
+        
+        // Registration panel buttons
+        ConnectButtonDirect(registerButton, OnRegisterButtonClicked, "RegisterButton");
+        ConnectButtonDirect(backFromRegisterButton, BackFromRegister, "BackFromRegisterButton");
+        
+        // Login panel buttons
+        ConnectButtonDirect(loginSubmitButton, OnLoginSubmitButtonClicked, "LoginSubmitButton");
+        ConnectButtonDirect(backFromLoginButton, BackFromLogin, "BackFromLoginButton");
+        ConnectButtonDirect(deleteProfileButton, DeleteSelectedProfile, "DeleteProfileButton");
         
         // Multiplayer panel buttons
         ConnectButtonDirect(createGameButton, ShowRoomListPanel, "CreateGameButton");
@@ -279,24 +344,25 @@ public class UIManager : MonoBehaviour
         }
     }
     
-    // In OnDestroy method - replace NetworkClient references with SecureNetworkManager
+    // In OnDestroy method - unsubscribe from MP-Server events
     void OnDestroy()
     {
         // Unregister network events
         SecureNetworkManager networkManager = SecureNetworkManager.Instance;
         if (networkManager != null)
         {
-            networkManager.OnConnected -= (msg) => OnConnected();
-            networkManager.OnDisconnected -= (msg) => OnDisconnected();
-            networkManager.OnConnectionFailed -= (msg) => OnConnectionFailed();
+            networkManager.OnConnected -= OnConnected;
+            networkManager.OnDisconnected -= OnDisconnected;
+            networkManager.OnConnectionFailed -= OnConnectionFailed;
+            networkManager.OnAuthenticationChanged -= OnAuthenticationChanged;
+            networkManager.OnRoomCreated -= OnRoomCreated;
+            networkManager.OnRoomJoined -= OnRoomJoined;
             networkManager.OnRoomListReceived -= OnRoomListReceived;
-            networkManager.OnGameHosted -= OnGameHosted;
-            networkManager.OnRoomJoined -= OnJoinedGame;
-            networkManager.OnPlayerJoined -= OnPlayerJoined;
-            networkManager.OnPlayerDisconnected -= OnPlayerLeftRoom;
             networkManager.OnGameStarted -= OnGameStarted;
-            networkManager.OnServerMessage -= OnServerMessage;
-            networkManager.OnRoomPlayersReceived -= OnRoomPlayersReceived;
+            networkManager.OnPlayerPositionUpdate -= OnPlayerPositionUpdate;
+            networkManager.OnPlayerInputUpdate -= OnPlayerInputUpdate;
+            networkManager.OnMessageReceived -= OnMessageReceived;
+            networkManager.OnError -= OnNetworkError;
         }
         
         // Unregister scene loading event
@@ -346,10 +412,10 @@ public class UIManager : MonoBehaviour
         multiplayerPanel.SetActive(true);
         
         // Connect to server if not already connected
-        if (SecureNetworkManager.Instance != null && !SecureNetworkManager.Instance.IsConnected())
+        if (SecureNetworkManager.Instance != null && !SecureNetworkManager.Instance.IsConnected)
         {
             ShowConnectionPanel("Connecting to server...");
-            _ = SecureNetworkManager.Instance.Connect();
+            _ = SecureNetworkManager.Instance.ConnectToServerAsync();
         }
     }
     public void OnPlayButtonClicked()
@@ -363,12 +429,21 @@ public class UIManager : MonoBehaviour
         return;
     }
     
-    // If SecureNetworkManager exists, check if authenticated
-    if (SecureNetworkManager.Instance != null && !SecureNetworkManager.Instance.IsAuthenticated())
+    // Profile exists, check if we need to authenticate
+    if (SecureNetworkManager.Instance == null || !SecureNetworkManager.Instance.IsAuthenticated)
     {
-        // Show authentication panel first
-        ShowAuthPanel();
-        ShowNotification("Please log in to continue");
+        // Find the current profile and show appropriate auth screen
+        var currentProfile = savedProfiles.Find(p => p.id == playerId);
+        if (currentProfile != null)
+        {
+            SelectProfileForAuthentication(currentProfile);
+        }
+        else
+        {
+            // Profile data is inconsistent, show profile selection
+            ShowProfilePanel();
+            ShowNotification("Please select a profile to continue");
+        }
         return;
     }
     
@@ -502,6 +577,18 @@ public class UIManager : MonoBehaviour
             authPanel.SetActive(false);
         }
         
+        // Hide registration panel if it exists
+        if (registerPanel != null)
+        {
+            registerPanel.SetActive(false);
+        }
+        
+        // Hide login panel if it exists
+        if (loginPanel != null)
+        {
+            loginPanel.SetActive(false);
+        }
+        
         // Hide loading panel if it exists
         if (loadingPanel != null)
         {
@@ -527,6 +614,12 @@ public class UIManager : MonoBehaviour
         if (consolePanel != null)
         {
             consolePanel.SetActive(false);
+        }
+        
+        // Hide confirmation panel if it exists
+        if (confirmationPanel != null)
+        {
+            confirmationPanel.SetActive(false);
         }
         
         // Don't hide race UI panels here - they're controlled by scene changes
@@ -576,16 +669,16 @@ public class UIManager : MonoBehaviour
             // Set the credentials in NetworkManager
             SecureNetworkManager.Instance.SetCredentials(username, password);
             
-            // Update local player name and attempt to reconnect
+            // Update local player name
             playerName = username;
             
             // Show connection panel
             ShowConnectionPanel("Authenticating...");
             
             // If not connected, connect
-            if (!SecureNetworkManager.Instance.IsConnected())
+            if (!SecureNetworkManager.Instance.IsConnected)
             {
-                _ = SecureNetworkManager.Instance.Connect();
+                _ = SecureNetworkManager.Instance.ConnectToServerAsync();
             }
         }
     }
@@ -634,21 +727,28 @@ public class UIManager : MonoBehaviour
             return;
         }
         
+        // Check if name already exists
+        var existingProfile = savedProfiles.Find(p => p.name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (existingProfile != null)
+        {
+            ShowNotification("Profile name already exists. Please choose a different name.");
+            return;
+        }
+        
         // Generate a player ID
         string id = GenerateUniquePlayerId(name);
         
-        // Create new profile
+        // Create new profile without password (will be set during registration)
         ProfileData profile = new ProfileData(name, id);
         savedProfiles.Add(profile);
         
         // Save to disk
         SaveProfiles();
         
-        // Set as current profile
-        SelectProfile(profile);
-        
-        // Show multiplayer panel
-        ShowMultiplayerPanel();
+        // Set as selected profile and show registration
+        selectedProfile = profile;
+        isFirstTimeRegistration = true;
+        ShowRegisterPanel();
     }
     
     private string GenerateUniquePlayerId(string name)
@@ -668,10 +768,13 @@ public class UIManager : MonoBehaviour
         playerId = profile.id;
         
         // Update UI
-        currentProfileText.text = $"Profile: {playerName}";
+        if (currentProfileText != null)
+        {
+            currentProfileText.text = $"Profile: {playerName}";
+        }
         
         // Update profile's last played time
-        profile.lastPlayed = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        profile.UpdateLastPlayed();
         SaveProfiles();
         
         ShowNotification($"Welcome, {playerName}!");
@@ -697,46 +800,86 @@ private void RefreshProfileList()
         Destroy(child.gameObject);
     }
     
+    // Show message if no profiles exist
+    if (savedProfiles.Count == 0)
+    {
+        GameObject noProfilesText = new GameObject("NoProfilesText");
+        noProfilesText.transform.SetParent(profileListContent, false);
+        TextMeshProUGUI textComponent = noProfilesText.AddComponent<TextMeshProUGUI>();
+        textComponent.text = "No profiles found. Create your first profile!";
+        textComponent.fontSize = 18;
+        textComponent.alignment = TextAlignmentOptions.Center;
+        textComponent.color = Color.gray;
+        return;
+    }
+    
     // Add profiles
     foreach (ProfileData profile in savedProfiles)
     {
         GameObject profileItem = Instantiate(profileListItemPrefab, profileListContent);
         
-        // Check for required child objects
-        Transform nameTextTransform = profileItem.transform.Find("NameText");
-        if (nameTextTransform == null)
+        // Try to use ProfileListItem component first
+        ProfileListItem profileListItem = profileItem.GetComponent<ProfileListItem>();
+        if (profileListItem != null)
         {
-            continue;
+            // Use the enhanced ProfileListItem component
+            profileListItem.Initialize(profile);
+            profileListItem.OnProfileSelected += SelectProfileForAuthentication;
+            profileListItem.OnProfileDeleted += DeleteProfile;
         }
-        
+        else
+        {
+            // Fallback to manual setup for backward compatibility
+            SetupProfileItemManually(profileItem, profile);
+        }
+    }
+}
+
+private void SetupProfileItemManually(GameObject profileItem, ProfileData profile)
+{
+    // Check for required child objects
+    Transform nameTextTransform = profileItem.transform.Find("NameText");
+    if (nameTextTransform != null)
+    {
         TextMeshProUGUI nameText = nameTextTransform.GetComponent<TextMeshProUGUI>();
-        if (nameText == null)
+        if (nameText != null)
         {
-            continue;
+            nameText.text = profile.name;
         }
-        nameText.text = profile.name;
-        
-        Transform infoTextTransform = profileItem.transform.Find("InfoText");
-        if (infoTextTransform == null)
-        {
-            continue;
-        }
-        
+    }
+    
+    Transform infoTextTransform = profileItem.transform.Find("InfoText");
+    if (infoTextTransform != null)
+    {
         TextMeshProUGUI infoText = infoTextTransform.GetComponent<TextMeshProUGUI>();
-        if (infoText == null)
+        if (infoText != null)
         {
-            continue;
+            string statusText = profile.hasPassword ? "Ready to play" : "Setup required";
+            infoText.text = $"Last played: {profile.lastPlayed} • {statusText}";
         }
-        infoText.text = $"Last played: {profile.lastPlayed}";
-        
-        // Set button callback
-        Button selectButton = profileItem.GetComponent<Button>();
-        if (selectButton != null)
+    }
+    
+    // Set button callback for selection
+    Button selectButton = profileItem.GetComponent<Button>();
+    if (selectButton != null)
+    {
+        ProfileData profileCopy = profile; // Create a copy for the closure
+        selectButton.onClick.AddListener(() => {
+            selectedProfile = profileCopy;
+            SelectProfileForAuthentication(profileCopy);
+        });
+    }
+    
+    // Look for delete button in the profile item
+    Transform deleteButtonTransform = profileItem.transform.Find("DeleteButton");
+    if (deleteButtonTransform != null)
+    {
+        Button deleteButton = deleteButtonTransform.GetComponent<Button>();
+        if (deleteButton != null)
         {
             ProfileData profileCopy = profile; // Create a copy for the closure
-            selectButton.onClick.AddListener(() => {
-                SelectProfile(profileCopy);
-                ShowMultiplayerPanel();
+            deleteButton.onClick.AddListener(() => {
+                DeleteProfile(profileCopy);
             });
         }
     }
@@ -767,102 +910,126 @@ private void RefreshProfileList()
         }
     }
     
+    public void DeleteSelectedProfile()
+    {
+        if (selectedProfile == null)
+        {
+            ShowNotification("No profile selected to delete");
+            return;
+        }
+        
+        DeleteProfile(selectedProfile);
+    }
+    
     #endregion
     
-    #region Room Management
+    #region Room Management - MP-Server Protocol
     
-public async void CreateRoom()
-{
-    // Make sure we have a valid track selected
-    if (GameManager.SelectedTrackIndex < 0)
+    public async void CreateRoom()
     {
-        GameManager.SelectedTrackIndex = 0; // Set to default track
-    }
-    
-    if (SecureNetworkManager.Instance == null)
-    {
-        ShowNotification("Network manager not available");
-        return;
-    }
-    
-    // Check authentication first
-    if (!SecureNetworkManager.Instance.IsAuthenticated())
-    {
-        ShowNotification("Please log in before creating a room");
-        ShowAuthPanel();
-        return;
-    }
-    
-    // Show connection panel immediately to provide feedback
-    ShowConnectionPanel("Creating room...");
-    
-    // Make sure we're connected before attempting to create a room
-    if (!SecureNetworkManager.Instance.IsConnected())
-    {
-        ShowConnectionPanel("Connecting to server...");
+        // Make sure we have a valid track selected
+        if (GameManager.SelectedTrackIndex < 0)
+        {
+            GameManager.SelectedTrackIndex = 0; // Set to default track
+        }
         
-        try {
-            // Connect() returns a Task, not a bool
-            await SecureNetworkManager.Instance.Connect();
+        if (SecureNetworkManager.Instance == null)
+        {
+            ShowNotification("Network manager not available");
+            return;
+        }
+        
+        // Check authentication first
+        if (!SecureNetworkManager.Instance.IsAuthenticated)
+        {
+            ShowNotification("Please log in before creating a room");
+            ShowAuthPanel();
+            return;
+        }
+        
+        // Show connection panel immediately to provide feedback
+        ShowConnectionPanel("Creating room...");
+        
+        // Make sure we're connected before attempting to create a room
+        if (!SecureNetworkManager.Instance.IsConnected)
+        {
+            ShowConnectionPanel("Connecting to server...");
             
-            // Check if we're connected after the await
-            if (!SecureNetworkManager.Instance.IsConnected()) {
-                ShowNotification("Could not connect to server");
+            try 
+            {
+                await SecureNetworkManager.Instance.ConnectToServerAsync();
+                
+                // Check if we're connected after the await
+                if (!SecureNetworkManager.Instance.IsConnected) 
+                {
+                    ShowNotification("Could not connect to server");
+                    HideConnectionPanel();
+                    return;
+                }
+            }
+            catch (Exception e) 
+            {
+                ShowNotification("Connection error: " + e.Message);
                 HideConnectionPanel();
                 return;
             }
         }
-        catch (Exception e) {
-            ShowNotification("Connection error: " + e.Message);
+        
+        string roomName = createRoomNameInput.text;
+        if (string.IsNullOrEmpty(roomName))
+            roomName = $"{playerName}'s Room";
+        
+        try 
+        {
+            await SecureNetworkManager.Instance.CreateRoomAsync(roomName);
+            // The actual feedback will come through the OnRoomCreated event callback
+        }
+        catch (Exception e) 
+        {
+            ShowNotification("Error creating room: " + e.Message);
             HideConnectionPanel();
-            return;
         }
     }
     
-    string roomName = createRoomNameInput.text;
-    if (string.IsNullOrEmpty(roomName))
-        roomName = $"{playerName}'s Room";
-        
-    int maxPlayers = (int)maxPlayersSlider.value;
-    
-    try {
-        // HostGame is not async and doesn't return a value, it just calls CreateRoom internally
-        SecureNetworkManager.Instance.HostGame(roomName, maxPlayers);
-        
-        // The actual feedback will come through the OnGameHosted event callback
-        // We don't need to do anything else here, the event system handles it
-    }
-    catch (Exception e) {
-        ShowNotification("Error creating room: " + e.Message);
-        HideConnectionPanel();
-    }
-}
-    
-    // In JoinSelectedRoom method - update to use NetworkManager
-    public void JoinSelectedRoom()
+    // Join selected room using MP-Server protocol
+    public async void JoinSelectedRoom()
     {
-        if (currentRoomId != null && SecureNetworkManager.Instance != null && SecureNetworkManager.Instance.IsConnected())
+        if (string.IsNullOrEmpty(currentRoomId))
+        {
+            ShowNotification("Please select a room to join");
+            return;
+        }
+        
+        if (SecureNetworkManager.Instance != null && SecureNetworkManager.Instance.IsConnected)
         {
             ShowConnectionPanel("Joining room...");
-            SecureNetworkManager.Instance.JoinGame(currentRoomId);
+            try
+            {
+                await SecureNetworkManager.Instance.JoinRoomAsync(currentRoomId);
+                // The actual feedback will come through the OnRoomJoined event callback
+            }
+            catch (Exception e)
+            {
+                ShowNotification("Error joining room: " + e.Message);
+                HideConnectionPanel();
+            }
         }
         else
         {
-            ShowNotification("Please select a room to join");
+            ShowNotification("Not connected to server");
         }
     }
     
-    // In StartGame method - update to use NetworkManager with server protocol
-    public void StartGame()
+    // Start game using MP-Server protocol
+    public async void StartGame()
     {
         if (!isHost)
         {
-            // According to SERVER-README.md, only the host can start the game
             ShowNotification("Only the host can start the game");
             return;
         }
         
-        if (SecureNetworkManager.Instance != null && SecureNetworkManager.Instance.IsConnected() && !string.IsNullOrEmpty(currentRoomId))
+        if (SecureNetworkManager.Instance != null && SecureNetworkManager.Instance.IsConnected && !string.IsNullOrEmpty(currentRoomId))
         {
             // Show visual feedback
             ShowConnectionPanel("Starting game...");
@@ -875,8 +1042,16 @@ public async void CreateRoom()
                 return;
             }
             
-            // Send the start game command according to server documentation
-            _ = SecureNetworkManager.Instance.StartGame();
+            try
+            {
+                await SecureNetworkManager.Instance.StartGameAsync();
+                // The actual feedback will come through the OnGameStarted event callback
+            }
+            catch (Exception e)
+            {
+                ShowNotification("Error starting game: " + e.Message);
+                HideConnectionPanel();
+            }
         }
         else
         {
@@ -884,31 +1059,29 @@ public async void CreateRoom()
         }
     }
     
-    public void LeaveRoom()
+    public async void LeaveRoom()
     {
-        if (SecureNetworkManager.Instance != null && SecureNetworkManager.Instance.IsConnected())
+        if (SecureNetworkManager.Instance != null && SecureNetworkManager.Instance.IsConnected)
         {
-            _ = SecureNetworkManager.Instance.LeaveGame();
-            ShowRoomListPanel();
-            
-            // Reset room state
-            currentRoomId = null;
-            currentRoomName = null;
-            isHost = false;
-            playersInRoom.Clear();
+            try
+            {
+                await SecureNetworkManager.Instance.LeaveRoomAsync();
+                ShowRoomListPanel();
+                
+                // Reset room state
+                currentRoomId = null;
+                currentRoomName = null;
+                isHost = false;
+                playersInRoom.Clear();
+            }
+            catch (Exception e)
+            {
+                ShowNotification("Error leaving room: " + e.Message);
+            }
         }
     }
     
-    public void ExitGame()
-    {
-        #if UNITY_EDITOR
-        UnityEditor.EditorApplication.isPlaying = false;
-        #else
-        Application.Quit();
-        #endif
-    }
-    
-    // In RefreshRoomList method - update to use NetworkManager
+    // Refresh room list using MP-Server protocol
     public async void RefreshRoomList()
     {
         if (SecureNetworkManager.Instance == null)
@@ -918,23 +1091,24 @@ public async void CreateRoom()
         }
         
         // Check if we're connected to the server
-        if (!SecureNetworkManager.Instance.IsConnected())
+        if (!SecureNetworkManager.Instance.IsConnected)
         {
             ShowConnectionPanel("Connecting to server...");
             
-            try {
-                // Connect returns Task, not Task<bool>
-                await SecureNetworkManager.Instance.Connect();
+            try 
+            {
+                await SecureNetworkManager.Instance.ConnectToServerAsync();
                 
                 // Check connection status after awaiting
-                if (!SecureNetworkManager.Instance.IsConnected())
+                if (!SecureNetworkManager.Instance.IsConnected)
                 {
                     ShowNotification("Failed to connect to server");
                     HideConnectionPanel();
                     return;
                 }
             }
-            catch (Exception e) {
+            catch (Exception e) 
+            {
                 ShowNotification("Connection error: " + e.Message);
                 HideConnectionPanel();
                 return;
@@ -953,7 +1127,15 @@ public async void CreateRoom()
         textComponent.alignment = TextAlignmentOptions.Center;
         
         // Request room list from server - this triggers the OnRoomListReceived event callback
-        _ = SecureNetworkManager.Instance.RequestRoomList();
+        try
+        {
+            await SecureNetworkManager.Instance.RequestRoomListAsync();
+        }
+        catch (Exception e)
+        {
+            ShowNotification("Error requesting room list: " + e.Message);
+            ClearRoomList();
+        }
     }
     
     private void ClearRoomList()
@@ -972,27 +1154,8 @@ public async void CreateRoom()
     private void UpdateRoomInfo()
     {
         // Check references
-        if (roomInfoText == null)
-        {
-            return;
-        }
-    
-        if (playerCountText == null)
-        {
-            return;
-        }
-    
-        if (startGameButton == null)
-        {
-            return;
-        }
-    
-        if (playerListContent == null)
-        {
-            return;
-        }
-    
-        if (playerListItemPrefab == null)
+        if (roomInfoText == null || playerCountText == null || startGameButton == null || 
+            playerListContent == null || playerListItemPrefab == null)
         {
             return;
         }
@@ -1022,6 +1185,7 @@ public async void CreateRoom()
         }
     
         // Populate player list
+        string sessionId = SecureNetworkManager.Instance?.SessionId;
         foreach (string playerId in playersInRoom)
         {
             GameObject playerItem = Instantiate(playerListItemPrefab, playerListContent);
@@ -1031,8 +1195,9 @@ public async void CreateRoom()
             {
                 continue;
             }            
+            
             string playerDisplayName = playerId;
-            if (SecureNetworkManager.Instance != null && playerId == SecureNetworkManager.Instance.GetClientId())
+            if (!string.IsNullOrEmpty(sessionId) && playerId == sessionId)
                 playerDisplayName += " (You)";
 
             playerText.text = playerDisplayName;
@@ -1041,36 +1206,276 @@ public async void CreateRoom()
     
     #endregion
     
-    #region Network Event Handlers
+    #region Network Event Handlers - MP-Server Protocol
     
-    private void OnConnected()
+    private void OnConnected(string message)
+    {
+        HideConnectionPanel();
+        ShowNotification($"Connected: {message}");
+    }
+    
+    private void OnDisconnected(string message)
+    {
+        HideConnectionPanel();
+        ShowMainMenu();
+        ShowNotification($"Disconnected: {message}");
+    }
+    
+    private void OnConnectionFailed(string message)
+    {
+        HideConnectionPanel();
+        ShowMainMenu();
+        ShowNotification($"Connection failed: {message}");
+    }
+    
+    private void OnAuthenticationChanged(bool isAuthenticated)
+    {
+        if (isAuthenticated)
+        {
+            HideConnectionPanel();
+            ShowNotification("Authentication successful");
+        }
+        else
+        {
+            ShowAuthPanel("Authentication failed. Please try again.");
+        }
+    }
+    
+    private void OnRoomCreated(RoomInfo roomInfo)
     {
         HideConnectionPanel();
         
-        // According to SERVER-README.md section 3.2, only NAME is needed for registration
-        // SecureNetworkManager already sent the NAME command during connection
+        currentRoomId = roomInfo.Id;
+        currentRoomName = roomInfo.Name;
+        isHost = true; // Creator is always host
         
-        // Just for extra in-game information, we can use PLAYER_INFO command to get details
-        if (SecureNetworkManager.Instance != null)
+        // Add self to players list
+        string sessionId = SecureNetworkManager.Instance?.SessionId;
+        playersInRoom.Clear();
+        if (!string.IsNullOrEmpty(sessionId))
         {
-            _ = SecureNetworkManager.Instance.RequestPlayerInfo();
+            playersInRoom.Add(sessionId);
         }
         
-        ShowNotification("Connected to server");
+        Debug.Log($"Room created: ID={currentRoomId}, Name={currentRoomName}, SessionID={sessionId}, isHost={isHost}");
+        
+        ShowRoomLobbyPanel();
+        UpdateRoomInfo();
+        ShowNotification("Room created successfully");
     }
     
-    private void OnDisconnected()
+    private void OnRoomJoined(RoomInfo roomInfo)
     {
         HideConnectionPanel();
-        ShowMainMenu();
-        ShowNotification("Disconnected from server");
+        
+        currentRoomId = roomInfo.Id;
+        currentRoomName = roomInfo.Name ?? "Unknown Room";
+        
+        // Determine if we're the host
+        string sessionId = SecureNetworkManager.Instance?.SessionId;
+        isHost = (roomInfo.HostId == sessionId);
+        
+        // Add self to players list
+        playersInRoom.Clear();
+        if (!string.IsNullOrEmpty(sessionId))
+        {
+            playersInRoom.Add(sessionId);
+        }
+        
+        Debug.Log($"Joined room: ID={currentRoomId}, SessionID={sessionId}, HostID={roomInfo.HostId}, isHost={isHost}");
+        
+        ShowRoomLobbyPanel();
+        UpdateRoomInfo();
+        ShowNotification("Joined room successfully");
     }
     
-    private void OnConnectionFailed()
+    private void OnRoomListReceived(List<RoomInfo> rooms)
     {
         HideConnectionPanel();
-        ShowMainMenu();
-        ShowNotification("Failed to connect to server");
+        
+        // Clear previous room list
+        ClearRoomList();
+        
+        roomList = rooms ?? new List<RoomInfo>();
+        
+        Debug.Log($"Received room list with {roomList.Count} rooms");
+        
+        if (roomList.Count == 0)
+        {
+            // Add a message to the UI when no rooms are available
+            GameObject emptyListText = new GameObject("EmptyListText");
+            emptyListText.transform.SetParent(roomListContent, false);
+            TextMeshProUGUI textComponent = emptyListText.AddComponent<TextMeshProUGUI>();
+            textComponent.text = "No rooms available. Create one!";
+            textComponent.fontSize = 24;
+            textComponent.alignment = TextAlignmentOptions.Center;
+            return;
+        }
+        
+        foreach (var room in roomList)
+        {
+            Debug.Log($"Processing room: ID={room.Id}, Name={room.Name}, Players={room.PlayerCount}, Active={room.IsActive}");
+            
+            // Create room list item
+            GameObject roomItem = Instantiate(roomListItemPrefab, roomListContent);
+            RoomListItem roomListItem = roomItem.GetComponent<RoomListItem>();
+            
+            if (roomListItem == null)
+            {
+                Debug.LogError("RoomListItem component not found on instantiated prefab!");
+                Destroy(roomItem);
+                continue;
+            }
+            
+            try
+            {
+                // Skip empty room IDs
+                if (string.IsNullOrEmpty(room.Id))
+                {
+                    Debug.LogWarning("Skipping room with empty ID");
+                    Destroy(roomItem);
+                    continue;
+                }
+                
+                Debug.Log($"Initializing room UI: ID={room.Id}, Name={room.Name}, Players={room.PlayerCount}");
+                roomListItem.Initialize(room.Id, room.Name, room.PlayerCount, 20); // Default max players
+                roomListItem.OnSelected += OnRoomSelected;
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"Error initializing room list item: {e.Message}\nRoom data: {JsonUtility.ToJson(room)}");
+                Destroy(roomItem);
+            }
+        }
+    }
+    
+    private void OnGameStarted(GameStartData gameData)
+    {
+        HideConnectionPanel();
+        
+        // Show clear feedback to the user that the game is starting
+        ShowNotification("Game starting! Loading race track...");
+        
+        Debug.Log($"OnGameStarted received with RoomId: {gameData.RoomId}");
+        
+        // Check for spawn positions
+        if (gameData.SpawnPositions != null && gameData.SpawnPositions.Count > 0)
+        {
+            // Get the current client's session ID to find their spawn position
+            string sessionId = SecureNetworkManager.Instance?.SessionId;
+            if (string.IsNullOrEmpty(sessionId))
+            {
+                Debug.LogError("Session ID is null or empty when trying to get spawn position!");
+                ShowNotification("Error: Session ID not found. Please restart the game.");
+                return;
+            }
+            
+            // Look for this client's spawn position
+            if (gameData.SpawnPositions.TryGetValue(sessionId, out Vector3 spawnPosition))
+            {
+                Debug.Log($"Found spawn position for session {sessionId}: {spawnPosition}");
+                
+                // Hide UI and ensure all panels are disabled before loading scene
+                HideAllPanels();
+                
+                // Set spawn position in GameManager BEFORE loading scene
+                if (GameManager.Instance != null)
+                {
+                    // Set the spawn position and index before loading the scene
+                    int spawnIndex = new List<string>(gameData.SpawnPositions.Keys).IndexOf(sessionId);
+                    GameManager.Instance.SetMultiplayerSpawnPosition(spawnPosition, spawnIndex);
+                    
+                    // Load the race track scene
+                    string sceneName = "RaceTrack";
+                    
+                    Debug.Log($"Loading race scene: {sceneName} (immediate scene transition)");
+                    
+                    // Force GC collection before loading scene to reduce potential stutter
+                    System.GC.Collect();
+                    
+                    // Use the LoadSceneAsync method with an immediate callback to ensure the scene loads
+                    StartCoroutine(LoadRaceSceneAsync(sceneName));
+                }
+                else
+                {
+                    Debug.LogError("GameManager.Instance is null when trying to start game!");
+                    ShowNotification("Error: Game manager not found. Please restart the game.");
+                }
+            }
+            else
+            {
+                Debug.LogError($"Spawn position not found for session ID: {sessionId} in spawn positions!");
+                ShowNotification("Error: Your spawn position was not assigned. Please try again.");
+            }
+        }
+        else
+        {
+            Debug.LogError("Spawn position data missing in game start message!");
+            ShowNotification("Error: Missing spawn data. Please try again.");
+        }
+    }
+    
+    private void OnPlayerPositionUpdate(PlayerUpdate playerUpdate)
+    {
+        // Handle position updates from other players
+        // This can be forwarded to GameManager if needed
+        if (GameManager.Instance != null)
+        {
+            // Convert PlayerUpdate to format expected by GameManager
+            var playerData = new Dictionary<string, object>
+            {
+                ["sessionId"] = playerUpdate.SessionId,
+                ["position"] = new Dictionary<string, float>
+                {
+                    ["x"] = playerUpdate.Position.x,
+                    ["y"] = playerUpdate.Position.y,
+                    ["z"] = playerUpdate.Position.z
+                },
+                ["rotation"] = new Dictionary<string, float>
+                {
+                    ["x"] = playerUpdate.Rotation.x,
+                    ["y"] = playerUpdate.Rotation.y,
+                    ["z"] = playerUpdate.Rotation.z,
+                    ["w"] = playerUpdate.Rotation.w
+                },
+                ["timestamp"] = playerUpdate.Timestamp
+            };
+            
+            // Forward to GameManager (if it has a method to handle this)
+            // GameManager.Instance.HandlePlayerUpdate(playerData);
+        }
+    }
+    
+    private void OnPlayerInputUpdate(PlayerInput playerInput)
+    {
+        // Handle input updates from other players
+        // This can be forwarded to GameManager if needed
+        if (GameManager.Instance != null)
+        {
+            var inputData = new Dictionary<string, object>
+            {
+                ["sessionId"] = playerInput.SessionId,
+                ["steering"] = playerInput.Steering,
+                ["throttle"] = playerInput.Throttle,
+                ["brake"] = playerInput.Brake,
+                ["timestamp"] = playerInput.Timestamp
+            };
+            
+            // Forward to GameManager (if it has a method to handle this)
+            // GameManager.Instance.HandlePlayerInput(inputData);
+        }
+    }
+    
+    private void OnMessageReceived(RelayMessage message)
+    {
+        ShowNotification($"{message.SenderName}: {message.Message}");
+        Debug.Log($"Message from {message.SenderName} ({message.SenderId}): {message.Message}");
+    }
+    
+    private void OnNetworkError(string error)
+    {
+        ShowNotification($"Network error: {error}");
+        Debug.LogError($"Network error: {error}");
     }
     
     private void OnRoomListReceived(Dictionary<string, object> message)
@@ -1080,7 +1485,7 @@ public async void CreateRoom()
         // Clear previous room list
         ClearRoomList();
         
-        Debug.Log($"UIManager.OnRoomListReceived: {JsonConvert.SerializeObject(message)}");
+        Debug.Log($"UIManager.OnRoomListReceived: {JsonUtility.ToJson(message)}");
         
         // Parse room list from message
         if (message.ContainsKey("rooms"))
@@ -1092,9 +1497,16 @@ public async void CreateRoom()
                 // Handle different possible types
                 List<Dictionary<string, object>> roomList = null;
                 
-                if (roomsObj is Newtonsoft.Json.Linq.JArray jArray)
+                if (roomsObj is List<object> objectList)
                 {
-                    roomList = jArray.ToObject<List<Dictionary<string, object>>>();
+                    roomList = new List<Dictionary<string, object>>();
+                    foreach (var item in objectList)
+                    {
+                        if (item is Dictionary<string, object> dict)
+                        {
+                            roomList.Add(dict);
+                        }
+                    }
                 }
                 else if (roomsObj is List<Dictionary<string, object>> directList)
                 {
@@ -1128,7 +1540,7 @@ public async void CreateRoom()
                 
                 foreach (var room in roomList)
                 {
-                    Debug.Log($"Processing room: {JsonConvert.SerializeObject(room)}");
+                    Debug.Log($"Processing room: {JsonUtility.ToJson(room)}");
                     
                     // Create room list item
                     GameObject roomItem = Instantiate(roomListItemPrefab, roomListContent);
@@ -1178,7 +1590,7 @@ public async void CreateRoom()
                         roomListItem.OnSelected += OnRoomSelected;
                     }
                     catch (Exception e) {
-                        Debug.LogError($"Error initializing room list item: {e.Message}\nRoom data: {JsonConvert.SerializeObject(room)}");
+                        Debug.LogError($"Error initializing room list item: {e.Message}\nRoom data: {JsonUtility.ToJson(room)}");
                         Destroy(roomItem);
                     }
                 }
@@ -1219,7 +1631,7 @@ public async void CreateRoom()
     
     private void OnGameHosted(Dictionary<string, object> message)
     {
-        Debug.Log($"OnGameHosted called with message: {JsonConvert.SerializeObject(message)}");
+        Debug.Log($"OnGameHosted called with message: {JsonUtility.ToJson(message)}");
         
         HideConnectionPanel();
         
@@ -1250,31 +1662,26 @@ public async void CreateRoom()
     private void OnRoomPlayersReceived(Dictionary<string, object> message)
     {
         // Debug log commented for cleaner console
-        // Debug.Log($"OnRoomPlayersReceived: {JsonConvert.SerializeObject(message)}");
+        // Debug.Log($"OnRoomPlayersReceived: {JsonUtility.ToJson(message)}");
         
         // Clear the current player list to get fresh data
         playersInRoom.Clear();
         
         if (message.ContainsKey("players"))
         {
-            Newtonsoft.Json.Linq.JArray playersArray = null;
+            List<object> playersArray = null;
             
             // Handle different possible data types
-            if (message["players"] is Newtonsoft.Json.Linq.JArray jArray)
+            if (message["players"] is List<object> playersList)
             {
-                playersArray = jArray;
+                playersArray = playersList;
             }
             else if (message["players"] is string jsonStr)
             {
-                // Try to parse string as JSON
-                try
-                {
-                    playersArray = Newtonsoft.Json.Linq.JArray.Parse(jsonStr);
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError($"Failed to parse players JSON string: {e.Message}");
-                }
+                // Simple JSON parsing for player arrays
+                // For now, we'll handle this as a basic case
+                Debug.LogWarning("String-based player arrays not fully supported with Unity JsonUtility");
+                playersArray = new List<object>();
             }
             
             if (playersArray != null)
@@ -1286,26 +1693,24 @@ public async void CreateRoom()
                     try
                     {
                         // The player data can be either a simple ID string or a complete object
-                        if (playerToken.Type == Newtonsoft.Json.Linq.JTokenType.String)
+                        if (playerToken is string playerId)
                         {
-                            string playerId = playerToken.ToString();
                             if (!string.IsNullOrEmpty(playerId))
                             {
                                 playersInRoom.Add(playerId);
                                 // Debug.Log($"Added player ID: {playerId}");
                             }
                         }
-                        else if (playerToken.Type == Newtonsoft.Json.Linq.JTokenType.Object)
+                        else if (playerToken is Dictionary<string, object> playerObj)
                         {
                             // Extract ID from player object
-                            var playerObj = playerToken.ToObject<Dictionary<string, object>>();
-                            if (playerObj != null && playerObj.ContainsKey("id"))
+                            if (playerObj.ContainsKey("id"))
                             {
-                                string playerId = playerObj["id"].ToString();
-                                if (!string.IsNullOrEmpty(playerId))
+                                string playerIdFromObj = playerObj["id"].ToString();
+                                if (!string.IsNullOrEmpty(playerIdFromObj))
                                 {
-                                    playersInRoom.Add(playerId);
-                                    // Debug.Log($"Added player ID from object: {playerId}");
+                                    playersInRoom.Add(playerIdFromObj);
+                                    // Debug.Log($"Added player ID from object: {playerIdFromObj}");
                                 }
                             }
                         }
@@ -1423,12 +1828,12 @@ public async void CreateRoom()
         // Show clear feedback to the user that the game is starting
         ShowNotification("Game starting! Loading race track...");
         
-        Debug.Log($"OnGameStarted received with message: {JsonConvert.SerializeObject(message)}");
+        Debug.Log($"OnGameStarted received with message: {JsonUtility.ToJson(message)}");
         
         // Check for spawn_positions (plural, snake_case) as sent by SecureNetworkManager
         if (message.ContainsKey("spawn_positions"))
         {
-            var spawnPositionsObj = message["spawn_positions"] as Newtonsoft.Json.Linq.JObject;
+            var spawnPositionsObj = message["spawn_positions"] as Dictionary<string, object>;
             
             // Get the current client's ID to find their spawn position
             string clientId = SecureNetworkManager.Instance?.GetClientId();
@@ -1442,7 +1847,7 @@ public async void CreateRoom()
             // Look for this client's spawn position in the spawn_positions object
             if (spawnPositionsObj != null && spawnPositionsObj.ContainsKey(clientId))
             {
-                var spawnPosObj = spawnPositionsObj[clientId] as Newtonsoft.Json.Linq.JObject;
+                var spawnPosObj = spawnPositionsObj[clientId] as Dictionary<string, object>;
                 
                 // Extract spawn position
                 Vector3 spawnPosition = new Vector3(
@@ -1592,7 +1997,7 @@ public async void CreateRoom()
         // Update network latency display
         if (latencyText != null && SecureNetworkManager.Instance != null && Time.time - lastLatencyUpdateTime > LATENCY_UPDATE_INTERVAL)
         {
-            float latency = SecureNetworkManager.Instance.GetLatency();
+            float latency = SecureNetworkManager.Instance.Latency;
             latencyText.text = $"Ping: {(latency * 1000):0}ms";
             latencyText.color = latency < 0.1f ? Color.green : (latency < 0.3f ? Color.yellow : Color.red);
             lastLatencyUpdateTime = Time.time;
@@ -1612,7 +2017,7 @@ public async void CreateRoom()
     private void RefreshPlayerList()
     {
         // Request the complete player list from the server
-        if (SecureNetworkManager.Instance != null && SecureNetworkManager.Instance.IsConnected() && !string.IsNullOrEmpty(currentRoomId))
+        if (SecureNetworkManager.Instance != null && SecureNetworkManager.Instance.IsConnected && !string.IsNullOrEmpty(currentRoomId))
         {
             // Use the proper helper method that formats the command correctly
             _ = SecureNetworkManager.Instance.GetRoomPlayers(currentRoomId);
@@ -1789,5 +2194,371 @@ public async void CreateRoom()
             // Set the next update time
             fpsNextUpdateTime = Time.unscaledTime + fpsUpdateInterval;
         }
+    }
+
+    // New method to handle profile selection for authentication
+    private void SelectProfileForAuthentication(ProfileData profile)
+    {
+        selectedProfile = profile;
+        
+        // If this is a first-time profile (no password saved), show registration
+        if (!profile.hasPassword || string.IsNullOrEmpty(profile.password))
+        {
+            isFirstTimeRegistration = true;
+            ShowRegisterPanel();
+        }
+        else
+        {
+            // Existing profile, show login screen
+            isFirstTimeRegistration = false;
+            ShowLoginPanel(profile.name);
+        }
+    }
+    
+    public void ShowRegisterPanel()
+    {
+        if (registerPanel == null)
+        {
+            ShowNotification("Registration panel not available");
+            return;
+        }
+        
+        HideAllPanels();
+        registerPanel.SetActive(true);
+        
+        // Pre-fill username if we have a selected profile
+        if (registerUsernameInput != null && selectedProfile != null)
+        {
+            registerUsernameInput.text = selectedProfile.name;
+            registerUsernameInput.interactable = !isFirstTimeRegistration; // Lock username for existing profiles
+        }
+        
+        if (registerStatusText != null)
+        {
+            registerStatusText.text = isFirstTimeRegistration ? 
+                "Create your password for this profile" : 
+                "Set up your account";
+        }
+        
+        // Clear password fields
+        if (registerPasswordInput != null) registerPasswordInput.text = "";
+        if (registerConfirmPasswordInput != null) registerConfirmPasswordInput.text = "";
+    }
+    
+    public void ShowLoginPanel(string username = "")
+    {
+        if (loginPanel == null)
+        {
+            ShowNotification("Login panel not available");
+            return;
+        }
+        
+        HideAllPanels();
+        loginPanel.SetActive(true);
+        
+        // Pre-fill username
+        if (loginUsernameInput != null)
+        {
+            loginUsernameInput.text = username;
+            loginUsernameInput.interactable = false; // Lock username since we're logging into a specific profile
+        }
+        
+        if (loginStatusText != null)
+        {
+            loginStatusText.text = $"Enter password for {username}";
+        }
+        
+        // Clear password field
+        if (loginPasswordInput != null) 
+        {
+            loginPasswordInput.text = "";
+            loginPasswordInput.Select(); // Focus on password field
+        }
+    }
+    
+    public void OnRegisterButtonClicked()
+    {
+        string username = registerUsernameInput.text;
+        string password = registerPasswordInput.text;
+        string confirmPassword = registerConfirmPasswordInput.text;
+        
+        // Validate inputs
+        if (string.IsNullOrEmpty(username))
+        {
+            ShowNotification("Please enter a username");
+            UpdateRegisterStatus("Username is required", Color.red);
+            return;
+        }
+        
+        if (username.Length < 3)
+        {
+            ShowNotification("Username must be at least 3 characters long");
+            UpdateRegisterStatus("Username too short", Color.red);
+            return;
+        }
+        
+        if (string.IsNullOrEmpty(password))
+        {
+            ShowNotification("Please enter a password");
+            UpdateRegisterStatus("Password is required", Color.red);
+            return;
+        }
+        
+        if (password.Length < 4)
+        {
+            ShowNotification("Password must be at least 4 characters long");
+            UpdateRegisterStatus("Password too short", Color.red);
+            return;
+        }
+        
+        if (password != confirmPassword)
+        {
+            ShowNotification("Passwords do not match");
+            UpdateRegisterStatus("Passwords do not match", Color.red);
+            return;
+        }
+        
+        // Check if username already exists (if this is a new registration)
+        if (!isFirstTimeRegistration)
+        {
+            var existingProfile = savedProfiles.Find(p => p.name.Equals(username, StringComparison.OrdinalIgnoreCase));
+            if (existingProfile != null)
+            {
+                ShowNotification("Username already exists. Please choose a different name.");
+                UpdateRegisterStatus("Username already exists", Color.red);
+                return;
+            }
+        }
+        
+        UpdateRegisterStatus("Creating profile...", Color.yellow);
+        
+        // Create or update profile
+        ProfileData profile;
+        if (isFirstTimeRegistration && selectedProfile != null)
+        {
+            // Update existing profile with password
+            profile = selectedProfile;
+            profile.SetPassword(EncryptPassword(password));
+        }
+        else
+        {
+            // Create new profile
+            string id = GenerateUniquePlayerId(username);
+            profile = new ProfileData(username, id, EncryptPassword(password));
+            savedProfiles.Add(profile);
+        }
+        
+        // Save profiles
+        SaveProfiles();
+        
+        UpdateRegisterStatus("Profile created successfully!", Color.green);
+        
+        // Set as current profile and authenticate
+        SelectProfile(profile);
+        
+        // Small delay for user feedback, then authenticate
+        StartCoroutine(AuthenticateAfterDelay(username, password, 1f));
+    }
+    
+    private IEnumerator AuthenticateAfterDelay(string username, string password, float delay)
+    {
+        yield return new WaitForSeconds(delay);
+        AuthenticateWithServer(username, password);
+    }
+    
+    private void UpdateRegisterStatus(string message, Color color)
+    {
+        if (registerStatusText != null)
+        {
+            registerStatusText.text = message;
+            registerStatusText.color = color;
+        }
+    }
+    
+    public void OnLoginSubmitButtonClicked()
+    {
+        string username = loginUsernameInput.text;
+        string password = loginPasswordInput.text;
+        
+        if (string.IsNullOrEmpty(password))
+        {
+            ShowNotification("Please enter your password");
+            UpdateLoginStatus("Password is required", Color.red);
+            return;
+        }
+        
+        UpdateLoginStatus("Verifying password...", Color.yellow);
+        
+        // Verify password against stored profile
+        if (selectedProfile != null)
+        {
+            if (VerifyPassword(password, selectedProfile.password))
+            {
+                UpdateLoginStatus("Password verified!", Color.green);
+                
+                // Password correct, authenticate with server
+                SelectProfile(selectedProfile);
+                
+                // Small delay for user feedback, then authenticate
+                StartCoroutine(AuthenticateAfterDelay(username, password, 0.5f));
+            }
+            else
+            {
+                ShowNotification("Incorrect password");
+                UpdateLoginStatus("Incorrect password", Color.red);
+                return;
+            }
+        }
+        else
+        {
+            ShowNotification("Profile not found");
+            UpdateLoginStatus("Profile not found", Color.red);
+            return;
+        }
+    }
+    
+    private void UpdateLoginStatus(string message, Color color)
+    {
+        if (loginStatusText != null)
+        {
+            loginStatusText.text = message;
+            loginStatusText.color = color;
+        }
+    }
+    
+    private void AuthenticateWithServer(string username, string password)
+    {
+        ShowConnectionPanel("Authenticating...");
+        
+        if (SecureNetworkManager.Instance != null)
+        {
+            // Set the credentials in NetworkManager
+            SecureNetworkManager.Instance.SetCredentials(username, password);
+            
+            // If not connected, connect first
+            if (!SecureNetworkManager.Instance.IsConnected)
+            {
+                _ = SecureNetworkManager.Instance.ConnectToServerAsync();
+            }
+            else
+            {
+                // Already connected, just authenticate
+                ShowMultiplayerPanel();
+                HideConnectionPanel();
+                ShowNotification("Ready to play!");
+            }
+        }
+        else
+        {
+            ShowNotification("Network manager not available");
+            HideConnectionPanel();
+        }
+    }
+    
+    private string EncryptPassword(string password)
+    {
+        // Simple encryption for local storage (you might want to use a more secure method in production)
+        byte[] data = System.Text.Encoding.UTF8.GetBytes(password);
+        return System.Convert.ToBase64String(data);
+    }
+    
+    private bool VerifyPassword(string password, string encryptedPassword)
+    {
+        try
+        {
+            byte[] data = System.Convert.FromBase64String(encryptedPassword);
+            string decrypted = System.Text.Encoding.UTF8.GetString(data);
+            return password == decrypted;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+    
+    private void DeleteProfile(ProfileData profile)
+    {
+        if (profile != null)
+        {
+            ShowConfirmationDialog(
+                $"Are you sure you want to delete the profile '{profile.name}'?\n\nThis action cannot be undone.",
+                () => ConfirmDeleteProfile(profile),
+                () => HideConfirmationDialog()
+            );
+        }
+        else
+        {
+            ShowNotification("Profile not found");
+        }
+    }
+    
+    private void ConfirmDeleteProfile(ProfileData profile)
+    {
+        savedProfiles.Remove(profile);
+        SaveProfiles();
+        ShowNotification($"Profile {profile.name} deleted");
+        
+        // Clear current profile if it was the deleted one
+        if (selectedProfile == profile)
+        {
+            selectedProfile = null;
+            playerName = "Player";
+            playerId = null;
+            if (currentProfileText != null)
+                currentProfileText.text = "Profile: None";
+        }
+        
+        // Refresh profile list
+        RefreshProfileList();
+        HideConfirmationDialog();
+    }
+    
+    public void ShowConfirmationDialog(string message, System.Action onConfirm, System.Action onCancel)
+    {
+        if (confirmationPanel == null)
+        {
+            // Fallback to simple notification
+            ShowNotification("Confirmation dialog not available. " + message);
+            return;
+        }
+        
+        confirmationPanel.SetActive(true);
+        
+        if (confirmationText != null)
+        {
+            confirmationText.text = message;
+        }
+        
+        // Clear previous listeners and set new ones
+        if (confirmYesButton != null)
+        {
+            confirmYesButton.onClick.RemoveAllListeners();
+            confirmYesButton.onClick.AddListener(() => onConfirm?.Invoke());
+        }
+        
+        if (confirmNoButton != null)
+        {
+            confirmNoButton.onClick.RemoveAllListeners();
+            confirmNoButton.onClick.AddListener(() => onCancel?.Invoke());
+        }
+    }
+    
+    public void HideConfirmationDialog()
+    {
+        if (confirmationPanel != null)
+        {
+            confirmationPanel.SetActive(false);
+        }
+    }
+    
+    // Back button methods for new panels
+    public void BackFromRegister()
+    {
+        ShowProfilePanel();
+    }
+    
+    public void BackFromLogin()
+    {
+        ShowProfilePanel();
     }
 }
