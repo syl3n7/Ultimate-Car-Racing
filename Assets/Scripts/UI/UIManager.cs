@@ -147,8 +147,6 @@ public class UIManager : MonoBehaviour
     public Button confirmNoButton;
     
     // Profile management state
-    private ProfileData selectedProfile;
-
     private CarController playerCarController;
     private bool carUIInitialized = false;
     

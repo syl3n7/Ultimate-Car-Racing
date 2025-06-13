@@ -19,10 +19,10 @@ public class ProfileListItem : MonoBehaviour
     public Color selectedColor = new Color(0.8f, 0.9f, 1f);
     public Color deleteColor = new Color(1f, 0.8f, 0.8f);
     
-    public event Action<ProfileData> OnProfileSelected;
-    public event Action<ProfileData> OnProfileDeleted;
+    public event Action<UIManager.ProfileData> OnProfileSelected;
+    public event Action<UIManager.ProfileData> OnProfileDeleted;
     
-    private ProfileData profileData;
+    private UIManager.ProfileData profileData;
     private Image backgroundImage;
     private bool isSelected = false;
     
@@ -46,7 +46,7 @@ public class ProfileListItem : MonoBehaviour
         }
     }
     
-    public void Initialize(ProfileData profile)
+    public void Initialize(UIManager.ProfileData profile)
     {
         profileData = profile;
         
@@ -95,50 +95,11 @@ public class ProfileListItem : MonoBehaviour
         OnProfileDeleted?.Invoke(profileData);
     }
     
-    public ProfileData GetProfileData()
+    public UIManager.ProfileData GetProfileData()
     {
         return profileData;
     }
 }
 
 /// <summary>
-/// Enhanced ProfileData class with additional functionality
-/// </summary>
-[System.Serializable]
-public class ProfileData
-{
-    public string name;
-    public string id;
-    public string lastPlayed;
-    public string password; // Store encrypted password for local profile management
-    public bool hasPassword; // Flag to indicate if password is set
-    
-    public ProfileData(string name, string id)
-    {
-        this.name = name;
-        this.id = id;
-        this.lastPlayed = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-        this.password = "";
-        this.hasPassword = false;
-    }
-    
-    public ProfileData(string name, string id, string password)
-    {
-        this.name = name;
-        this.id = id;
-        this.lastPlayed = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-        this.password = password;
-        this.hasPassword = !string.IsNullOrEmpty(password);
-    }
-    
-    public void SetPassword(string encryptedPassword)
-    {
-        this.password = encryptedPassword;
-        this.hasPassword = !string.IsNullOrEmpty(encryptedPassword);
-    }
-    
-    public void UpdateLastPlayed()
-    {
-        this.lastPlayed = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-    }
-}
+
