@@ -787,6 +787,19 @@ MonoBehaviour:
   passwordInput: {fileID: 902718504}
   loginButton: {fileID: 1625091139}
   authStatusText: {fileID: 425488996}
+  registerPanel: {fileID: 0}
+  registerUsernameInput: {fileID: 0}
+  registerPasswordInput: {fileID: 0}
+  registerConfirmPasswordInput: {fileID: 0}
+  registerButton: {fileID: 0}
+  backFromRegisterButton: {fileID: 0}
+  registerStatusText: {fileID: 0}
+  loginPanel: {fileID: 0}
+  loginUsernameInput: {fileID: 0}
+  loginPasswordInput: {fileID: 0}
+  loginSubmitButton: {fileID: 0}
+  backFromLoginButton: {fileID: 0}
+  loginStatusText: {fileID: 0}
   networkInfoPanel: {fileID: 1979019095}
   extraInfoHUD: {fileID: 1355974894}
   raceHUD: {fileID: 2024558282}
@@ -806,6 +819,7 @@ MonoBehaviour:
   joinRoomButton: {fileID: 2061225408}
   backFromRoomListButton: {fileID: 1747287606}
   backFromCreditsButton: {fileID: 315423983}
+  deleteProfileButton: {fileID: 0}
   backFromProfileButton: {fileID: 1661420335}
   backFromRoomLobbyButton: {fileID: 1739683868}
   speedText: {fileID: 698476462}
@@ -818,6 +832,10 @@ MonoBehaviour:
   latencyText: {fileID: 1578519286}
   raceUIPanel: {fileID: 2024558282}
   networkStatsPanel: {fileID: 1355974894}
+  confirmationPanel: {fileID: 0}
+  confirmationText: {fileID: 0}
+  confirmYesButton: {fileID: 0}
+  confirmNoButton: {fileID: 0}
   fpsText: {fileID: 674769015}
   fpsUpdateInterval: 0.3
   fpsAverageSamples: 20
@@ -1911,7 +1929,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Material: {fileID: 0}
-  m_Color: {r: 0, g: 0, b: 0, a: 1}
+  m_Color: {r: 0.2924528, g: 0.04552332, b: 0.06255303, a: 1}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -2693,7 +2711,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &533121134
 RectTransform:
   m_ObjectHideFlags: 0
@@ -2727,7 +2745,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 0}
+  m_Color: {r: 0.01886791, g: 0.013972933, b: 0.01886791, a: 0.3254902}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -3466,7 +3484,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 1, y: 1}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: -0.00012207031, y: 0}
+  m_AnchoredPosition: {x: -0.00024414062, y: 0}
   m_SizeDelta: {x: 301.4182, y: 118.5644}
   m_Pivot: {x: 1, y: 1}
 --- !u!114 &674769015
@@ -4626,7 +4644,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &825215803
 RectTransform:
   m_ObjectHideFlags: 0
@@ -4945,8 +4963,8 @@ Camera:
   m_GameObject: {fileID: 848838384}
   m_Enabled: 1
   serializedVersion: 2
-  m_ClearFlags: 1
-  m_BackGroundColor: {r: 0.19215687, g: 0.3019608, b: 0.4745098, a: 0}
+  m_ClearFlags: 2
+  m_BackGroundColor: {r: 0, g: 0, b: 0, a: 0}
   m_projectionMatrixMode: 1
   m_GateFitMode: 2
   m_FOVAxisMode: 0
