@@ -189,17 +189,32 @@ public class SecureNetworkManager : MonoBehaviour
                 attempt++;
                 Log($"Connecting to MP-Server (attempt {attempt}/{maxRetryAttempts})...");
                 
-                // Simulate connection for Unity compatibility
-                await Task.Delay(1000);
+                // Create TCP client and connect to server
+                _tcpClient = new TcpClient();
+                await _tcpClient.ConnectAsync(serverHost, serverPort);
                 
-                _isConnected = true;
-                _isAuthenticated = true;
-                _sessionId = System.Guid.NewGuid().ToString();
-                
-                Log("✅ Successfully connected to MP-Server (Simulated)");
-                OnConnected?.Invoke($"Connected to {serverHost}:{serverPort}");
-                OnAuthenticationChanged?.Invoke(true);
-                return true;
+                if (_tcpClient.Connected)
+                {
+                    // Also initialize UDP client for game data
+                    _udpClient = new UdpClient();
+                    
+                    _isConnected = true;
+                    _sessionId = System.Guid.NewGuid().ToString();
+                    
+                    // Start receiving messages
+                    _ = Task.Run(ReceiveMessages);
+                    
+                    Log($"✅ Successfully connected to MP-Server at {serverHost}:{serverPort}");
+                    OnConnected?.Invoke($"Connected to {serverHost}:{serverPort}");
+                    
+                    // Attempt authentication
+                    await AuthenticateAsync();
+                    return true;
+                }
+                else
+                {
+                    throw new Exception("Failed to establish TCP connection");
+                }
             }
             catch (Exception ex)
             {
@@ -224,7 +239,21 @@ public class SecureNetworkManager : MonoBehaviour
         
         try
         {
-            // Simulate disconnection
+            // Close TCP connection properly
+            if (_tcpClient != null && _tcpClient.Connected)
+            {
+                _tcpClient.Close();
+                _tcpClient = null;
+            }
+            
+            // Close UDP connection properly
+            if (_udpClient != null)
+            {
+                _udpClient.Close();
+                _udpClient = null;
+            }
+            
+            // Small delay to ensure cleanup
             await Task.Delay(100);
         }
         catch (Exception ex)
@@ -656,8 +685,21 @@ public class SecureNetworkManager : MonoBehaviour
                 rotation = new QuaternionData { x = rotation.x, y = rotation.y, z = rotation.z, w = rotation.w }
             };
             
-            await Task.Delay(10); // Simulate UDP send
-            _packetsSent++;
+            // Send real UDP packet
+            if (_udpClient != null && _isConnected)
+            {
+                try
+                {
+                    var json = JsonUtility.ToJson(update);
+                    var data = Encoding.UTF8.GetBytes(json);
+                    await _udpClient.SendAsync(data, data.Length, serverHost, serverPort);
+                    _packetsSent++;
+                }
+                catch (Exception ex)
+                {
+                    LogError($"Failed to send UDP position update: {ex.Message}");
+                }
+            }
             
             if (logNetworkTraffic)
             {
@@ -689,12 +731,25 @@ public class SecureNetworkManager : MonoBehaviour
                 client_id = _sessionId
             };
             
-            await Task.Delay(10); // Simulate UDP send
-            _packetsSent++;
-            
-            if (logNetworkTraffic)
+            // Send real UDP packet
+            if (_udpClient != null && _isConnected)
             {
-                Log($"📤 UDP Input: S:{steering:F2} T:{throttle:F2} B:{brake:F2}");
+                try
+                {
+                    var json = JsonUtility.ToJson(input);
+                    var data = Encoding.UTF8.GetBytes(json);
+                    await _udpClient.SendAsync(data, data.Length, serverHost, serverPort);
+                    _packetsSent++;
+                    
+                    if (logNetworkTraffic)
+                    {
+                        Log($"📤 UDP Input: S:{steering:F2} T:{throttle:F2} B:{brake:F2}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogError($"Failed to send UDP input update: {ex.Message}");
+                }
             }
         }
         catch (Exception ex)
@@ -1091,6 +1146,131 @@ public class SecureNetworkManager : MonoBehaviour
     }
     
     #endregion
+    
+    /// <summary>
+    /// Authenticate with the MP-Server after connection
+    /// </summary>
+    private async Task AuthenticateAsync()
+    {
+        try
+        {
+            // Send authentication request
+            var authRequest = new
+            {
+                command = "AUTH",
+                sessionId = _sessionId,
+                timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+            };
+            
+            await SendTcpMessageInternal(authRequest);
+            
+            // Wait for authentication response (simplified for now)
+            await Task.Delay(1000);
+            
+            _isAuthenticated = true;
+            OnAuthenticationChanged?.Invoke(true);
+            Log("✅ Successfully authenticated with MP-Server");
+        }
+        catch (Exception ex)
+        {
+            LogError($"Authentication failed: {ex.Message}");
+            _isAuthenticated = false;
+            OnAuthenticationChanged?.Invoke(false);
+        }
+    }
+    
+    /// <summary>
+    /// Receive messages from TCP connection
+    /// </summary>
+    private async Task ReceiveMessages()
+    {
+        var buffer = new byte[4096];
+        
+        try
+        {
+            while (_tcpClient != null && _tcpClient.Connected && _isConnected)
+            {
+                var stream = _tcpClient.GetStream();
+                var bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
+                
+                if (bytesRead > 0)
+                {
+                    var message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                    
+                    // Process received message on main thread
+                    UnityMainThreadDispatcher.Instance().Enqueue(() =>
+                    {
+                        ProcessReceivedMessage(message);
+                    });
+                }
+                else
+                {
+                    // Connection closed by server
+                    break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogError($"Error receiving messages: {ex.Message}");
+        }
+        finally
+        {
+            if (_isConnected)
+            {
+                UnityMainThreadDispatcher.Instance().Enqueue(async () =>
+                {
+                    await DisconnectAsync();
+                });
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Process received message from server
+    /// </summary>
+    private void ProcessReceivedMessage(string message)
+    {
+        try
+        {
+            Log($"Received: {message}");
+            
+            // Parse and handle different message types
+            // This is a simplified implementation - you'll want to add proper JSON parsing
+            if (message.Contains("\"command\":\"ROOM_LIST\""))
+            {
+                // Handle room list response
+                OnRoomListReceived?.Invoke(new List<RoomInfo>());
+            }
+            else if (message.Contains("\"command\":\"ROOM_JOINED\""))
+            {
+                // Handle room joined response - create a basic RoomInfo object
+                var roomInfo = new RoomInfo
+                {
+                    Id = "unknown",
+                    Name = "Joined Room",
+                    HostId = "host_unknown",
+                    PlayerCount = 1,
+                    IsActive = true
+                };
+                OnRoomJoined?.Invoke(roomInfo);
+            }
+            // Add more message type handling as needed
+            
+            // Create RelayMessage for the general message received event
+            var relayMessage = new RelayMessage
+            {
+                SenderId = "server",
+                SenderName = "Server",
+                Message = message
+            };
+            OnMessageReceived?.Invoke(relayMessage);
+        }
+        catch (Exception ex)
+        {
+            LogError($"Error processing received message: {ex.Message}");
+        }
+    }
 }
 
 // Data structures for MP-Server protocol (Unity-compatible)
