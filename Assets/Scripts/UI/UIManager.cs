@@ -21,16 +21,47 @@ public class UIManager : MonoBehaviour
     public GameObject roomLobbyPanel;
     
     [Header("Profile UI")]
-    public TMP_InputField playerNameInput;
     public Transform profileListContent;
     public GameObject profileListItemPrefab;
     public TextMeshProUGUI currentProfileText;
+    public Button newProfileButton;
+    public Button playButton;
+    public Button deleteProfileButton;
+    public Button createProfileButton;
+    public Button backFromProfileButton;
+    
+    [Header("Registration Panel")]
+    public GameObject registrationPanel;
+    public TMP_InputField registrationUsernameInput;
+    public TMP_InputField registrationPasswordInput;
+    public TMP_InputField registrationConfirmPasswordInput;
+    public Button registerButton;
+    public Button backFromRegisterButton;
+    public Button cancelRegistrationButton;
+    public TextMeshProUGUI registrationStatusText;
+    
+    [Header("Login Panel")]
+    public GameObject loginPanel;
+    public TextMeshProUGUI loginUsernameLabel;
+    public TMP_InputField loginUsernameInput;
+    public TMP_InputField loginPasswordInput;
+    public Button loginButton;
+    public Button backFromLoginButton;
+    public TextMeshProUGUI loginStatusText;
+    
+    [Header("Confirmation Dialog")]
+    public GameObject confirmationDialog;
+    public TextMeshProUGUI confirmationTitle;
+    public TextMeshProUGUI confirmationMessage;
+    public Button confirmButton;
+    public Button cancelButton;
     
     [Header("Room List UI")]
     public Transform roomListContent;
     public GameObject roomListItemPrefab;
     public Button refreshRoomsButton;
     public TMP_InputField createRoomNameInput;
+    public TMP_InputField roomNameInput;
     public Slider maxPlayersSlider;
     public TextMeshProUGUI maxPlayersText;
     
@@ -40,66 +71,61 @@ public class UIManager : MonoBehaviour
     public GameObject playerListItemPrefab;
     public Button startGameButton;
     public Button leaveGameButton;
+    public Button leaveRoomButton;
     public TextMeshProUGUI playerCountText;
     
     [Header("Connection UI")]
     public GameObject connectionPanel;
     public TextMeshProUGUI connectionStatusText;
     
+    [Header("Network Info Panel")]
+    public TextMeshProUGUI networkLatencyText;
+    
     [Header("Notification UI")]
     public GameObject notificationPanel;
     public TextMeshProUGUI notificationText;
+    public GameObject notification;
 
     [Header("Loading Screen")]
     public GameObject loadingPanel;
     public TextMeshProUGUI loadingText;
-    public Slider loadingProgressBar;
     public TextMeshProUGUI loadingTips;
-
-    [Header("Authentication UI")]
-    public GameObject authPanel;
-    public TMP_InputField usernameInput;
-    public TMP_InputField passwordInput;
-    public Button loginButton;
-    public TextMeshProUGUI authStatusText;
-    
-    [Header("Profile Management UI")]
-    public GameObject registerPanel;
-    public TMP_InputField registerUsernameInput;
-    public TMP_InputField registerPasswordInput;
-    public TMP_InputField registerConfirmPasswordInput;
-    public Button registerButton;
-    public Button backFromRegisterButton;
-    public TextMeshProUGUI registerStatusText;
-    
-    [Header("Login UI")]
-    public GameObject loginPanel;
-    public TMP_InputField loginUsernameInput;
-    public TMP_InputField loginPasswordInput;
-    public Button loginSubmitButton;
-    public Button backFromLoginButton;
-    public TextMeshProUGUI loginStatusText;
+    public GameObject progressBarBackground;
+    public Slider loadingProgressBar;
     
     [Header("Additional UI Panels")]
     public GameObject networkInfoPanel;
     public GameObject extraInfoHUD;
     public GameObject raceHUD;
     public GameObject consolePanel;
+    public GameObject backgroundPanel;
+    
+    [Header("Console Panel UI")]
+    public TextMeshProUGUI consoleOutputText;
+    public TMP_InputField consoleInputField;
+    
+    [Header("Race HUD Elements")]
+    public TextMeshProUGUI raceSpeedText;
+    public TextMeshProUGUI raceRPMText;
+    public TextMeshProUGUI raceGearText;
+    
+    [Header("Extra Info HUD Elements")]
+    public TextMeshProUGUI extraLatencyText;
+    public TextMeshProUGUI fpsText;
     
     [Header("Button References")]
     [Header("Main Menu Buttons")]
-    public Button playButton;
     public Button instructionsButton;
     public Button creditsButton;
     public Button profileButton;
     public Button exitButton;
     
-    [Header("Profile Panel Buttons")]
-    public Button createProfileButton;
+    [Header("Instructions Panel Buttons")]
     public Button backToMainButton;
     
-    [Header("Instructions Panel Buttons")]
-    public Button backFromInstructionsButton;
+    [Header("Credits Panel Buttons")]
+    public Button backToMainButtonCredits;
+    public Button backFromCreditsButton;
     
     [Header("Multiplayer Panel Buttons")]
     public Button createGameButton;
@@ -110,13 +136,6 @@ public class UIManager : MonoBehaviour
     public Button createRoomButton;
     public Button joinRoomButton;
     public Button backFromRoomListButton;
-    
-    [Header("Credits Panel Buttons")]
-    public Button backFromCreditsButton;
-    
-    [Header("Profile Panel Buttons - Additional")]
-    public Button deleteProfileButton;
-    public Button backFromProfileButton;
     
     [Header("Room Lobby Panel Buttons")]
     public Button backFromRoomLobbyButton;
@@ -140,12 +159,6 @@ public class UIManager : MonoBehaviour
     public GameObject networkStatsPanel;  // Panel specifically for network stats
     private bool isRaceUIVisible = false;
 
-    [Header("Confirmation Dialog")]
-    public GameObject confirmationPanel;
-    public TextMeshProUGUI confirmationText;
-    public Button confirmYesButton;
-    public Button confirmNoButton;
-    
     // Profile management state
     private CarController playerCarController;
     private bool carUIInitialized = false;
@@ -273,33 +286,31 @@ public class UIManager : MonoBehaviour
     {
         // Main Menu buttons
         ConnectButtonDirect(playButton, OnPlayButtonClicked, "PlayButton");
+        ConnectButtonDirect(createProfileButton, ShowProfilePanel, "CreateProfileButton");
         ConnectButtonDirect(instructionsButton, ShowInstructions, "InstructionsButton");
         ConnectButtonDirect(creditsButton, ShowCredits, "CreditsButton");
-        ConnectButtonDirect(profileButton, ShowProfilePanel, "ProfileButton");
         ConnectButtonDirect(exitButton, Application.Quit, "ExitButton");
         
         // Profile panel buttons
-        ConnectButtonDirect(createProfileButton, CreateNewProfile, "CreateProfileButton");
-        ConnectButtonDirect(backToMainButton, ShowMainMenu, "BackToMainButton");
-        
-        // Instructions panel buttons
-        ConnectButtonDirect(backFromInstructionsButton, BackFromInstructions, "BackFromInstructionsButton");
-        
-        // Credits panel buttons
-        ConnectButtonDirect(backFromCreditsButton, BackFromCredits, "BackFromCreditsButton");
-        
-        // Profile panel buttons (additional)
+        ConnectButtonDirect(newProfileButton, CreateNewProfile, "NewProfileButton");
         ConnectButtonDirect(backFromProfileButton, BackFromProfile, "BackFromProfileButton");
         ConnectButtonDirect(deleteProfileButton, DeleteSelectedProfile, "DeleteProfileButton");
+        
+        // Instructions panel buttons
+        ConnectButtonDirect(backToMainButton, ShowMainMenu, "BackToMainButton");
+        
+        // Credits panel buttons
+        ConnectButtonDirect(backToMainButtonCredits, ShowMainMenu, "BackToMainButtonCredits");
+        ConnectButtonDirect(backFromCreditsButton, BackFromCredits, "BackFromCreditsButton");
         
         // Registration panel buttons
         ConnectButtonDirect(registerButton, OnRegisterButtonClicked, "RegisterButton");
         ConnectButtonDirect(backFromRegisterButton, BackFromRegister, "BackFromRegisterButton");
+        ConnectButtonDirect(cancelRegistrationButton, BackFromRegister, "CancelRegistrationButton");
         
         // Login panel buttons
-        ConnectButtonDirect(loginSubmitButton, OnLoginSubmitButtonClicked, "LoginSubmitButton");
+        ConnectButtonDirect(loginButton, OnLoginButtonClicked, "LoginButton");
         ConnectButtonDirect(backFromLoginButton, BackFromLogin, "BackFromLoginButton");
-        ConnectButtonDirect(deleteProfileButton, DeleteSelectedProfile, "DeleteProfileButton");
         
         // Multiplayer panel buttons
         ConnectButtonDirect(createGameButton, ShowRoomListPanel, "CreateGameButton");
@@ -315,10 +326,8 @@ public class UIManager : MonoBehaviour
         // Room lobby panel buttons
         ConnectButtonDirect(startGameButton, StartGame, "StartGameButton");
         ConnectButtonDirect(leaveGameButton, LeaveRoom, "LeaveGameButton");
+        ConnectButtonDirect(leaveRoomButton, LeaveRoom, "LeaveRoomButton");
         ConnectButtonDirect(backFromRoomLobbyButton, BackFromRoomLobby, "BackFromRoomLobbyButton");
-        
-        // Auth panel buttons
-        ConnectButtonDirect(loginButton, OnLoginButtonClicked, "LoginButton");
         
         // Connect max players slider if assigned
         if (maxPlayersSlider != null)
@@ -570,15 +579,20 @@ public class UIManager : MonoBehaviour
         notificationPanel.SetActive(false);
         
         // Hide auth panel if it exists
-        if (authPanel != null)
+        if (registrationPanel != null)
         {
-            authPanel.SetActive(false);
+            registrationPanel.SetActive(false);
+        }
+        
+        if (loginPanel != null)
+        {
+            loginPanel.SetActive(false);
         }
         
         // Hide registration panel if it exists
-        if (registerPanel != null)
+        if (registrationPanel != null)
         {
-            registerPanel.SetActive(false);
+            registrationPanel.SetActive(false);
         }
         
         // Hide login panel if it exists
@@ -614,70 +628,23 @@ public class UIManager : MonoBehaviour
             consolePanel.SetActive(false);
         }
         
-        // Hide confirmation panel if it exists
-        if (confirmationPanel != null)
+        // Hide confirmation dialog if it exists
+        if (confirmationDialog != null)
         {
-            confirmationPanel.SetActive(false);
+            confirmationDialog.SetActive(false);
         }
         
         // Don't hide race UI panels here - they're controlled by scene changes
     }
 
-    public void ShowAuthPanel(string message = "Please login to continue")
+    public void ShowProfilePanelForAuth(string message = "Please select or create a profile")
     {
-        if (authPanel == null)
-        {
-            return;
-        }
-        
         HideAllPanels();
-        authPanel.SetActive(true);
+        ShowProfilePanel();
         
-        if (authStatusText != null)
+        if (!string.IsNullOrEmpty(message))
         {
-            authStatusText.text = message;
-        }
-        
-        // Pre-fill the username if we have a profile selected
-        if (usernameInput != null && !string.IsNullOrEmpty(playerName))
-        {
-            usernameInput.text = playerName;
-        }
-    }
-    
-    public void OnLoginButtonClicked()
-    {
-        string username = usernameInput.text;
-        string password = passwordInput.text;
-        
-        if (string.IsNullOrEmpty(username))
-        {
-            ShowNotification("Please enter a username");
-            return;
-        }
-        
-        if (string.IsNullOrEmpty(password))
-        {
-            ShowNotification("Please enter a password");
-            return;
-        }
-        
-        if (SecureNetworkManager.Instance != null)
-        {
-            // Set the credentials in NetworkManager
-            SecureNetworkManager.Instance.SetCredentials(username, password);
-            
-            // Update local player name
-            playerName = username;
-            
-            // Show connection panel
-            ShowConnectionPanel("Authenticating...");
-            
-            // If not connected, connect
-            if (!SecureNetworkManager.Instance.IsConnected)
-            {
-                _ = SecureNetworkManager.Instance.ConnectToServerAsync();
-            }
+            ShowNotification(message);
         }
     }
     
@@ -718,34 +685,7 @@ public class UIManager : MonoBehaviour
     
     public void CreateNewProfile()
     {
-        string name = playerNameInput.text;
-        if (string.IsNullOrEmpty(name))
-        {
-            ShowNotification("Please enter a name");
-            return;
-        }
-        
-        // Check if name already exists
-        var existingProfile = savedProfiles.Find(p => p.name.Equals(name, StringComparison.OrdinalIgnoreCase));
-        if (existingProfile != null)
-        {
-            ShowNotification("Profile name already exists. Please choose a different name.");
-            return;
-        }
-        
-        // Generate a player ID
-        string id = GenerateUniquePlayerId(name);
-        
-        // Create new profile without password (will be set during registration)
-        ProfileData profile = new ProfileData(name, id);
-        savedProfiles.Add(profile);
-        
-        // Save to disk
-        SaveProfiles();
-        
-        // Set as selected profile and show registration
-        selectedProfile = profile;
-        isFirstTimeRegistration = true;
+        // Show registration panel for new profile creation
         ShowRegisterPanel();
     }
     
@@ -941,7 +881,7 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
         if (!SecureNetworkManager.Instance.IsAuthenticated)
         {
             ShowNotification("Please log in before creating a room");
-            ShowAuthPanel();
+            ShowProfilePanelForAuth();
             return;
         }
         
@@ -1235,7 +1175,7 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
         }
         else
         {
-            ShowAuthPanel("Authentication failed. Please try again.");
+            ShowProfilePanelForAuth("Authentication failed. Please try again.");
         }
     }
     
@@ -1960,7 +1900,7 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
             }
             
             HideConnectionPanel();
-            ShowAuthPanel(errorMessage);
+            ShowProfilePanelForAuth(errorMessage);
         }
     }
     
@@ -1971,7 +1911,6 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
     private const float PLAYER_LIST_REFRESH_INTERVAL = 3f; // Refresh player list every 3 seconds
 
     [Header("FPS Counter")]
-    public TextMeshProUGUI fpsText;
     public float fpsUpdateInterval = 0.5f; // How often to update the FPS display
     public int fpsAverageSamples = 20; // How many frames to average
     private float[] fpsSamples;
@@ -2215,32 +2154,32 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
     
     public void ShowRegisterPanel()
     {
-        if (registerPanel == null)
+        if (registrationPanel == null)
         {
             ShowNotification("Registration panel not available");
             return;
         }
         
         HideAllPanels();
-        registerPanel.SetActive(true);
+        registrationPanel.SetActive(true);
         
         // Pre-fill username if we have a selected profile
-        if (registerUsernameInput != null && selectedProfile != null)
+        if (registrationUsernameInput != null && selectedProfile != null)
         {
-            registerUsernameInput.text = selectedProfile.name;
-            registerUsernameInput.interactable = !isFirstTimeRegistration; // Lock username for existing profiles
+            registrationUsernameInput.text = selectedProfile.name;
+            registrationUsernameInput.interactable = !isFirstTimeRegistration; // Lock username for existing profiles
         }
         
-        if (registerStatusText != null)
+        if (registrationStatusText != null)
         {
-            registerStatusText.text = isFirstTimeRegistration ? 
+            registrationStatusText.text = isFirstTimeRegistration ? 
                 "Create your password for this profile" : 
                 "Set up your account";
         }
         
         // Clear password fields
-        if (registerPasswordInput != null) registerPasswordInput.text = "";
-        if (registerConfirmPasswordInput != null) registerConfirmPasswordInput.text = "";
+        if (registrationPasswordInput != null) registrationPasswordInput.text = "";
+        if (registrationConfirmPasswordInput != null) registrationConfirmPasswordInput.text = "";
     }
     
     public void ShowLoginPanel(string username = "")
@@ -2255,10 +2194,9 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
         loginPanel.SetActive(true);
         
         // Pre-fill username
-        if (loginUsernameInput != null)
+        if (loginUsernameLabel != null)
         {
-            loginUsernameInput.text = username;
-            loginUsernameInput.interactable = false; // Lock username since we're logging into a specific profile
+            loginUsernameLabel.text = username;
         }
         
         if (loginStatusText != null)
@@ -2276,9 +2214,9 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
     
     public void OnRegisterButtonClicked()
     {
-        string username = registerUsernameInput.text;
-        string password = registerPasswordInput.text;
-        string confirmPassword = registerConfirmPasswordInput.text;
+        string username = registrationUsernameInput.text;
+        string password = registrationPasswordInput.text;
+        string confirmPassword = registrationConfirmPasswordInput.text;
         
         // Validate inputs
         if (string.IsNullOrEmpty(username))
@@ -2366,16 +2304,23 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
     
     private void UpdateRegisterStatus(string message, Color color)
     {
-        if (registerStatusText != null)
+        if (registrationStatusText != null)
         {
-            registerStatusText.text = message;
-            registerStatusText.color = color;
+            registrationStatusText.text = message;
+            registrationStatusText.color = color;
         }
     }
     
-    public void OnLoginSubmitButtonClicked()
+    public void OnLoginButtonClicked()
     {
-        string username = loginUsernameInput.text;
+        if (selectedProfile == null)
+        {
+            ShowNotification("No profile selected");
+            UpdateLoginStatus("Please select a profile first", Color.red);
+            return;
+        }
+        
+        string username = selectedProfile.name;
         string password = loginPasswordInput.text;
         
         if (string.IsNullOrEmpty(password))
@@ -2513,39 +2458,50 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
     
     public void ShowConfirmationDialog(string message, System.Action onConfirm, System.Action onCancel)
     {
-        if (confirmationPanel == null)
+        if (confirmationDialog == null)
         {
             // Fallback to simple notification
             ShowNotification("Confirmation dialog not available. " + message);
             return;
         }
         
-        confirmationPanel.SetActive(true);
+        confirmationDialog.SetActive(true);
         
-        if (confirmationText != null)
+        if (confirmationTitle != null)
         {
-            confirmationText.text = message;
+            confirmationTitle.text = "Confirm Action";
+        }
+        
+        if (confirmationMessage != null)
+        {
+            confirmationMessage.text = message;
         }
         
         // Clear previous listeners and set new ones
-        if (confirmYesButton != null)
+        if (confirmButton != null)
         {
-            confirmYesButton.onClick.RemoveAllListeners();
-            confirmYesButton.onClick.AddListener(() => onConfirm?.Invoke());
+            confirmButton.onClick.RemoveAllListeners();
+            confirmButton.onClick.AddListener(() => {
+                onConfirm?.Invoke();
+                HideConfirmationDialog();
+            });
         }
         
-        if (confirmNoButton != null)
+        if (cancelButton != null)
         {
-            confirmNoButton.onClick.RemoveAllListeners();
-            confirmNoButton.onClick.AddListener(() => onCancel?.Invoke());
+            cancelButton.onClick.RemoveAllListeners();
+            cancelButton.onClick.AddListener(() => {
+                onCancel?.Invoke();
+                HideConfirmationDialog();
+            });
         }
     }
     
     public void HideConfirmationDialog()
     {
-        if (confirmationPanel != null)
+        if (confirmationDialog != null)
         {
-            confirmationPanel.SetActive(false);
+            confirmationDialog.SetActive(false);
         }
     }
     
@@ -2559,4 +2515,11 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
     {
         ShowProfilePanel();
     }
+
+    [Header("Panel Title Elements")]
+    public TextMeshProUGUI registrationTitle;
+    public TextMeshProUGUI profileTitle;
+    public TextMeshProUGUI instructionsControls;
+    public TextMeshProUGUI creditsText;
+    public TextMeshProUGUI loginText;
 }
