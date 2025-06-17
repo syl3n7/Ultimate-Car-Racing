@@ -46,6 +46,18 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   serverHost: 89.114.116.19
   serverPort: 443
+  acceptSelfSignedCerts: 1
+  pinnedCertificateThumbprint: 
   playerName: Player
   playerPassword: secret123
+  saveCredentials: 1
+  tcpTimeoutMs: 10000
+  udpUpdateRateHz: 20
+  maxRetryAttempts: 3
+  enableCompression: 1
+  enforceEncryption: 1
+  logSecurityEvents: 1
+  rateLimitTcpMs: 100
+  rateLimitUdpMs: 50
   enableDebugLogs: 1
+  logNetworkTraffic: 1
