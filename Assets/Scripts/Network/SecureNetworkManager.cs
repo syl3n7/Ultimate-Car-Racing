@@ -1644,7 +1644,118 @@ public class SecureNetworkManager : MonoBehaviour
         
         return message;
     }
-    
-    /// <summary>
-    /// Helper method to send JSON commands to the server
+}
+
+// Network data structures for MP-Server protocol
+[System.Serializable]
+public struct RoomInfo
+{
+    public string Id;
+    public string Name;
+    public string HostId;
+    public int PlayerCount;
+    public int MaxPlayers;
+    public bool IsActive;
+}
+
+[System.Serializable]
+public struct GameStartData
+{
+    public string RoomId;
+    public string HostId;
+    public Dictionary<string, Vector3> SpawnPositions;
+}
+
+[System.Serializable]
+public struct RelayMessage
+{
+    public string SenderId;
+    public string SenderName;
+    public string Message;
+}
+
+[System.Serializable]
+public struct PlayerUpdate
+{
+    public string SessionId;
+    public Vector3 Position;
+    public Quaternion Rotation;
+    public Vector3 Velocity;
+    public Vector3 AngularVelocity;
+    public float Timestamp;
+}
+
+[System.Serializable]
+public struct PlayerInput
+{
+    public string SessionId;
+    public float Steering;
+    public float Throttle;
+    public float Brake;
+    public float Timestamp;
+}
+
+[System.Serializable]
+public struct NetworkStats
+{
+    public float Latency;
+    public int PacketsSent;
+    public int PacketsReceived;
+    public bool IsConnected;
+    public bool IsAuthenticated;
+    public bool UdpEncrypted;
+}
+
+[System.Serializable]
+public struct NetworkStatus
+{
+    public bool IsConnected;
+    public bool IsAuthenticated;
+    public bool UdpEncrypted;
+}
+
+// Internal Unity-compatible message structures
+[System.Serializable]
+internal class PositionUpdateMessage
+{
+    public string command;
+    public string sessionId;
+    public Vector3Data position;
+    public QuaternionData rotation;
+}
+
+[System.Serializable]
+internal class InputUpdateMessage
+{
+    public string command;
+    public string sessionId;
+    public string roomId;
+    public InputData input;
+    public string client_id;
+}
+
+[System.Serializable]
+internal class Vector3Data
+{
+    public float x;
+    public float y;
+    public float z;
+}
+
+[System.Serializable]
+internal class QuaternionData
+{
+    public float x;
+    public float y;
+    public float z;
+    public float w;
+}
+
+[System.Serializable]
+internal class InputData
+{
+    public float steering;
+    public float throttle;
+    public float brake;
+    public float timestamp;
 }

@@ -179,6 +179,9 @@ public class UIManager : MonoBehaviour
     private string currentRoomName;
     private bool isHost = false;
     
+    // Login state tracking
+    private bool isLoginInProgress = false;
+    
     [Serializable]
     public class ProfileData
     {
@@ -865,6 +868,8 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
     
     public async void CreateRoom()
     {
+        Debug.Log("CreateRoom called");
+        
         // Make sure we have a valid track selected
         if (GameManager.SelectedTrackIndex < 0)
         {
@@ -874,14 +879,6 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
         if (SecureNetworkManager.Instance == null)
         {
             ShowNotification("Network manager not available");
-            return;
-        }
-        
-        // Check authentication first
-        if (!SecureNetworkManager.Instance.IsAuthenticated)
-        {
-            ShowNotification("Please log in before creating a room");
-            ShowProfilePanelForAuth();
             return;
         }
         
@@ -913,17 +910,67 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
             }
         }
         
+        // Check authentication after ensuring connection
+        if (!SecureNetworkManager.Instance.IsAuthenticated)
+        {
+            Debug.Log("Not authenticated, checking if we can auto-authenticate");
+            
+            // Try to auto-authenticate if we have a selected profile
+            if (selectedProfile != null && !string.IsNullOrEmpty(selectedProfile.name))
+            {
+                ShowConnectionPanel("Re-authenticating...");
+                
+                try
+                {
+                    // Set credentials and attempt authentication
+                    SecureNetworkManager.Instance.SetCredentials(selectedProfile.name, "");
+                    
+                    // Wait a moment for authentication to complete
+                    await Task.Delay(1000);
+                    
+                    if (SecureNetworkManager.Instance.IsAuthenticated)
+                    {
+                        Debug.Log("Auto-authentication successful");
+                        ShowConnectionPanel("Creating room...");
+                    }
+                    else
+                    {
+                        throw new Exception("Auto-authentication failed");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Auto-authentication failed: {ex.Message}");
+                    ShowNotification("Authentication required. Please log in again.");
+                    HideConnectionPanel();
+                    ShowProfilePanelForAuth("Please log in to create a room");
+                    return;
+                }
+            }
+            else
+            {
+                ShowNotification("Authentication required. Please log in first.");
+                HideConnectionPanel();
+                ShowProfilePanelForAuth("Please log in to create a room");
+                return;
+            }
+        }
+        
         string roomName = createRoomNameInput.text;
         if (string.IsNullOrEmpty(roomName))
             roomName = $"{playerName}'s Room";
         
+        Debug.Log($"Attempting to create room: {roomName}");
+        
         try 
         {
             await SecureNetworkManager.Instance.CreateRoomAsync(roomName);
+            Debug.Log("CreateRoomAsync completed, waiting for callback");
             // The actual feedback will come through the OnRoomCreated event callback
         }
         catch (Exception e) 
         {
+            Debug.LogError($"Error creating room: {e.Message}");
             ShowNotification("Error creating room: " + e.Message);
             HideConnectionPanel();
         }
@@ -1150,10 +1197,19 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
     {
         HideConnectionPanel();
         ShowNotification($"Connected: {message}");
+        
+        // If we're in a login process, transition to multiplayer panel
+        if (isLoginInProgress)
+        {
+            isLoginInProgress = false;
+            ShowMultiplayerPanel();
+            ShowNotification("Login successful! Ready to play!");
+        }
     }
     
     private void OnDisconnected(string message)
     {
+        isLoginInProgress = false;
         HideConnectionPanel();
         ShowMainMenu();
         ShowNotification($"Disconnected: {message}");
@@ -1161,6 +1217,7 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
     
     private void OnConnectionFailed(string message)
     {
+        isLoginInProgress = false;
         HideConnectionPanel();
         ShowMainMenu();
         ShowNotification($"Connection failed: {message}");
@@ -1184,6 +1241,7 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
     
     private void OnRoomCreated(RoomInfo roomInfo)
     {
+        Debug.Log($"OnRoomCreated called: ID={roomInfo.Id}, Name={roomInfo.Name}");
         HideConnectionPanel();
         
         currentRoomId = roomInfo.Id;
@@ -1198,7 +1256,7 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
             playersInRoom.Add(sessionId);
         }
         
-        Debug.Log($"Room created: ID={currentRoomId}, Name={currentRoomName}, SessionID={sessionId}, isHost={isHost}");
+        Debug.Log($"Room created successfully: ID={currentRoomId}, Name={currentRoomName}, SessionID={sessionId}, isHost={isHost}");
         
         ShowRoomLobbyPanel();
         UpdateRoomInfo();
@@ -2374,6 +2432,7 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
     
     private void AuthenticateWithServer(string username, string password)
     {
+        isLoginInProgress = true;
         ShowConnectionPanel("Authenticating...");
         
         if (SecureNetworkManager.Instance != null)
@@ -2389,6 +2448,7 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
             else
             {
                 // Already connected, just authenticate
+                isLoginInProgress = false;
                 ShowMultiplayerPanel();
                 HideConnectionPanel();
                 ShowNotification("Ready to play!");
@@ -2396,6 +2456,7 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
         }
         else
         {
+            isLoginInProgress = false;
             ShowNotification("Network manager not available");
             HideConnectionPanel();
         }
