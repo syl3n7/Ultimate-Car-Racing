@@ -6,6 +6,7 @@ using UnityEngine.UI;
 using TMPro;
 using UnityEngine.SceneManagement;
 using System.IO;
+using System.Threading.Tasks;
 
 public class UIManager : MonoBehaviour
 {
@@ -961,6 +962,7 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
             roomName = $"{playerName}'s Room";
         
         Debug.Log($"Attempting to create room: {roomName}");
+        Debug.Log($"Current auth state: Connected={SecureNetworkManager.Instance.IsConnected}, Authenticated={SecureNetworkManager.Instance.IsAuthenticated}");
         
         try 
         {

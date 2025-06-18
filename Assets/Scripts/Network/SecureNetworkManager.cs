@@ -50,6 +50,9 @@ public class SecureNetworkManager : MonoBehaviour
     [SerializeField] private bool enableDebugLogs = true;
     [SerializeField] private bool logNetworkTraffic = false;
     
+    [Header("Keepalive Settings")]
+    [SerializeField] private float pingIntervalSeconds = 30f; // Send ping every 30 seconds
+    
     // Core networking components
     private TcpClient _tcpClient;
     private SslStream _sslStream;
@@ -264,11 +267,24 @@ public class SecureNetworkManager : MonoBehaviour
                     // 5. Start receiving messages
                     _ = Task.Run(ReceiveMessages);
                     
-                    // 6. Authenticate with server
+                    // 6. Start automatic ping coroutine
+                    _pingCoroutine = StartCoroutine(AutoPingCoroutine());
+                    
+                    // 7. Authenticate with server
                     await AuthenticateAsync();
                     
-                    // 7. Initialize UDP client for game data
+                    // 8. Initialize UDP client for game data
                     _udpClient = new UdpClient();
+                    
+                    // 9. Start UDP receiving
+                    _ = Task.Run(StartUdpReceiving);
+                    
+                    // Start ping coroutine for keepalive
+                    _pingCoroutine = StartCoroutine(PingServerCoroutine());
+                    _ = StartCoroutine(AutoPingCoroutine());
+                    
+                    // Start receiving UDP messages
+                    _ = Task.Run(StartUdpReceiving);
                     
                     return true;
                 }
@@ -300,6 +316,16 @@ public class SecureNetworkManager : MonoBehaviour
         
         try
         {
+            // Send BYE command for graceful disconnect
+            await SendByeAsync();
+            
+            // Stop ping coroutine
+            if (_pingCoroutine != null)
+            {
+                StopCoroutine(_pingCoroutine);
+                _pingCoroutine = null;
+            }
+            
             // Close readers/writers
             _tcpReader?.Close();
             _tcpWriter?.Close();
@@ -507,6 +533,9 @@ public class SecureNetworkManager : MonoBehaviour
                 case "NAME_OK":
                     HandleNameOk(jsonData);
                     break;
+                case "AUTH_OK":
+                    HandleAuthOk(jsonData);
+                    break;
                 case "AUTH_FAILED":
                     HandleAuthFailed(jsonData);
                     break;
@@ -514,9 +543,11 @@ public class SecureNetworkManager : MonoBehaviour
                     HandleRoomCreated(jsonData);
                     break;
                 case "JOIN_OK":
+                case "ROOM_JOIN_OK":
                     HandleRoomJoined(jsonData);
                     break;
                 case "ROOM_LEFT":
+                case "ROOM_LEFT_OK":
                     HandleRoomLeft(jsonData);
                     break;
                 case "ROOM_LIST":
@@ -540,6 +571,12 @@ public class SecureNetworkManager : MonoBehaviour
                 case "PONG":
                     HandlePong();
                     break;
+                case "PLAYER_INFO":
+                    HandlePlayerInfo(jsonData);
+                    break;
+                case "GAME_END":
+                    HandleGameEnd(jsonData);
+                    break;
                 default:
                     Log($"Unhandled command: {command}");
                     break;
@@ -549,6 +586,13 @@ public class SecureNetworkManager : MonoBehaviour
         {
             LogError($"Failed to process TCP message: {ex.Message}");
         }
+    }
+    
+    private void HandleAuthOk(Dictionary<string, object> data)
+    {
+        Log("Re-authentication successful");
+        _isAuthenticated = true;
+        OnAuthenticationChanged?.Invoke(true);
     }
     
     /// <summary>
@@ -883,6 +927,34 @@ public class SecureNetworkManager : MonoBehaviour
         }
     }
 
+    private void HandlePlayerInfo(Dictionary<string, object> data)
+    {
+        Log("Received player info from server");
+        
+        // Extract player information including spawn position
+        if (data.ContainsKey("spawnPosition"))
+        {
+            // Handle spawn position data
+            Log($"Player spawn position received");
+        }
+        
+        if (data.ContainsKey("playerId"))
+        {
+            Log($"Player ID: {data["playerId"]}");
+        }
+        
+        // TODO: Parse and use player info data as needed
+    }
+    
+    private void HandleGameEnd(Dictionary<string, object> data)
+    {
+        Log("Game ended");
+        _isInRoom = false;
+        
+        // TODO: Handle game end scenario
+        OnError?.Invoke("Game ended");
+    }
+    
     #endregion
     
     #region UDP Communication
@@ -936,12 +1008,14 @@ public class SecureNetworkManager : MonoBehaviour
                 _lastUdpMessage = DateTime.UtcNow;
             }
             
-            var update = new PositionUpdateMessage
+            // Create update message in MP-Server format
+            var update = new
             {
                 command = "UPDATE",
                 sessionId = _sessionId,
-                position = new Vector3Data { x = position.x, y = position.y, z = position.z },
-                rotation = new QuaternionData { x = rotation.x, y = rotation.y, z = rotation.z, w = rotation.w }
+                position = new { x = position.x, y = position.y, z = position.z },
+                rotation = new { x = rotation.x, y = rotation.y, z = rotation.z, w = rotation.w },
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             };
             
             // Send encrypted UDP packet using UdpEncryption
@@ -949,14 +1023,17 @@ public class SecureNetworkManager : MonoBehaviour
             {
                 try
                 {
-                    var json = JsonUtility.ToJson(update);
-                    
                     // Use UdpEncryption instance to create encrypted packet
                     if (_udpCrypto != null)
                     {
                         var encryptedData = _udpCrypto.CreatePacket(update);
-                        await _udpClient.SendAsync(encryptedData, encryptedData.Length, serverHost, serverPort);
+                        await _udpClient.SendAsync(encryptedData, encryptedData.Length, _serverUdpEndpoint);
                         _packetsSent++;
+                        
+                        if (logNetworkTraffic)
+                        {
+                            Log($"📤 UDP Position: ({position.x:F2}, {position.y:F2}, {position.z:F2})");
+                        }
                     }
                     else
                     {
@@ -967,11 +1044,6 @@ public class SecureNetworkManager : MonoBehaviour
                 {
                     LogError($"Failed to send encrypted UDP position update: {ex.Message}");
                 }
-            }
-            
-            if (logNetworkTraffic)
-            {
-                Log($"📤 UDP Position: ({position.x:F2}, {position.y:F2}, {position.z:F2})");
             }
         }
         catch (Exception ex)
@@ -984,19 +1056,19 @@ public class SecureNetworkManager : MonoBehaviour
     {
         try
         {
-            var input = new InputUpdateMessage
+            // Create input message in MP-Server format
+            var input = new
             {
                 command = "INPUT",
                 sessionId = _sessionId,
                 roomId = _currentRoomId,
-                input = new InputData
+                input = new
                 {
                     steering = steering,
                     throttle = throttle,
                     brake = brake,
-                    timestamp = Time.time
-                },
-                client_id = _sessionId
+                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                }
             };
             
             // Send encrypted UDP packet using UdpEncryption
@@ -1004,13 +1076,11 @@ public class SecureNetworkManager : MonoBehaviour
             {
                 try
                 {
-                    var json = JsonUtility.ToJson(input);
-                    
                     // Use UdpEncryption instance to create encrypted packet
                     if (_udpCrypto != null)
                     {
                         var encryptedData = _udpCrypto.CreatePacket(input);
-                        await _udpClient.SendAsync(encryptedData, encryptedData.Length, serverHost, serverPort);
+                        await _udpClient.SendAsync(encryptedData, encryptedData.Length, _serverUdpEndpoint);
                         _packetsSent++;
                         
                         if (logNetworkTraffic)
@@ -1032,6 +1102,87 @@ public class SecureNetworkManager : MonoBehaviour
         catch (Exception ex)
         {
             LogError($"Failed to send input update: {ex.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Start receiving UDP messages from server
+    /// </summary>
+    private async Task StartUdpReceiving()
+    {
+        if (_udpClient == null)
+        {
+            LogError("UDP client not initialized");
+            return;
+        }
+
+        try
+        {
+            Log("Starting UDP message receiving...");
+            
+            while (_isConnected && _udpClient != null)
+            {
+                try
+                {
+                    var result = await _udpClient.ReceiveAsync();
+                    var encryptedData = result.Buffer;
+                    
+                    // Decrypt and process UDP message
+                    if (_udpCrypto != null)
+                    {
+                        // Try to parse as position update
+                        var positionUpdate = _udpCrypto.ParsePacket<PlayerUpdate>(encryptedData);
+                        if (!string.IsNullOrEmpty(positionUpdate.SessionId))
+                        {
+                            // Dispatch to main thread for Unity operations
+                            UnityMainThreadDispatcher.Instance().Enqueue(() =>
+                            {
+                                OnPlayerPositionUpdate?.Invoke(positionUpdate);
+                            });
+                            continue;
+                        }
+                        
+                        // Try to parse as input update
+                        var inputUpdate = _udpCrypto.ParsePacket<PlayerInput>(encryptedData);
+                        if (!string.IsNullOrEmpty(inputUpdate.SessionId))
+                        {
+                            // Dispatch to main thread for Unity operations
+                            UnityMainThreadDispatcher.Instance().Enqueue(() =>
+                            {
+                                OnPlayerInputUpdate?.Invoke(inputUpdate);
+                            });
+                            continue;
+                        }
+                        
+                        if (logNetworkTraffic)
+                        {
+                            Log("📥 UDP: Unknown message type received");
+                        }
+                    }
+                    else
+                    {
+                        LogError("UDP encryption not available for decryption");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    if (_isConnected)
+                    {
+                        LogError($"UDP receive error: {ex.Message}");
+                    }
+                    
+                    // Wait before retry to avoid spam
+                    await Task.Delay(1000);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogError($"UDP receiving stopped: {ex.Message}");
+        }
+        finally
+        {
+            Log("UDP receiving stopped");
         }
     }
     
@@ -1245,34 +1396,61 @@ public class SecureNetworkManager : MonoBehaviour
     }
     
     /// <summary>
-    /// Send periodic ping to measure latency
+    /// Send a message to another player
     /// </summary>
-    public async Task SendPingAsync()
+    public async Task SendRelayMessageAsync(string targetPlayerId, string message)
     {
-        if (!_isConnected) return;
-        
+        if (!_isAuthenticated)
+        {
+            LogError("Must be authenticated to send relay messages");
+            return;
+        }
+
         try
         {
-            _lastLatencyCheck = DateTime.UtcNow;
-            
-            // Send PING command as newline-delimited JSON
-            var pingCommand = new
+            // Send RELAY_MESSAGE command as newline-delimited JSON
+            var relayCommand = new
             {
-                command = "PING",
-                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                command = "RELAY_MESSAGE",
+                message = message,
+                targetId = targetPlayerId
             };
             
-            string jsonCommand = JsonUtility.ToJson(pingCommand);
-            await SendTcpMessageAsync(jsonCommand);
+            string json = JsonUtility.ToJson(relayCommand);
+            await SendTcpMessageAsync(json);
             
-            // Latency will be calculated when PONG response is received in HandlePong
+            Log($"Sent relay message to {targetPlayerId}: {message}");
         }
         catch (Exception ex)
         {
-            LogError($"Failed to send ping: {ex.Message}");
+            LogError($"Failed to send relay message: {ex.Message}");
         }
     }
     
+    /// <summary>
+    /// Get current player information including spawn position
+    /// </summary>
+    public async Task RequestPlayerInfoAsync()
+    {
+        try
+        {
+            // Send PLAYER_INFO command as newline-delimited JSON
+            var playerInfoCommand = new
+            {
+                command = "PLAYER_INFO"
+            };
+            
+            string json = JsonUtility.ToJson(playerInfoCommand);
+            await SendTcpMessageAsync(json);
+            
+            Log("Requested player info");
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to request player info: {ex.Message}");
+        }
+    }
+
     #endregion
     
     #region Message Queue Processing
@@ -1466,52 +1644,60 @@ public class SecureNetworkManager : MonoBehaviour
         };
     }
     
-    #endregion
-    
-    #region Logging
-    
-    private void Log(string message)
+    /// <summary>
+    /// Get comprehensive protocol compliance status
+    /// </summary>
+    public Dictionary<string, bool> GetProtocolStatus()
     {
-        if (enableDebugLogs)
+        return new Dictionary<string, bool>
         {
-            Debug.Log($"[MP-Client] {message}");
-        }
+            ["Connected"] = _isConnected,
+            ["Authenticated"] = _isAuthenticated,
+            ["UDP_Encryption"] = _udpCrypto != null,
+            ["In_Room"] = _isInRoom,
+            ["Is_Host"] = IsHost,
+            ["SSL_Connected"] = _sslStream != null && _isConnected,
+            ["TCP_Reader_Active"] = _tcpReader != null,
+            ["TCP_Writer_Active"] = _tcpWriter != null,
+            ["UDP_Client_Active"] = _udpClient != null,
+            ["Ping_Active"] = _pingCoroutine != null
+        };
     }
     
-    private void LogError(string message)
+    /// <summary>
+    /// Get detailed connection information for debugging
+    /// </summary>
+    public string GetConnectionDetails()
     {
-        Debug.LogError($"[MP-Client] {message}");
-    }
-    
-    #endregion
-    
-    #region Unity Lifecycle
-    
-    void OnDestroy()
-    {
-        _connectionCts?.Cancel();
-        _messagingCts?.Cancel();
-        _ = DisconnectAsync();
-    }
-    
-    void OnApplicationPause(bool pauseStatus)
-    {
-        if (pauseStatus && _isConnected)
+        var status = GetProtocolStatus();
+        var details = new StringBuilder();
+        
+        details.AppendLine("=== MP-Server Connection Details ===");
+        details.AppendLine($"Server: {serverHost}:{serverPort}");
+        details.AppendLine($"Player: {playerName}");
+        details.AppendLine($"Session ID: {_sessionId ?? "None"}");
+        details.AppendLine($"Room ID: {_currentRoomId ?? "None"}");
+        details.AppendLine($"Host ID: {_currentRoomHostId ?? "None"}");
+        details.AppendLine("");
+        
+        details.AppendLine("Status:");
+        foreach (var kvp in status)
         {
-            Log("Application paused - maintaining connection");
+            details.AppendLine($"  {kvp.Key}: {(kvp.Value ? "✅" : "❌")}");
         }
+        
+        details.AppendLine("");
+        details.AppendLine("Network Stats:");
+        details.AppendLine($"  Latency: {_latency:F1}ms");
+        details.AppendLine($"  Packets Sent: {_packetsSent}");
+        details.AppendLine($"  Packets Received: {_packetsReceived}");
+        details.AppendLine($"  UDP Update Rate: {udpUpdateRateHz}Hz");
+        details.AppendLine($"  TCP Rate Limit: {rateLimitTcpMs}ms");
+        details.AppendLine($"  UDP Rate Limit: {rateLimitUdpMs}ms");
+        
+        return details.ToString();
     }
-    
-    void OnApplicationFocus(bool hasFocus)
-    {
-        if (!hasFocus && _isConnected)
-        {
-            Log("Application lost focus - maintaining connection");
-        }
-    }
-    
-    #endregion
-    
+
     /// <summary>
     /// Authenticate with the MP-Server after connection
     /// </summary>
@@ -1643,6 +1829,212 @@ public class SecureNetworkManager : MonoBehaviour
         }
         
         return message;
+    }
+    
+    /// <summary>
+    /// Send ping to server to keep connection alive
+    /// </summary>
+    public async Task SendPingAsync()
+    {
+        if (!_isConnected)
+        {
+            return;
+        }
+
+        try
+        {
+            _lastLatencyCheck = DateTime.UtcNow;
+            
+            var pingCommand = new
+            {
+                command = "PING"
+            };
+            
+            string json = JsonUtility.ToJson(pingCommand);
+            await SendTcpMessageAsync(json);
+            
+            if (enableDebugLogs)
+            {
+                Log("Sent PING to server");
+            }
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to send ping: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Send BYE command to gracefully disconnect
+    /// </summary>
+    public async Task SendByeAsync()
+    {
+        if (!_isConnected)
+        {
+            return;
+        }
+
+        try
+        {
+            var byeCommand = new
+            {
+                command = "BYE"
+            };
+            
+            string json = JsonUtility.ToJson(byeCommand);
+            await SendTcpMessageAsync(json);
+            
+            Log("Sent BYE command to server");
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to send BYE: {ex.Message}");
+        }
+    }
+    
+    private IEnumerator PingServerCoroutine()
+    {
+        while (_isConnected)
+        {
+            try
+            {
+                await SendPingAsync();
+            }
+            catch (Exception ex)
+            {
+                LogError($"Error in ping coroutine: {ex.Message}");
+            }
+            
+            // Wait for the next ping interval
+            yield return new WaitForSeconds(pingIntervalSeconds);
+        }
+    }
+    
+    /// <summary>
+    /// Automatic ping coroutine to keep connection alive
+    /// </summary>
+    private IEnumerator AutoPingCoroutine()
+    {
+        while (_isConnected)
+        {
+            yield return new WaitForSeconds(pingIntervalSeconds);
+            
+            if (_isConnected)
+            {
+                _ = SendPingAsync();
+            }
+        }
+    }
+    
+    /// <summary>
+    /// Re-authenticate with the server (using AUTHENTICATE command)
+    /// </summary>
+    public async Task ReAuthenticateAsync()
+    {
+        if (!_isConnected)
+        {
+            LogError("Cannot re-authenticate - not connected");
+            return;
+        }
+
+        try
+        {
+            var authRequest = new
+            {
+                command = "AUTHENTICATE",
+                password = playerPassword
+            };
+            
+            string json = JsonUtility.ToJson(authRequest);
+            await SendTcpMessageAsync(json);
+            
+            Log("Sent re-authentication request");
+        }
+        catch (Exception ex)
+        {
+            LogError($"Re-authentication failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Test all MP-Server protocol commands for compliance verification
+    /// </summary>
+    [System.Diagnostics.Conditional("UNITY_EDITOR")]
+    public async Task TestAllProtocolCommands()
+    {
+        Log("=== MP-Server Protocol Compliance Test ===");
+        
+        if (!_isConnected)
+        {
+            LogError("Cannot test protocol - not connected to server");
+            return;
+        }
+        
+        try
+        {
+            // Test 1: PING/PONG
+            Log("Testing PING command...");
+            await SendPingAsync();
+            await Task.Delay(1000);
+            
+            // Test 2: LIST_ROOMS
+            Log("Testing LIST_ROOMS command...");
+            await RequestRoomListAsync();
+            await Task.Delay(1000);
+            
+            // Test 3: PLAYER_INFO
+            Log("Testing PLAYER_INFO command...");
+            await RequestPlayerInfoAsync();
+            await Task.Delay(1000);
+            
+            if (_isAuthenticated)
+            {
+                // Test 4: CREATE_ROOM
+                Log("Testing CREATE_ROOM command...");
+                await CreateRoomAsync("Test Room " + DateTime.Now.ToString("HH:mm:ss"));
+                await Task.Delay(2000);
+                
+                if (_isInRoom)
+                {
+                    // Test 5: GET_ROOM_PLAYERS
+                    Log("Testing GET_ROOM_PLAYERS command...");
+                    await GetRoomPlayers(_currentRoomId);
+                    await Task.Delay(1000);
+                    
+                    // Test 6: RELAY_MESSAGE
+                    Log("Testing RELAY_MESSAGE command...");
+                    await SendRelayMessageAsync(_sessionId, "Test relay message");
+                    await Task.Delay(1000);
+                    
+                    // Test 7: UDP position update
+                    Log("Testing UDP position update...");
+                    await SendPositionUpdateAsync(Vector3.zero, Quaternion.identity);
+                    await Task.Delay(500);
+                    
+                    // Test 8: UDP input update
+                    Log("Testing UDP input update...");
+                    await SendInputUpdateAsync(0.5f, 0.8f, 0.0f);
+                    await Task.Delay(500);
+                    
+                    // Test 9: LEAVE_ROOM
+                    Log("Testing LEAVE_ROOM command...");
+                    await LeaveRoomAsync();
+                    await Task.Delay(1000);
+                }
+            }
+            
+            Log("=== Protocol Test Complete ===");
+            Log($"Connection: {(_isConnected ? "✅" : "❌")}");
+            Log($"Authentication: {(_isAuthenticated ? "✅" : "❌")}");
+            Log($"UDP Encryption: {(_udpCrypto != null ? "✅" : "❌")}");
+            Log($"Packets Sent: {_packetsSent}");
+            Log($"Packets Received: {_packetsReceived}");
+            Log($"Latency: {_latency:F1}ms");
+        }
+        catch (Exception ex)
+        {
+            LogError($"Protocol test failed: {ex.Message}");
+        }
     }
 }
 
