@@ -1172,6 +1172,9 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
         {
             HideConnectionPanel();
             ShowNotification("Authentication successful");
+            
+            // Automatically navigate to multiplayer panel after successful login
+            ShowMultiplayerPanel();
         }
         else
         {

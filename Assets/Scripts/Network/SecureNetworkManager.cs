@@ -641,12 +641,33 @@ public class SecureNetworkManager : MonoBehaviour
                     break;
                     
                 case "ROOM_LIST":
-                    // For room list, we'll need to parse it differently
-                    // This is a simplified version
-                    if (parts.Length >= 2)
+                    // Parse room list in pipe-delimited format
+                    // Expected format: ROOM_LIST|room1_data|room2_data|...
+                    // Where room_data might be: id,name,hostId,playerCount,maxPlayers,isActive
+                    var rooms = new List<object>();
+                    
+                    for (int i = 1; i < parts.Length; i++)
                     {
-                        result["rooms"] = new object[0]; // Empty for now
+                        if (!string.IsNullOrEmpty(parts[i]))
+                        {
+                            var roomParts = parts[i].Split(',');
+                            if (roomParts.Length >= 3) // At least id, name, and basic info
+                            {
+                                var roomData = new Dictionary<string, object>
+                                {
+                                    ["id"] = roomParts[0],
+                                    ["name"] = roomParts.Length > 1 ? roomParts[1] : "Unknown Room",
+                                    ["hostId"] = roomParts.Length > 2 ? roomParts[2] : "",
+                                    ["playerCount"] = roomParts.Length > 3 && int.TryParse(roomParts[3], out int pc) ? pc : 0,
+                                    ["maxPlayers"] = roomParts.Length > 4 && int.TryParse(roomParts[4], out int mp) ? mp : 8,
+                                    ["isActive"] = roomParts.Length > 5 && bool.TryParse(roomParts[5], out bool active) ? active : true
+                                };
+                                rooms.Add(roomData);
+                            }
+                        }
                     }
+                    
+                    result["rooms"] = rooms.ToArray();
                     break;
                     
                 default:
@@ -749,10 +770,14 @@ public class SecureNetworkManager : MonoBehaviour
     private void HandleRoomList(Dictionary<string, object> data)
     {
         // Handle room list response from server
+        Log($"Handling room list response. Data keys: {string.Join(", ", data.Keys)}");
+        
         var roomList = new List<RoomInfo>();
         
         if (data.ContainsKey("rooms") && data["rooms"] is object[] rooms)
         {
+            Log($"Found {rooms.Length} rooms in response");
+            
             foreach (var roomData in rooms)
             {
                 if (roomData is Dictionary<string, object> room)
@@ -778,8 +803,13 @@ public class SecureNetworkManager : MonoBehaviour
                         bool.TryParse(room["isActive"].ToString(), out roomInfo.IsActive);
                     
                     roomList.Add(roomInfo);
+                    Log($"Added room: {roomInfo.Name} (ID: {roomInfo.Id}, Players: {roomInfo.PlayerCount}/{roomInfo.MaxPlayers})");
                 }
             }
+        }
+        else
+        {
+            LogError($"Room list response missing 'rooms' key or wrong format. Available keys: {string.Join(", ", data.Keys)}");
         }
         
         OnRoomListReceived?.Invoke(roomList);
@@ -1160,7 +1190,12 @@ public class SecureNetworkManager : MonoBehaviour
 
         try
         {
-            // Send LIST_ROOMS command to server using JSON format
+            if (enableDebugLogs)
+            {
+                Log("Sending room list request to server...");
+            }
+            
+            // Send LIST_ROOMS command to server using proper JSON format
             var listRoomsRequest = new
             {
                 command = "LIST_ROOMS"
@@ -1169,7 +1204,6 @@ public class SecureNetworkManager : MonoBehaviour
             string json = JsonUtility.ToJson(listRoomsRequest);
             await SendTcpMessageAsync(json);
             
-            // Response will be handled in ProcessTcpMessage when server responds
             Log("Requesting room list from server");
         }
         catch (Exception ex)
@@ -1610,108 +1644,7 @@ public class SecureNetworkManager : MonoBehaviour
         
         return message;
     }
-}
-
-// Data structures for MP-Server protocol (Unity-compatible)
-[System.Serializable]
-public struct PlayerUpdate
-{
-    public string SessionId;
-    public Vector3 Position;
-    public Quaternion Rotation;
-    public float Timestamp;
-}
-
-[System.Serializable]
-public struct PlayerInput
-{
-    public string SessionId;
-    public float Steering;
-    public float Throttle;
-    public float Brake;
-    public float Timestamp;
-}
-
-[System.Serializable]
-public struct RoomInfo
-{
-    public string Id;
-    public string Name;
-    public string HostId;
-    public int PlayerCount;
-    public int MaxPlayers;
-    public bool IsActive;
-}
-
-[System.Serializable]
-public struct GameStartData
-{
-    public string RoomId;
-    public string HostId;
-    public Dictionary<string, Vector3> SpawnPositions;
-}
-
-[System.Serializable]
-public struct RelayMessage
-{
-    public string SenderId;
-    public string SenderName;
-    public string Message;
-}
-
-[System.Serializable]
-public struct NetworkStats
-{
-    public float Latency;
-    public int PacketsSent;
-    public int PacketsReceived;
-    public bool IsConnected;
-    public bool IsAuthenticated;
-    public bool UdpEncrypted;
-}
-
-// Internal Unity-compatible message structures
-[System.Serializable]
-internal class PositionUpdateMessage
-{
-    public string command;
-    public string sessionId;
-    public Vector3Data position;
-    public QuaternionData rotation;
-}
-
-[System.Serializable]
-internal class InputUpdateMessage
-{
-    public string command;
-    public string sessionId;
-    public string roomId;
-    public InputData input;
-    public string client_id;
-}
-
-[System.Serializable]
-internal class Vector3Data
-{
-    public float x;
-    public float y;
-    public float z;
-}
-
-[System.Serializable]
-internal class QuaternionData
-{
-    public float x;
-    public float y;
-    public float z;
-    public float w;
-}
-
-[System.Serializable]
-internal class InputData
-{
-    public float steering;
-    public float throttle;
-    public float brake;
-    public float timestamp;
+    
+    /// <summary>
+    /// Helper method to send JSON commands to the server
 }
