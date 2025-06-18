@@ -4050,14 +4050,12 @@ RectTransform:
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 398888627}
-  - {fileID: 533121134}
   - {fileID: 1979019096}
   - {fileID: 825215803}
   - {fileID: 1772979099}
   - {fileID: 701115293}
   - {fileID: 499118865}
   - {fileID: 1682046184}
-  - {fileID: 1531169047}
   - {fileID: 1768485843}
   - {fileID: 51321679}
   - {fileID: 1694105003}
@@ -4065,6 +4063,8 @@ RectTransform:
   - {fileID: 1355974895}
   - {fileID: 2024558283}
   - {fileID: 732438998}
+  - {fileID: 1531169047}
+  - {fileID: 533121134}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
@@ -4092,7 +4092,7 @@ MonoBehaviour:
   roomListPanel: {fileID: 1694105002}
   roomLobbyPanel: {fileID: 1555562241}
   profileListContent: {fileID: 240730154}
-  profileListItemPrefab: {fileID: 5723622210698753489, guid: b0fbdaa4c945a4c24b46ee942df78fd0, type: 3}
+  profileListItemPrefab: {fileID: 5723622210698753489, guid: 543d36c9d081c44d2af8eb6b6db04aa4, type: 3}
   currentProfileText: {fileID: 1432429072}
   newProfileButton: {fileID: 23200889}
   playButton: {fileID: 1646967546}
@@ -7333,7 +7333,7 @@ RectTransform:
   m_Father: {fileID: 1724256120}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
-  m_AnchorMax: {x: 0, y: 0}
+  m_AnchorMax: {x: 0, y: 1}
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 10, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
@@ -32308,9 +32308,9 @@ RectTransform:
   m_Father: {fileID: 871774524}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
-  m_AnchorMax: {x: 0, y: 0}
+  m_AnchorMax: {x: 1, y: 1}
   m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 0, y: 0}
+  m_SizeDelta: {x: -17, y: 0}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &1305802067
 MonoBehaviour:
@@ -41935,7 +41935,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &1694105003
 RectTransform:
   m_ObjectHideFlags: 0
@@ -47136,7 +47136,7 @@ RectTransform:
   m_Father: {fileID: 1056785154}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
-  m_AnchorMax: {x: 0, y: 0}
+  m_AnchorMax: {x: 0, y: 1}
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 20, y: 0}
   m_Pivot: {x: 0.5, y: 0.5}
@@ -49800,8 +49800,8 @@ RectTransform:
   m_Children: []
   m_Father: {fileID: 1580766339}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
-  m_AnchorMin: {x: 0, y: 0}
-  m_AnchorMax: {x: 0, y: 0}
+  m_AnchorMin: {x: 0, y: 0.24960285}
+  m_AnchorMax: {x: 1, y: 1}
   m_AnchoredPosition: {x: 0, y: 0}
   m_SizeDelta: {x: 20, y: 20}
   m_Pivot: {x: 0.5, y: 0.5}

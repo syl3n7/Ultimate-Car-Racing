@@ -24,7 +24,7 @@ public class SecureNetworkManager : MonoBehaviour
     public static SecureNetworkManager Instance { get; private set; }
     
     [Header("Server Configuration")]
-    [SerializeField] private string serverHost = "localhost";
+    [SerializeField] private string serverHost = "89.114.116.19";
     [SerializeField] private int serverPort = 443; // TLS port for MP-Server
     [SerializeField] private bool acceptSelfSignedCerts = true; // Development mode
     [SerializeField] private string pinnedCertificateThumbprint = ""; // Production mode
@@ -189,26 +189,87 @@ public class SecureNetworkManager : MonoBehaviour
                 attempt++;
                 Log($"Connecting to MP-Server (attempt {attempt}/{maxRetryAttempts})...");
                 
-                // Create TCP client and connect to server
+                // 1. Create TCP client and connect to server
                 _tcpClient = new TcpClient();
                 await _tcpClient.ConnectAsync(serverHost, serverPort);
                 
                 if (_tcpClient.Connected)
                 {
-                    // Also initialize UDP client for game data
-                    _udpClient = new UdpClient();
+                    // 2. Setup TLS/SSL stream (accept self-signed certificates for MP-Server)
+                    _sslStream = new SslStream(_tcpClient.GetStream(), false, ValidateServerCertificate);
+                    await _sslStream.AuthenticateAsClientAsync(serverHost);
+                    
+                    // 3. Setup readers/writers for protocol communication
+                    _tcpReader = new StreamReader(_sslStream, Encoding.UTF8);
+                    _tcpWriter = new StreamWriter(_sslStream, Encoding.UTF8);
+                    
+                    // 4. Read connection confirmation from server
+                    string response = await _tcpReader.ReadLineAsync();
+                    
+                    // Parse connection response (supports both JSON and pipe-delimited formats)
+                    Dictionary<string, object> connectionData = null;
+                    string sessionId = null;
+                    
+                    if (response.StartsWith("{"))
+                    {
+                        // JSON format
+                        connectionData = ParseJsonMessage(response);
+                        if (connectionData == null || !connectionData.ContainsKey("command") || 
+                            connectionData["command"].ToString() != "CONNECTED")
+                        {
+                            throw new Exception($"Invalid JSON server response: {response}");
+                        }
+                        
+                        if (connectionData.ContainsKey("sessionId"))
+                        {
+                            sessionId = connectionData["sessionId"].ToString();
+                        }
+                    }
+                    else if (response.Contains("|"))
+                    {
+                        // Pipe-delimited format: CONNECTED|sessionId
+                        var parts = response.Split('|');
+                        if (parts.Length >= 2 && parts[0] == "CONNECTED")
+                        {
+                            sessionId = parts[1];
+                            connectionData = new Dictionary<string, object>
+                            {
+                                ["command"] = "CONNECTED",
+                                ["sessionId"] = sessionId
+                            };
+                        }
+                        else
+                        {
+                            throw new Exception($"Invalid pipe-delimited server response: {response}");
+                        }
+                    }
+                    else
+                    {
+                        throw new Exception($"Invalid server response format: {response}");
+                    }
+                    
+                    if (string.IsNullOrEmpty(sessionId))
+                    {
+                        throw new Exception("Server did not provide session ID");
+                    }
+                    
+                    _sessionId = sessionId;
                     
                     _isConnected = true;
-                    _sessionId = System.Guid.NewGuid().ToString();
-                    
-                    // Start receiving messages
-                    _ = Task.Run(ReceiveMessages);
                     
                     Log($"✅ Successfully connected to MP-Server at {serverHost}:{serverPort}");
+                    Log($"Session ID: {_sessionId}");
                     OnConnected?.Invoke($"Connected to {serverHost}:{serverPort}");
                     
-                    // Attempt authentication
+                    // 5. Start receiving messages
+                    _ = Task.Run(ReceiveMessages);
+                    
+                    // 6. Authenticate with server
                     await AuthenticateAsync();
+                    
+                    // 7. Initialize UDP client for game data
+                    _udpClient = new UdpClient();
+                    
                     return true;
                 }
                 else
@@ -239,6 +300,16 @@ public class SecureNetworkManager : MonoBehaviour
         
         try
         {
+            // Close readers/writers
+            _tcpReader?.Close();
+            _tcpWriter?.Close();
+            _tcpReader = null;
+            _tcpWriter = null;
+            
+            // Close SSL stream
+            _sslStream?.Close();
+            _sslStream = null;
+            
             // Close TCP connection properly
             if (_tcpClient != null && _tcpClient.Connected)
             {
@@ -310,8 +381,6 @@ public class SecureNetworkManager : MonoBehaviour
             
             // Serialize with Unity's JsonUtility
             var json = SerializeToJson(message);
-            
-            await Task.Delay(50); // Simulate network delay
             
             _packetsSent++;
             
@@ -403,8 +472,27 @@ public class SecureNetworkManager : MonoBehaviour
                 Log($"📥 TCP Received: {message}");
             }
             
-            // Parse JSON using Unity-compatible approach
-            var jsonData = ParseJsonMessage(message);
+            // Parse message (supports both JSON and pipe-delimited formats)
+            Dictionary<string, object> jsonData = null;
+            
+            if (message.StartsWith("{"))
+            {
+                // JSON format
+                jsonData = ParseJsonMessage(message);
+            }
+            else if (message.Contains("|"))
+            {
+                // Pipe-delimited format: COMMAND|param1|param2|...
+                jsonData = ParsePipeDelimitedMessage(message);
+            }
+            else
+            {
+                // Simple command without parameters
+                jsonData = new Dictionary<string, object>
+                {
+                    ["command"] = message.Trim()
+                };
+            }
             
             if (jsonData == null || !jsonData.ContainsKey("command"))
             {
@@ -428,11 +516,20 @@ public class SecureNetworkManager : MonoBehaviour
                 case "JOIN_OK":
                     HandleRoomJoined(jsonData);
                     break;
+                case "ROOM_LEFT":
+                    HandleRoomLeft(jsonData);
+                    break;
                 case "ROOM_LIST":
                     HandleRoomList(jsonData);
                     break;
+                case "ROOM_PLAYERS":
+                    HandleRoomPlayers(jsonData);
+                    break;
                 case "GAME_STARTED":
                     HandleGameStarted(jsonData);
+                    break;
+                case "MESSAGE_SENT":
+                    HandleMessageSent(jsonData);
                     break;
                 case "RELAYED_MESSAGE":
                     HandleRelayedMessage(jsonData);
@@ -495,10 +592,94 @@ public class SecureNetworkManager : MonoBehaviour
         }
     }
     
+    private Dictionary<string, object> ParsePipeDelimitedMessage(string message)
+    {
+        try
+        {
+            var parts = message.Split('|');
+            if (parts.Length == 0) return null;
+            
+            var result = new Dictionary<string, object>
+            {
+                ["command"] = parts[0]
+            };
+            
+            // Handle common pipe-delimited formats
+            switch (parts[0].ToUpper())
+            {
+                case "CONNECTED":
+                    if (parts.Length >= 2)
+                        result["sessionId"] = parts[1];
+                    break;
+                    
+                case "AUTH_OK":
+                case "NAME_OK":
+                    if (parts.Length >= 2)
+                        result["message"] = parts[1];
+                    break;
+                    
+                case "AUTH_FAILED":
+                case "ERROR":
+                    if (parts.Length >= 2)
+                        result["message"] = parts[1];
+                    break;
+                    
+                case "ROOM_CREATED":
+                    if (parts.Length >= 3)
+                    {
+                        result["roomId"] = parts[1];
+                        result["name"] = parts[2];
+                    }
+                    break;
+                    
+                case "JOIN_OK":
+                    if (parts.Length >= 3)
+                    {
+                        result["roomId"] = parts[1];
+                        result["hostId"] = parts[2];
+                    }
+                    break;
+                    
+                case "ROOM_LIST":
+                    // For room list, we'll need to parse it differently
+                    // This is a simplified version
+                    if (parts.Length >= 2)
+                    {
+                        result["rooms"] = new object[0]; // Empty for now
+                    }
+                    break;
+                    
+                default:
+                    // For unknown commands, add all parameters as indexed values
+                    for (int i = 1; i < parts.Length; i++)
+                    {
+                        result[$"param{i}"] = parts[i];
+                    }
+                    break;
+            }
+            
+            return result;
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to parse pipe-delimited message: {ex.Message}");
+            return null;
+        }
+    }
+    
     private void HandleNameOk(Dictionary<string, object> data)
     {
         Log("Authentication successful");
-        // Authentication logic is handled in AuthenticateWithServer method
+        _isAuthenticated = true;
+        
+        // Initialize UDP encryption with session ID
+        if (!string.IsNullOrEmpty(_sessionId))
+        {
+            _udpCrypto = new UdpEncryption(_sessionId);
+            Log("UDP encryption initialized");
+        }
+        
+        OnAuthenticationChanged?.Invoke(true);
     }
     
     private void HandleAuthFailed(Dictionary<string, object> data)
@@ -522,6 +703,7 @@ public class SecureNetworkManager : MonoBehaviour
                 Name = data["name"].ToString(),
                 HostId = _currentRoomHostId,
                 PlayerCount = 1,
+                MaxPlayers = 8, // Default max players
                 IsActive = false
             };
             
@@ -545,7 +727,8 @@ public class SecureNetworkManager : MonoBehaviour
             var roomInfo = new RoomInfo
             {
                 Id = _currentRoomId,
-                HostId = _currentRoomHostId
+                HostId = _currentRoomHostId,
+                MaxPlayers = 8 // Default max players
             };
             
             OnRoomJoined?.Invoke(roomInfo);
@@ -553,23 +736,70 @@ public class SecureNetworkManager : MonoBehaviour
         }
     }
     
-    private void HandleRoomList(Dictionary<string, object> data)
+    private void HandleRoomLeft(Dictionary<string, object> data)
     {
-        // For complex JSON structures like room lists, we'll use a simplified approach
-        // The MP-Server should send room data in a more manageable format
-        var rooms = new List<RoomInfo>();
+        _currentRoomId = null;
+        _currentRoomHostId = null;
+        _isInRoom = false;
         
-        // For now, create a mock room list to maintain functionality
-        // TODO: Update MP-Server to send room list in a simpler format
-        if (data.ContainsKey("roomCount"))
-        {
-            Log("Room list request acknowledged by server");
-        }
-        
-        OnRoomListReceived?.Invoke(rooms);
-        Log($"Received room list with {rooms.Count} rooms");
+        Log("Successfully left room");
+        // OnRoomLeft event would be triggered here if it exists
     }
     
+    private void HandleRoomList(Dictionary<string, object> data)
+    {
+        // Handle room list response from server
+        var roomList = new List<RoomInfo>();
+        
+        if (data.ContainsKey("rooms") && data["rooms"] is object[] rooms)
+        {
+            foreach (var roomData in rooms)
+            {
+                if (roomData is Dictionary<string, object> room)
+                {
+                    var roomInfo = new RoomInfo();
+                    
+                    if (room.ContainsKey("id"))
+                        roomInfo.Id = room["id"].ToString();
+                    
+                    if (room.ContainsKey("name"))
+                        roomInfo.Name = room["name"].ToString();
+                    
+                    if (room.ContainsKey("hostId"))
+                        roomInfo.HostId = room["hostId"].ToString();
+                    
+                    if (room.ContainsKey("playerCount"))
+                        int.TryParse(room["playerCount"].ToString(), out roomInfo.PlayerCount);
+                    
+                    if (room.ContainsKey("maxPlayers"))
+                        int.TryParse(room["maxPlayers"].ToString(), out roomInfo.MaxPlayers);
+                    
+                    if (room.ContainsKey("isActive"))
+                        bool.TryParse(room["isActive"].ToString(), out roomInfo.IsActive);
+                    
+                    roomList.Add(roomInfo);
+                }
+            }
+        }
+        
+        OnRoomListReceived?.Invoke(roomList);
+        Log($"Received room list with {roomList.Count} rooms");
+    }
+    
+    private void HandleRoomPlayers(Dictionary<string, object> data)
+    {
+        // Handle room players list response
+        // For now, just log that we received the response
+        Log("Received room players list from server");
+        // TODO: Parse player list and trigger appropriate events
+    }
+    
+    private void HandleMessageSent(Dictionary<string, object> data)
+    {
+        // Handle confirmation that message was sent
+        Log("Message sent successfully");
+    }
+
     private void HandleGameStarted(Dictionary<string, object> data)
     {
         var gameData = new GameStartData();
@@ -613,8 +843,7 @@ public class SecureNetworkManager : MonoBehaviour
         LogError($"Server error: {message}");
         OnError?.Invoke(message);
     }
-    
-    private void HandlePong()
+     private void HandlePong()
     {
         // Calculate latency
         var now = DateTime.UtcNow;
@@ -623,7 +852,7 @@ public class SecureNetworkManager : MonoBehaviour
             _latency = (float)(now - _lastLatencyCheck).TotalMilliseconds;
         }
     }
-    
+
     #endregion
     
     #region UDP Communication
@@ -685,19 +914,28 @@ public class SecureNetworkManager : MonoBehaviour
                 rotation = new QuaternionData { x = rotation.x, y = rotation.y, z = rotation.z, w = rotation.w }
             };
             
-            // Send real UDP packet
+            // Send encrypted UDP packet using UdpEncryption
             if (_udpClient != null && _isConnected)
             {
                 try
                 {
                     var json = JsonUtility.ToJson(update);
-                    var data = Encoding.UTF8.GetBytes(json);
-                    await _udpClient.SendAsync(data, data.Length, serverHost, serverPort);
-                    _packetsSent++;
+                    
+                    // Use UdpEncryption instance to create encrypted packet
+                    if (_udpCrypto != null)
+                    {
+                        var encryptedData = _udpCrypto.CreatePacket(update);
+                        await _udpClient.SendAsync(encryptedData, encryptedData.Length, serverHost, serverPort);
+                        _packetsSent++;
+                    }
+                    else
+                    {
+                        LogError("UDP encryption not initialized - cannot send position update");
+                    }
                 }
                 catch (Exception ex)
                 {
-                    LogError($"Failed to send UDP position update: {ex.Message}");
+                    LogError($"Failed to send encrypted UDP position update: {ex.Message}");
                 }
             }
             
@@ -731,24 +969,33 @@ public class SecureNetworkManager : MonoBehaviour
                 client_id = _sessionId
             };
             
-            // Send real UDP packet
+            // Send encrypted UDP packet using UdpEncryption
             if (_udpClient != null && _isConnected)
             {
                 try
                 {
                     var json = JsonUtility.ToJson(input);
-                    var data = Encoding.UTF8.GetBytes(json);
-                    await _udpClient.SendAsync(data, data.Length, serverHost, serverPort);
-                    _packetsSent++;
                     
-                    if (logNetworkTraffic)
+                    // Use UdpEncryption instance to create encrypted packet
+                    if (_udpCrypto != null)
                     {
-                        Log($"📤 UDP Input: S:{steering:F2} T:{throttle:F2} B:{brake:F2}");
+                        var encryptedData = _udpCrypto.CreatePacket(input);
+                        await _udpClient.SendAsync(encryptedData, encryptedData.Length, serverHost, serverPort);
+                        _packetsSent++;
+                        
+                        if (logNetworkTraffic)
+                        {
+                            Log($"📤 UDP Input: S:{steering:F2} T:{throttle:F2} B:{brake:F2}");
+                        }
+                    }
+                    else
+                    {
+                        LogError("UDP encryption not initialized - cannot send input update");
                     }
                 }
                 catch (Exception ex)
                 {
-                    LogError($"Failed to send UDP input update: {ex.Message}");
+                    LogError($"Failed to send encrypted UDP input update: {ex.Message}");
                 }
             }
         }
@@ -765,6 +1012,9 @@ public class SecureNetworkManager : MonoBehaviour
     /// <summary>
     /// Create a new racing room
     /// </summary>
+    /// <summary>
+    /// Create a new room on the server
+    /// </summary>
     public async Task CreateRoomAsync(string roomName)
     {
         if (!_isAuthenticated)
@@ -772,24 +1022,26 @@ public class SecureNetworkManager : MonoBehaviour
             LogError("Must be authenticated to create room");
             return;
         }
-        
-        await Task.Delay(500); // Simulate server response time
-        
-        _currentRoomId = System.Guid.NewGuid().ToString();
-        _currentRoomHostId = _sessionId;
-        _isInRoom = true;
-        
-        var roomInfo = new RoomInfo
+
+        try
         {
-            Id = _currentRoomId,
-            Name = roomName,
-            HostId = _currentRoomHostId,
-            PlayerCount = 1,
-            IsActive = false
-        };
-        
-        OnRoomCreated?.Invoke(roomInfo);
-        Log($"Room created: {roomInfo.Name} ({roomInfo.Id})");
+            // Send CREATE_ROOM command to server using JSON format
+            var createRoomRequest = new
+            {
+                command = "CREATE_ROOM",
+                name = roomName
+            };
+            
+            string json = JsonUtility.ToJson(createRoomRequest);
+            await SendTcpMessageAsync(json);
+            
+            // Response will be handled in ProcessTcpMessage when server responds
+            Log($"Creating room: {roomName}");
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to create room: {ex.Message}");
+        }
     }
     
     /// <summary>
@@ -803,23 +1055,27 @@ public class SecureNetworkManager : MonoBehaviour
             return;
         }
         
-        await Task.Delay(500); // Simulate server response time
-        
-        _currentRoomId = roomId;
-        _currentRoomHostId = "host_" + roomId; // Simulate host ID
-        _isInRoom = true;
-        
-        var roomInfo = new RoomInfo
+        try
         {
-            Id = _currentRoomId,
-            Name = "Test Room",
-            HostId = _currentRoomHostId,
-            PlayerCount = 2,
-            IsActive = false
-        };
-        
-        OnRoomJoined?.Invoke(roomInfo);
-        Log($"Joined room: {_currentRoomId}");
+            // Send JOIN_ROOM command as newline-delimited JSON
+            var joinCommand = new
+            {
+                command = "JOIN_ROOM",
+                roomId = roomId
+            };
+            
+            string jsonCommand = JsonUtility.ToJson(joinCommand);
+            await SendTcpMessageAsync(jsonCommand);
+            
+            Log($"Sent join room request for room: {roomId}");
+            
+            // The server response will be handled in HandleTcpMessage
+            // Expected responses: ROOM_JOINED or ERROR
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to join room {roomId}: {ex.Message}");
+        }
     }
     
     /// <summary>
@@ -833,13 +1089,26 @@ public class SecureNetworkManager : MonoBehaviour
             return;
         }
         
-        await Task.Delay(200);
-        
-        _currentRoomId = null;
-        _currentRoomHostId = null;
-        _isInRoom = false;
-        
-        Log("Left room");
+        try
+        {
+            // Send LEAVE_ROOM command as newline-delimited JSON
+            var leaveCommand = new
+            {
+                command = "LEAVE_ROOM"
+            };
+            
+            string jsonCommand = JsonUtility.ToJson(leaveCommand);
+            await SendTcpMessageAsync(jsonCommand);
+            
+            Log("Sent leave room request");
+            
+            // The server response will be handled in HandleTcpMessage
+            // Expected response: ROOM_LEFT
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to leave room: {ex.Message}");
+        }
     }
     
     /// <summary>
@@ -853,24 +1122,33 @@ public class SecureNetworkManager : MonoBehaviour
             return;
         }
         
-        await Task.Delay(500);
-        
-        var gameData = new GameStartData
+        try
         {
-            RoomId = _currentRoomId,
-            HostId = _currentRoomHostId,
-            SpawnPositions = new Dictionary<string, Vector3>
+            // Send START_GAME command as newline-delimited JSON
+            var startCommand = new
             {
-                { _sessionId, new Vector3(0, 0, 0) }
-            }
-        };
-        
-        OnGameStarted?.Invoke(gameData);
-        Log($"Game started in room {gameData.RoomId}");
+                command = "START_GAME"
+            };
+            
+            string jsonCommand = JsonUtility.ToJson(startCommand);
+            await SendTcpMessageAsync(jsonCommand);
+            
+            Log("Sent start game request");
+            
+            // The server response will be handled in HandleTcpMessage
+            // Expected response: GAME_STARTED
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to start game: {ex.Message}");
+        }
     }
     
     /// <summary>
     /// Request list of available rooms
+    /// </summary>
+    /// <summary>
+    /// Request list of available rooms from server
     /// </summary>
     public async Task RequestRoomListAsync()
     {
@@ -879,17 +1157,25 @@ public class SecureNetworkManager : MonoBehaviour
             LogError("Must be connected to request room list");
             return;
         }
-        
-        await Task.Delay(300);
-        
-        var rooms = new List<RoomInfo>
+
+        try
         {
-            new RoomInfo { Id = "room1", Name = "Test Room 1", PlayerCount = 2, IsActive = false, HostId = "host1" },
-            new RoomInfo { Id = "room2", Name = "Test Room 2", PlayerCount = 1, IsActive = false, HostId = "host2" }
-        };
-        
-        OnRoomListReceived?.Invoke(rooms);
-        Log($"Received room list with {rooms.Count} rooms");
+            // Send LIST_ROOMS command to server using JSON format
+            var listRoomsRequest = new
+            {
+                command = "LIST_ROOMS"
+            };
+            
+            string json = JsonUtility.ToJson(listRoomsRequest);
+            await SendTcpMessageAsync(json);
+            
+            // Response will be handled in ProcessTcpMessage when server responds
+            Log("Requesting room list from server");
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to request room list: {ex.Message}");
+        }
     }
     
     /// <summary>
@@ -903,8 +1189,25 @@ public class SecureNetworkManager : MonoBehaviour
             return;
         }
         
-        await Task.Delay(100);
-        Log($"Message sent to {targetId}: {message}");
+        try
+        {
+            // Send MESSAGE command as newline-delimited JSON
+            var messageCommand = new
+            {
+                command = "MESSAGE",
+                targetId = targetId,
+                message = message
+            };
+            
+            string jsonCommand = JsonUtility.ToJson(messageCommand);
+            await SendTcpMessageAsync(jsonCommand);
+            
+            Log($"Sent message to {targetId}: {message}");
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to send message to {targetId}: {ex.Message}");
+        }
     }
     
     /// <summary>
@@ -914,13 +1217,25 @@ public class SecureNetworkManager : MonoBehaviour
     {
         if (!_isConnected) return;
         
-        _lastLatencyCheck = DateTime.UtcNow;
-        await Task.Delay(50);
-        
-        var now = DateTime.UtcNow;
-        if (_lastLatencyCheck != DateTime.MinValue)
+        try
         {
-            _latency = (float)(now - _lastLatencyCheck).TotalMilliseconds;
+            _lastLatencyCheck = DateTime.UtcNow;
+            
+            // Send PING command as newline-delimited JSON
+            var pingCommand = new
+            {
+                command = "PING",
+                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            };
+            
+            string jsonCommand = JsonUtility.ToJson(pingCommand);
+            await SendTcpMessageAsync(jsonCommand);
+            
+            // Latency will be calculated when PONG response is received in HandlePong
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to send ping: {ex.Message}");
         }
     }
     
@@ -1081,8 +1396,24 @@ public class SecureNetworkManager : MonoBehaviour
             return;
         }
         
-        await Task.Delay(100); // Simulate server request
-        Log($"Requested player list for room: {roomId}");
+        try
+        {
+            // Send GET_ROOM_PLAYERS command as newline-delimited JSON
+            var playersCommand = new
+            {
+                command = "GET_ROOM_PLAYERS",
+                roomId = roomId
+            };
+            
+            string jsonCommand = JsonUtility.ToJson(playersCommand);
+            await SendTcpMessageAsync(jsonCommand);
+            
+            Log($"Requested player list for room: {roomId}");
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to get room players for {roomId}: {ex.Message}");
+        }
     }
     
     /// <summary>
@@ -1154,22 +1485,21 @@ public class SecureNetworkManager : MonoBehaviour
     {
         try
         {
-            // Send authentication request
+            // Send NAME command with JSON format
             var authRequest = new
             {
-                command = "AUTH",
-                sessionId = _sessionId,
-                timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                command = "NAME",
+                name = playerName,
+                password = playerPassword
             };
             
-            await SendTcpMessageInternal(authRequest);
+            string json = JsonUtility.ToJson(authRequest);
+            await SendTcpMessageAsync(json);
             
-            // Wait for authentication response (simplified for now)
-            await Task.Delay(1000);
+            Log($"Sent authentication request for player: {playerName}");
             
-            _isAuthenticated = true;
-            OnAuthenticationChanged?.Invoke(true);
-            Log("✅ Successfully authenticated with MP-Server");
+            // Authentication response will be handled in ProcessTcpMessage
+            // when server responds with NAME_OK or AUTH_FAILED
         }
         catch (Exception ex)
         {
@@ -1184,23 +1514,18 @@ public class SecureNetworkManager : MonoBehaviour
     /// </summary>
     private async Task ReceiveMessages()
     {
-        var buffer = new byte[4096];
-        
         try
         {
-            while (_tcpClient != null && _tcpClient.Connected && _isConnected)
+            while (_tcpClient != null && _tcpClient.Connected && _isConnected && _tcpReader != null)
             {
-                var stream = _tcpClient.GetStream();
-                var bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
+                string message = await _tcpReader.ReadLineAsync();
                 
-                if (bytesRead > 0)
+                if (!string.IsNullOrEmpty(message))
                 {
-                    var message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                    
                     // Process received message on main thread
                     UnityMainThreadDispatcher.Instance().Enqueue(() =>
                     {
-                        ProcessReceivedMessage(message);
+                        ProcessTcpMessage(message);
                     });
                 }
                 else
@@ -1227,49 +1552,63 @@ public class SecureNetworkManager : MonoBehaviour
     }
     
     /// <summary>
-    /// Process received message from server
+    /// Validate server certificate - accept self-signed certificates for MP-Server
     /// </summary>
-    private void ProcessReceivedMessage(string message)
+    private bool ValidateServerCertificate(object sender, X509Certificate certificate, 
+        X509Chain chain, SslPolicyErrors sslPolicyErrors)
     {
+        // Accept self-signed certificates for this MP-Server
+        return true;
+    }
+    
+    /// <summary>
+    /// Send TCP message using MP-Server protocol
+    /// </summary>
+    private async Task SendTcpMessageAsync(string message)
+    {
+        if (_sslStream == null || !_isConnected)
+        {
+            LogError("Cannot send TCP message - not connected or SSL stream not available");
+            return;
+        }
+
         try
         {
-            Log($"Received: {message}");
+            byte[] data = Encoding.UTF8.GetBytes(message + "\n");
+            await _sslStream.WriteAsync(data, 0, data.Length);
+            await _sslStream.FlushAsync();
             
-            // Parse and handle different message types
-            // This is a simplified implementation - you'll want to add proper JSON parsing
-            if (message.Contains("\"command\":\"ROOM_LIST\""))
+            if (logNetworkTraffic)
             {
-                // Handle room list response
-                OnRoomListReceived?.Invoke(new List<RoomInfo>());
+                Log($"📤 TCP Sent: {message}");
             }
-            else if (message.Contains("\"command\":\"ROOM_JOINED\""))
-            {
-                // Handle room joined response - create a basic RoomInfo object
-                var roomInfo = new RoomInfo
-                {
-                    Id = "unknown",
-                    Name = "Joined Room",
-                    HostId = "host_unknown",
-                    PlayerCount = 1,
-                    IsActive = true
-                };
-                OnRoomJoined?.Invoke(roomInfo);
-            }
-            // Add more message type handling as needed
-            
-            // Create RelayMessage for the general message received event
-            var relayMessage = new RelayMessage
-            {
-                SenderId = "server",
-                SenderName = "Server",
-                Message = message
-            };
-            OnMessageReceived?.Invoke(relayMessage);
         }
         catch (Exception ex)
         {
-            LogError($"Error processing received message: {ex.Message}");
+            LogError($"Failed to send TCP message: {ex.Message}");
         }
+    }
+    
+    /// <summary>
+    /// Read TCP message using MP-Server protocol
+    /// </summary>
+    private async Task<string> ReadTcpMessage()
+    {
+        if (_sslStream == null)
+        {
+            throw new Exception("SSL stream not available");
+        }
+
+        byte[] buffer = new byte[4096];
+        int bytesRead = await _sslStream.ReadAsync(buffer, 0, buffer.Length);
+        string message = Encoding.UTF8.GetString(buffer, 0, bytesRead).Trim();
+        
+        if (logNetworkTraffic)
+        {
+            Log($"📥 TCP Received: {message}");
+        }
+        
+        return message;
     }
 }
 
@@ -1300,6 +1639,7 @@ public struct RoomInfo
     public string Name;
     public string HostId;
     public int PlayerCount;
+    public int MaxPlayers;
     public bool IsActive;
 }
 

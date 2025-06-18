@@ -922,10 +922,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d0d637073aa074aa0888781edf830397, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  nameText: {fileID: 0}
-  infoText: {fileID: 0}
-  selectButton: {fileID: 0}
-  deleteButton: {fileID: 0}
+  nameText: {fileID: 6121019010257317387}
+  infoText: {fileID: 2968386601461319644}
+  selectButton: {fileID: 7784039150825034811}
+  deleteButton: {fileID: 7187263626092196420}
   normalColor: {r: 1, g: 1, b: 1, a: 1}
   selectedColor: {r: 0.8, g: 0.9, b: 1, a: 1}
   deleteColor: {r: 1, g: 0.8, b: 0.8, a: 1}

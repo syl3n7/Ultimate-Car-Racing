@@ -2423,11 +2423,23 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
     {
         if (profile != null)
         {
-            ShowConfirmationDialog(
-                $"Are you sure you want to delete the profile '{profile.name}'?\n\nThis action cannot be undone.",
-                () => ConfirmDeleteProfile(profile),
-                () => HideConfirmationDialog()
-            );
+            // Delete immediately without confirmation
+            savedProfiles.Remove(profile);
+            SaveProfiles();
+            ShowNotification($"Profile {profile.name} deleted");
+            
+            // Clear current profile if it was the deleted one
+            if (selectedProfile == profile)
+            {
+                selectedProfile = null;
+                playerName = "Player";
+                playerId = null;
+                if (currentProfileText != null)
+                    currentProfileText.text = "Profile: None";
+            }
+            
+            // Refresh profile list
+            RefreshProfileList();
         }
         else
         {
