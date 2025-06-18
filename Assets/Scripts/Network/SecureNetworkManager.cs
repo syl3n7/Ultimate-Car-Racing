@@ -52,6 +52,7 @@ public class SecureNetworkManager : MonoBehaviour
     
     [Header("Keepalive Settings")]
     [SerializeField] private float pingIntervalSeconds = 30f; // Send ping every 30 seconds
+    private Coroutine _pingCoroutine;
     
     // Core networking components
     private TcpClient _tcpClient;
@@ -90,6 +91,7 @@ public class SecureNetworkManager : MonoBehaviour
     // Cancellation tokens for cleanup
     private CancellationTokenSource _connectionCts;
     private CancellationTokenSource _messagingCts;
+    private CancellationTokenSource _udpReceiveCancellation;
     
     // JSON serialization using Unity's JsonUtility (Unity-compatible)
     private static string SerializeToJson<T>(T obj)
@@ -270,21 +272,7 @@ public class SecureNetworkManager : MonoBehaviour
                     // 6. Start automatic ping coroutine
                     _pingCoroutine = StartCoroutine(AutoPingCoroutine());
                     
-                    // 7. Authenticate with server
-                    await AuthenticateAsync();
-                    
-                    // 8. Initialize UDP client for game data
-                    _udpClient = new UdpClient();
-                    
-                    // 9. Start UDP receiving
-                    _ = Task.Run(StartUdpReceiving);
-                    
-                    // Start ping coroutine for keepalive
-                    _pingCoroutine = StartCoroutine(PingServerCoroutine());
-                    _ = StartCoroutine(AutoPingCoroutine());
-                    
-                    // Start receiving UDP messages
-                    _ = Task.Run(StartUdpReceiving);
+                    Log("Connected to MP-Server. Ready for authentication.");
                     
                     return true;
                 }
@@ -343,12 +331,8 @@ public class SecureNetworkManager : MonoBehaviour
                 _tcpClient = null;
             }
             
-            // Close UDP connection properly
-            if (_udpClient != null)
-            {
-                _udpClient.Close();
-                _udpClient = null;
-            }
+            // Clean up UDP connection properly
+            CleanupUdpForGameSession();
             
             // Small delay to ensure cleanup
             await Task.Delay(100);
@@ -590,9 +574,10 @@ public class SecureNetworkManager : MonoBehaviour
     
     private void HandleAuthOk(Dictionary<string, object> data)
     {
-        Log("Re-authentication successful");
+        Log("Re-authentication successful via AUTH_OK");
         _isAuthenticated = true;
         OnAuthenticationChanged?.Invoke(true);
+        Log($"Authentication status updated to: {_isAuthenticated}");
     }
     
     /// <summary>
@@ -734,7 +719,7 @@ public class SecureNetworkManager : MonoBehaviour
     
     private void HandleNameOk(Dictionary<string, object> data)
     {
-        Log("Authentication successful");
+        Log("Authentication successful via NAME_OK");
         _isAuthenticated = true;
         
         // Initialize UDP encryption with session ID
@@ -745,6 +730,7 @@ public class SecureNetworkManager : MonoBehaviour
         }
         
         OnAuthenticationChanged?.Invoke(true);
+        Log($"Authentication status updated to: {_isAuthenticated}");
     }
     
     private void HandleAuthFailed(Dictionary<string, object> data)
@@ -806,6 +792,9 @@ public class SecureNetworkManager : MonoBehaviour
         _currentRoomId = null;
         _currentRoomHostId = null;
         _isInRoom = false;
+        
+        // Clean up UDP when leaving room (game session ends)
+        CleanupUdpForGameSession();
         
         Log("Successfully left room");
         // OnRoomLeft event would be triggered here if it exists
@@ -889,6 +878,9 @@ public class SecureNetworkManager : MonoBehaviour
         
         // For now, create default spawn positions
         gameData.SpawnPositions[_sessionId] = Vector3.zero;
+        
+        // Initialize UDP communication now that the game session has started
+        InitializeUdpForGameSession();
         
         OnGameStarted?.Invoke(gameData);
         Log($"Game started in room {gameData.RoomId} with {gameData.SpawnPositions?.Count ?? 0} spawn positions");
@@ -981,11 +973,11 @@ public class SecureNetworkManager : MonoBehaviour
     
     private bool CanSendUdp()
     {
-        if (!_isAuthenticated || !_isInRoom)
+        if (!_isAuthenticated || !_isInRoom || _udpClient == null)
         {
             if (enableDebugLogs)
             {
-                Log($"Cannot send UDP - Auth: {_isAuthenticated}, Room: {_isInRoom}");
+                Log($"Cannot send UDP - Auth: {_isAuthenticated}, Room: {_isInRoom}, UDP: {_udpClient != null}");
             }
             return false;
         }
@@ -1120,7 +1112,10 @@ public class SecureNetworkManager : MonoBehaviour
         {
             Log("Starting UDP message receiving...");
             
-            while (_isConnected && _udpClient != null)
+            // Initialize cancellation token for UDP receiving
+            _udpReceiveCancellation = new CancellationTokenSource();
+            
+            while (_isConnected && _udpClient != null && !_udpReceiveCancellation.Token.IsCancellationRequested)
             {
                 try
                 {
@@ -1186,6 +1181,60 @@ public class SecureNetworkManager : MonoBehaviour
         }
     }
     
+    /// <summary>
+    /// Initialize UDP communication when game session starts
+    /// </summary>
+    private void InitializeUdpForGameSession()
+    {
+        try
+        {
+            if (_udpClient != null)
+            {
+                Log("UDP already initialized, skipping...");
+                return;
+            }
+            
+            Log("Initializing UDP client for game session...");
+            
+            // Initialize UDP client for game data
+            _udpClient = new UdpClient();
+            Log("UDP client initialized for game session");
+            
+            // Start UDP receiving for real-time game data
+            _ = Task.Run(StartUdpReceiving);
+            Log("UDP receiving started for game session");
+        }
+        catch (Exception ex)
+        {
+            LogError($"Failed to initialize UDP for game session: {ex.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Clean up UDP communication when game session ends
+    /// </summary>
+    private void CleanupUdpForGameSession()
+    {
+        try
+        {
+            if (_udpClient != null)
+            {
+                _udpClient.Close();
+                _udpClient.Dispose();
+                _udpClient = null;
+                Log("UDP client cleaned up after game session ended");
+            }
+            
+            // Cancel UDP receiving if active
+            _udpReceiveCancellation?.Cancel();
+            _udpReceiveCancellation = null;
+        }
+        catch (Exception ex)
+        {
+            LogError($"Error cleaning up UDP: {ex.Message}");
+        }
+    }
+
     #endregion
     
     #region Room Management
@@ -1207,11 +1256,7 @@ public class SecureNetworkManager : MonoBehaviour
         try
         {
             // Send CREATE_ROOM command to server using JSON format
-            var createRoomRequest = new
-            {
-                command = "CREATE_ROOM",
-                name = roomName
-            };
+            var createRoomRequest = new CreateRoomRequest(roomName, 8); // Default 8 max players
             
             string json = JsonUtility.ToJson(createRoomRequest);
             await SendTcpMessageAsync(json);
@@ -1239,11 +1284,7 @@ public class SecureNetworkManager : MonoBehaviour
         try
         {
             // Send JOIN_ROOM command as newline-delimited JSON
-            var joinCommand = new
-            {
-                command = "JOIN_ROOM",
-                roomId = roomId
-            };
+            var joinCommand = new JoinRoomRequest(roomId);
             
             string jsonCommand = JsonUtility.ToJson(joinCommand);
             await SendTcpMessageAsync(jsonCommand);
@@ -1347,10 +1388,7 @@ public class SecureNetworkManager : MonoBehaviour
             }
             
             // Send LIST_ROOMS command to server using proper JSON format
-            var listRoomsRequest = new
-            {
-                command = "LIST_ROOMS"
-            };
+            var listRoomsRequest = new SimpleCommand("LIST_ROOMS");
             
             string json = JsonUtility.ToJson(listRoomsRequest);
             await SendTcpMessageAsync(json);
@@ -1699,37 +1737,6 @@ public class SecureNetworkManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Authenticate with the MP-Server after connection
-    /// </summary>
-    private async Task AuthenticateAsync()
-    {
-        try
-        {
-            // Send NAME command with JSON format
-            var authRequest = new
-            {
-                command = "NAME",
-                name = playerName,
-                password = playerPassword
-            };
-            
-            string json = JsonUtility.ToJson(authRequest);
-            await SendTcpMessageAsync(json);
-            
-            Log($"Sent authentication request for player: {playerName}");
-            
-            // Authentication response will be handled in ProcessTcpMessage
-            // when server responds with NAME_OK or AUTH_FAILED
-        }
-        catch (Exception ex)
-        {
-            LogError($"Authentication failed: {ex.Message}");
-            _isAuthenticated = false;
-            OnAuthenticationChanged?.Invoke(false);
-        }
-    }
-    
-    /// <summary>
     /// Receive messages from TCP connection
     /// </summary>
     private async Task ReceiveMessages()
@@ -1892,24 +1899,6 @@ public class SecureNetworkManager : MonoBehaviour
         }
     }
     
-    private IEnumerator PingServerCoroutine()
-    {
-        while (_isConnected)
-        {
-            try
-            {
-                await SendPingAsync();
-            }
-            catch (Exception ex)
-            {
-                LogError($"Error in ping coroutine: {ex.Message}");
-            }
-            
-            // Wait for the next ping interval
-            yield return new WaitForSeconds(pingIntervalSeconds);
-        }
-    }
-    
     /// <summary>
     /// Automatic ping coroutine to keep connection alive
     /// </summary>
@@ -1927,41 +1916,78 @@ public class SecureNetworkManager : MonoBehaviour
     }
     
     /// <summary>
-    /// Re-authenticate with the server (using AUTHENTICATE command)
+    /// Re-authenticate with the server (using NAME command)
     /// </summary>
-    public async Task ReAuthenticateAsync()
+    public async Task<bool> ReAuthenticateAsync()
     {
         if (!_isConnected)
         {
             LogError("Cannot re-authenticate - not connected");
-            return;
+            return false;
+        }
+        
+        if (string.IsNullOrEmpty(playerName))
+        {
+            LogError("Cannot re-authenticate - no player name set");
+            return false;
         }
 
         try
         {
-            var authRequest = new
-            {
-                command = "AUTHENTICATE",
-                password = playerPassword
-            };
+            // Reset authentication state
+            _isAuthenticated = false;
+            OnAuthenticationChanged?.Invoke(false);
+            
+            // Send NAME command with JSON format (same as initial authentication)
+            Log($"Re-auth credentials - Name: '{playerName}', Password length: {playerPassword?.Length ?? 0}");
+            
+            var authRequest = new AuthRequest("NAME", playerName, playerPassword ?? "");
             
             string json = JsonUtility.ToJson(authRequest);
+            Log($"📤 Re-auth JSON being sent: {json}");
             await SendTcpMessageAsync(json);
             
-            Log("Sent re-authentication request");
+            Log($"Sent re-authentication request for player: {playerName}");
+            
+            // Wait for authentication response (with timeout)
+            var startTime = DateTime.Now;
+            var timeout = TimeSpan.FromSeconds(10);
+            
+            Log("Waiting for authentication response...");
+            
+            while (!_isAuthenticated && (DateTime.Now - startTime) < timeout)
+            {
+                await Task.Delay(100);
+            }
+            
+            Log($"Authentication wait completed. Authenticated: {_isAuthenticated}");
+            
+            if (_isAuthenticated)
+            {
+                Log("Re-authentication successful");
+                return true;
+            }
+            else
+            {
+                LogError("Re-authentication timed out");
+                return false;
+            }
         }
         catch (Exception ex)
         {
             LogError($"Re-authentication failed: {ex.Message}");
+            _isAuthenticated = false;
+            OnAuthenticationChanged?.Invoke(false);
+            return false;
         }
     }
 
     /// <summary>
     /// Test all MP-Server protocol commands for compliance verification
     /// </summary>
-    [System.Diagnostics.Conditional("UNITY_EDITOR")]
     public async Task TestAllProtocolCommands()
     {
+#if UNITY_EDITOR
         Log("=== MP-Server Protocol Compliance Test ===");
         
         if (!_isConnected)
@@ -2035,7 +2061,134 @@ public class SecureNetworkManager : MonoBehaviour
         {
             LogError($"Protocol test failed: {ex.Message}");
         }
+#else
+        await Task.CompletedTask; // No-op in non-editor builds
+        Log("Protocol testing is only available in Unity Editor");
+#endif
     }
+    
+    #endregion
+    
+    #region Logging
+    
+    private void Log(string message)
+    {
+        if (enableDebugLogs)
+        {
+            Debug.Log($"[MP-Client] {message}");
+        }
+    }
+    
+    private void LogError(string message)
+    {
+        Debug.LogError($"[MP-Client] {message}");
+    }
+    
+    #endregion
+    
+    #region Unity Lifecycle
+    
+    void OnDestroy()
+    {
+        _connectionCts?.Cancel();
+        _messagingCts?.Cancel();
+        _ = DisconnectAsync();
+    }
+    
+    void OnApplicationPause(bool pauseStatus)
+    {
+        if (pauseStatus && _isConnected)
+        {
+            Log("Application paused - maintaining connection");
+        }
+    }
+    
+    void OnApplicationFocus(bool hasFocus)
+    {
+        if (!hasFocus && _isConnected)
+        {
+            Log("Application lost focus - maintaining connection");
+        }
+    }
+    
+    #endregion
+    
+    #region Authentication
+    
+    /// <summary>
+    /// Authenticate with server using provided credentials
+    /// </summary>
+    public async Task<bool> AuthenticateWithCredentialsAsync(string name, string password)
+    {
+        if (!_isConnected)
+        {
+            LogError("Cannot authenticate - not connected to server");
+            return false;
+        }
+        
+        if (string.IsNullOrEmpty(name))
+        {
+            LogError("Cannot authenticate - player name is empty");
+            return false;
+        }
+        
+        try
+        {
+            // Set credentials
+            playerName = name;
+            playerPassword = password ?? "";
+            
+            Log($"Authenticating with credentials - Name: '{playerName}', Password length: {playerPassword.Length}");
+            
+            // Send NAME command with JSON format using proper serializable class
+            var authRequest = new AuthRequest("NAME", playerName, playerPassword);
+            
+            string json = JsonUtility.ToJson(authRequest);
+            Log($"📤 Sending auth JSON: {json}");
+            await SendTcpMessageAsync(json);
+            
+            Log($"Sent authentication request for player: {playerName}");
+            
+            // Wait for authentication response (with timeout)
+            var startTime = DateTime.Now;
+            var timeout = TimeSpan.FromSeconds(10);
+            
+            Log("Waiting for authentication response...");
+            
+            while (!_isAuthenticated && (DateTime.Now - startTime) < timeout)
+            {
+                await Task.Delay(100);
+            }
+            
+            Log($"Authentication wait completed. Authenticated: {_isAuthenticated}");
+            
+            if (_isAuthenticated)
+            {
+                // Save credentials if authentication successful
+                if (saveCredentials)
+                {
+                    SaveCredentials();
+                }
+                
+                Log("Authentication successful");
+                return true;
+            }
+            else
+            {
+                LogError("Authentication timed out");
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            LogError($"Authentication failed: {ex.Message}");
+            _isAuthenticated = false;
+            OnAuthenticationChanged?.Invoke(false);
+            return false;
+        }
+    }
+    
+    #endregion
 }
 
 // Network data structures for MP-Server protocol
@@ -2150,4 +2303,88 @@ internal class InputData
     public float throttle;
     public float brake;
     public float timestamp;
+}
+
+[System.Serializable]
+public class AuthRequest
+{
+    public string command;
+    public string name;
+    public string password;
+    
+    public AuthRequest(string command, string name, string password)
+    {
+        this.command = command;
+        this.name = name;
+        this.password = password;
+    }
+}
+
+[System.Serializable]
+public class CreateRoomRequest
+{
+    public string command;
+    public string name;
+    public int maxPlayers;
+    
+    public CreateRoomRequest(string roomName, int maxPlayers)
+    {
+        this.command = "CREATE_ROOM";
+        this.name = roomName;
+        this.maxPlayers = maxPlayers;
+    }
+}
+
+[System.Serializable]
+public class JoinRoomRequest
+{
+    public string command;
+    public string roomId;
+    
+    public JoinRoomRequest(string roomId)
+    {
+        this.command = "JOIN_ROOM";
+        this.roomId = roomId;
+    }
+}
+
+[System.Serializable]
+public class SimpleCommand
+{
+    public string command;
+    
+    public SimpleCommand(string commandName)
+    {
+        this.command = commandName;
+    }
+}
+
+[System.Serializable]
+public class MessageRequest
+{
+    public string command;
+    public string message;
+    
+    public MessageRequest(string message)
+    {
+        this.command = "MESSAGE";
+        this.message = message;
+    }
+}
+
+[System.Serializable]
+public class RelayMessageRequest
+{
+    public string command;
+    public string toPlayerId;
+    public string messageType;
+    public string data;
+    
+    public RelayMessageRequest(string toPlayerId, string messageType, string data)
+    {
+        this.command = "RELAY_MESSAGE";
+        this.toPlayerId = toPlayerId;
+        this.messageType = messageType;
+        this.data = data;
+    }
 }

@@ -923,13 +923,29 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
                 
                 try
                 {
-                    // Set credentials and attempt authentication
-                    SecureNetworkManager.Instance.SetCredentials(selectedProfile.name, "");
+                    // Get the actual password (decrypt if needed)
+                    string actualPassword = "";
+                    if (selectedProfile.hasPassword && !string.IsNullOrEmpty(selectedProfile.password))
+                    {
+                        try
+                        {
+                            // Decode the base64 "encrypted" password
+                            byte[] data = System.Convert.FromBase64String(selectedProfile.password);
+                            actualPassword = System.Text.Encoding.UTF8.GetString(data);
+                        }
+                        catch
+                        {
+                            throw new Exception("Could not decrypt saved password");
+                        }
+                    }
                     
-                    // Wait a moment for authentication to complete
-                    await Task.Delay(1000);
+                    Debug.Log($"Attempting auto-authentication for profile: {selectedProfile.name}");
+                    ShowConnectionPanel("Authenticating...");
                     
-                    if (SecureNetworkManager.Instance.IsAuthenticated)
+                    // Attempt authentication with proper method
+                    bool authSuccess = await SecureNetworkManager.Instance.AuthenticateWithCredentialsAsync(selectedProfile.name, actualPassword);
+                    
+                    if (authSuccess)
                     {
                         Debug.Log("Auto-authentication successful");
                         ShowConnectionPanel("Creating room...");
@@ -2432,28 +2448,48 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
         }
     }
     
-    private void AuthenticateWithServer(string username, string password)
+    private async void AuthenticateWithServer(string username, string password)
     {
         isLoginInProgress = true;
         ShowConnectionPanel("Authenticating...");
         
         if (SecureNetworkManager.Instance != null)
         {
-            // Set the credentials in NetworkManager
-            SecureNetworkManager.Instance.SetCredentials(username, password);
-            
-            // If not connected, connect first
-            if (!SecureNetworkManager.Instance.IsConnected)
+            try
             {
-                _ = SecureNetworkManager.Instance.ConnectToServerAsync();
+                // If not connected, connect first
+                if (!SecureNetworkManager.Instance.IsConnected)
+                {
+                    ShowConnectionPanel("Connecting...");
+                    bool connected = await SecureNetworkManager.Instance.ConnectToServerAsync();
+                    if (!connected)
+                    {
+                        throw new Exception("Failed to connect to server");
+                    }
+                }
+                
+                // Now authenticate with the server using proper method
+                ShowConnectionPanel("Authenticating...");
+                bool authenticated = await SecureNetworkManager.Instance.AuthenticateWithCredentialsAsync(username, password);
+                
+                if (authenticated)
+                {
+                    isLoginInProgress = false;
+                    ShowMultiplayerPanel();
+                    HideConnectionPanel();
+                    ShowNotification("Ready to play!");
+                }
+                else
+                {
+                    throw new Exception("Authentication failed");
+                }
             }
-            else
+            catch (Exception ex)
             {
-                // Already connected, just authenticate
                 isLoginInProgress = false;
-                ShowMultiplayerPanel();
+                ShowNotification($"Login failed: {ex.Message}");
                 HideConnectionPanel();
-                ShowNotification("Ready to play!");
+                Debug.LogError($"Authentication error: {ex.Message}");
             }
         }
         else
