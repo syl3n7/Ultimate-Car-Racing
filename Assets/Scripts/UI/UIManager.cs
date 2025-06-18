@@ -982,14 +982,15 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
         
         try 
         {
+            ShowConnectionPanel("Creating room...");
             await SecureNetworkManager.Instance.CreateRoomAsync(roomName);
-            Debug.Log("CreateRoomAsync completed, waiting for callback");
-            // The actual feedback will come through the OnRoomCreated event callback
+            Debug.Log("CreateRoomAsync completed, waiting for server response");
+            // The UI will be updated via OnRoomCreated event callback or OnNetworkError for failures
         }
         catch (Exception e) 
         {
-            Debug.LogError($"Error creating room: {e.Message}");
-            ShowNotification("Error creating room: " + e.Message);
+            Debug.LogError($"CreateRoom exception: {e.Message}");
+            ShowNotification($"Failed to create room: {e.Message}");
             HideConnectionPanel();
         }
     }
@@ -1493,6 +1494,9 @@ private void SetupProfileItemManually(GameObject profileItem, ProfileData profil
     {
         ShowNotification($"Network error: {error}");
         Debug.LogError($"Network error: {error}");
+        
+        // Hide connection panel on any network error
+        HideConnectionPanel();
     }
     
     private void OnRoomListReceived(Dictionary<string, object> message)

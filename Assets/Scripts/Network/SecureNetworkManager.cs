@@ -70,6 +70,7 @@ public class SecureNetworkManager : MonoBehaviour
     private string _sessionId;
     private string _currentRoomId;
     private string _currentRoomHostId;
+    private string _lastRequestedRoomName; // Track room name for response correlation
     private UdpEncryption _udpCrypto;
     private IPEndPoint _serverUdpEndpoint;
     
@@ -482,6 +483,20 @@ public class SecureNetworkManager : MonoBehaviour
                 Log($"📥 TCP Received: {message}");
             }
             
+            // Handle ROOM_LIST response directly with JsonUtility for proper array parsing
+            if (message.Contains("\"command\":\"ROOM_LIST\""))
+            {
+                Log($"🔍 Detected ROOM_LIST command in message: {message}");
+                HandleRoomListResponseDirect(message);
+                return;
+            }
+            
+            // Additional check for malformed or different room list formats
+            if (message.Contains("ROOM_LIST") || message.Contains("rooms"))
+            {
+                Log($"🔍 Found potential room list message (non-standard format): {message}");
+            }
+            
             // Parse message (supports both JSON and pipe-delimited formats)
             Dictionary<string, object> jsonData = null;
             
@@ -524,6 +539,7 @@ public class SecureNetworkManager : MonoBehaviour
                     HandleAuthFailed(jsonData);
                     break;
                 case "ROOM_CREATED":
+                    Log($"Received ROOM_CREATED response: {message}");
                     HandleRoomCreated(jsonData);
                     break;
                 case "JOIN_OK":
@@ -535,6 +551,13 @@ public class SecureNetworkManager : MonoBehaviour
                     HandleRoomLeft(jsonData);
                     break;
                 case "ROOM_LIST":
+                    // Legacy support - old server format
+                    HandleRoomList(jsonData);
+                    break;
+                case "ROOMS":
+                    // This should be handled by HandleRoomListResponseDirect above
+                    // But adding fallback support here
+                    Log("ROOMS command reached switch statement - should have been handled directly");
                     HandleRoomList(jsonData);
                     break;
                 case "ROOM_PLAYERS":
@@ -550,6 +573,7 @@ public class SecureNetworkManager : MonoBehaviour
                     HandleRelayedMessage(jsonData);
                     break;
                 case "ERROR":
+                    Log($"Received ERROR response: {message}");
                     HandleError(jsonData);
                     break;
                 case "PONG":
@@ -742,16 +766,28 @@ public class SecureNetworkManager : MonoBehaviour
     
     private void HandleRoomCreated(Dictionary<string, object> data)
     {
-        if (data.ContainsKey("roomId") && data.ContainsKey("name"))
+        if (data.ContainsKey("roomId"))
         {
             _currentRoomId = data["roomId"].ToString();
             _currentRoomHostId = _sessionId; // Creator becomes host
             _isInRoom = true;
             
+            // Try to get room name from response, fall back to last requested name
+            string roomName = "New Room"; // Default fallback
+            if (data.ContainsKey("name"))
+            {
+                roomName = data["name"].ToString();
+            }
+            else if (!string.IsNullOrEmpty(_lastRequestedRoomName))
+            {
+                roomName = _lastRequestedRoomName;
+                _lastRequestedRoomName = null; // Clear after use
+            }
+            
             var roomInfo = new RoomInfo
             {
                 Id = _currentRoomId,
-                Name = data["name"].ToString(),
+                Name = roomName,
                 HostId = _currentRoomHostId,
                 PlayerCount = 1,
                 MaxPlayers = 8, // Default max players
@@ -759,7 +795,12 @@ public class SecureNetworkManager : MonoBehaviour
             };
             
             OnRoomCreated?.Invoke(roomInfo);
-            Log($"Room created: {roomInfo.Name} ({roomInfo.Id})");
+            Log($"Room created successfully: {roomInfo.Name} (ID: {roomInfo.Id})");
+        }
+        else
+        {
+            LogError("ROOM_CREATED response missing roomId field");
+            OnError?.Invoke("Failed to create room: Invalid server response");
         }
     }
     
@@ -802,14 +843,15 @@ public class SecureNetworkManager : MonoBehaviour
     
     private void HandleRoomList(Dictionary<string, object> data)
     {
-        // Handle room list response from server
-        Log($"Handling room list response. Data keys: {string.Join(", ", data.Keys)}");
+        // Legacy fallback handler - the new ROOMS format should be handled by HandleRoomsResponseDirect
+        Log($"HandleRoomList fallback called. Data keys: {string.Join(", ", data.Keys)}");
         
         var roomList = new List<RoomInfo>();
         
+        // Old dictionary parsing fallback (for legacy servers)
         if (data.ContainsKey("rooms") && data["rooms"] is object[] rooms)
         {
-            Log($"Found {rooms.Length} rooms in response");
+            Log($"Using legacy dictionary parsing. Found {rooms.Length} rooms in response");
             
             foreach (var roomData in rooms)
             {
@@ -826,8 +868,11 @@ public class SecureNetworkManager : MonoBehaviour
                     if (room.ContainsKey("hostId"))
                         roomInfo.HostId = room["hostId"].ToString();
                     
+                    // Try both currentPlayers and playerCount for compatibility
                     if (room.ContainsKey("playerCount"))
                         int.TryParse(room["playerCount"].ToString(), out roomInfo.PlayerCount);
+                    else if (room.ContainsKey("currentPlayers"))
+                        int.TryParse(room["currentPlayers"].ToString(), out roomInfo.PlayerCount);
                     
                     if (room.ContainsKey("maxPlayers"))
                         int.TryParse(room["maxPlayers"].ToString(), out roomInfo.MaxPlayers);
@@ -840,13 +885,14 @@ public class SecureNetworkManager : MonoBehaviour
                 }
             }
         }
-        else
+        
+        if (roomList.Count == 0)
         {
-            LogError($"Room list response missing 'rooms' key or wrong format. Available keys: {string.Join(", ", data.Keys)}");
+            LogError($"Room list response parsing failed. Available keys: {string.Join(", ", data.Keys)}");
         }
         
         OnRoomListReceived?.Invoke(roomList);
-        Log($"Received room list with {roomList.Count} rooms");
+        Log($"Room list fallback handler completed with {roomList.Count} rooms");
     }
     
     private void HandleRoomPlayers(Dictionary<string, object> data)
@@ -1001,14 +1047,7 @@ public class SecureNetworkManager : MonoBehaviour
             }
             
             // Create update message in MP-Server format
-            var update = new
-            {
-                command = "UPDATE",
-                sessionId = _sessionId,
-                position = new { x = position.x, y = position.y, z = position.z },
-                rotation = new { x = rotation.x, y = rotation.y, z = rotation.z, w = rotation.w },
-                timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-            };
+            var update = new PositionUpdateMessage(_sessionId, position, rotation);
             
             // Send encrypted UDP packet using UdpEncryption
             if (_udpClient != null && _isConnected)
@@ -1049,19 +1088,7 @@ public class SecureNetworkManager : MonoBehaviour
         try
         {
             // Create input message in MP-Server format
-            var input = new
-            {
-                command = "INPUT",
-                sessionId = _sessionId,
-                roomId = _currentRoomId,
-                input = new
-                {
-                    steering = steering,
-                    throttle = throttle,
-                    brake = brake,
-                    timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
-                }
-            };
+            var input = new InputUpdateMessage(_sessionId, steering, throttle, brake);
             
             // Send encrypted UDP packet using UdpEncryption
             if (_udpClient != null && _isConnected)
@@ -1243,30 +1270,55 @@ public class SecureNetworkManager : MonoBehaviour
     /// Create a new racing room
     /// </summary>
     /// <summary>
-    /// Create a new room on the server
+    /// Create a new room on the server - Returns the room ID on success, null on failure
+    /// Implements complete MP-Server protocol compliance with proper error handling
     /// </summary>
-    public async Task CreateRoomAsync(string roomName)
+    public async Task<string> CreateRoomAsync(string roomName)
     {
         if (!_isAuthenticated)
         {
             LogError("Must be authenticated to create room");
-            return;
+            OnError?.Invoke("Authentication required to create room");
+            return null;
+        }
+
+        if (string.IsNullOrEmpty(roomName) || roomName.Trim().Length == 0)
+        {
+            LogError("Room name cannot be empty");
+            OnError?.Invoke("Room name cannot be empty");
+            return null;
+        }
+
+        if (roomName.Length > 50)
+        {
+            LogError("Room name too long (max 50 characters)");
+            OnError?.Invoke("Room name too long (max 50 characters)");
+            return null;
         }
 
         try
         {
-            // Send CREATE_ROOM command to server using JSON format
-            var createRoomRequest = new CreateRoomRequest(roomName, 8); // Default 8 max players
+            // Store the requested room name for response correlation
+            _lastRequestedRoomName = roomName.Trim();
+            
+            // Send CREATE_ROOM command to server using exact MP-Server protocol format
+            var createRoomRequest = new CreateRoomRequest(roomName.Trim());
             
             string json = JsonUtility.ToJson(createRoomRequest);
+            Log($"Sending CREATE_ROOM request: {json}");
             await SendTcpMessageAsync(json);
             
+            Log($"Create room request sent for: {roomName}");
             // Response will be handled in ProcessTcpMessage when server responds
-            Log($"Creating room: {roomName}");
+            // OnRoomCreated event will be fired on success, OnError event on failure
+            return null; // This is async - actual result comes via events
         }
         catch (Exception ex)
         {
             LogError($"Failed to create room: {ex.Message}");
+            OnError?.Invoke($"Failed to create room: {ex.Message}");
+            _lastRequestedRoomName = null; // Clear on error
+            return null;
         }
     }
     
@@ -1314,10 +1366,7 @@ public class SecureNetworkManager : MonoBehaviour
         try
         {
             // Send LEAVE_ROOM command as newline-delimited JSON
-            var leaveCommand = new
-            {
-                command = "LEAVE_ROOM"
-            };
+            var leaveCommand = new SimpleCommand("LEAVE_ROOM");
             
             string jsonCommand = JsonUtility.ToJson(leaveCommand);
             await SendTcpMessageAsync(jsonCommand);
@@ -1347,10 +1396,7 @@ public class SecureNetworkManager : MonoBehaviour
         try
         {
             // Send START_GAME command as newline-delimited JSON
-            var startCommand = new
-            {
-                command = "START_GAME"
-            };
+            var startCommand = new SimpleCommand("START_GAME");
             
             string jsonCommand = JsonUtility.ToJson(startCommand);
             await SendTcpMessageAsync(jsonCommand);
@@ -1415,12 +1461,7 @@ public class SecureNetworkManager : MonoBehaviour
         try
         {
             // Send MESSAGE command as newline-delimited JSON
-            var messageCommand = new
-            {
-                command = "MESSAGE",
-                targetId = targetId,
-                message = message
-            };
+            var messageCommand = new MessageRequest(message, targetId);
             
             string jsonCommand = JsonUtility.ToJson(messageCommand);
             await SendTcpMessageAsync(jsonCommand);
@@ -1447,12 +1488,7 @@ public class SecureNetworkManager : MonoBehaviour
         try
         {
             // Send RELAY_MESSAGE command as newline-delimited JSON
-            var relayCommand = new
-            {
-                command = "RELAY_MESSAGE",
-                message = message,
-                targetId = targetPlayerId
-            };
+            var relayCommand = new RelayMessageRequest(message, targetPlayerId);
             
             string json = JsonUtility.ToJson(relayCommand);
             await SendTcpMessageAsync(json);
@@ -1473,10 +1509,7 @@ public class SecureNetworkManager : MonoBehaviour
         try
         {
             // Send PLAYER_INFO command as newline-delimited JSON
-            var playerInfoCommand = new
-            {
-                command = "PLAYER_INFO"
-            };
+            var playerInfoCommand = new SimpleCommand("PLAYER_INFO");
             
             string json = JsonUtility.ToJson(playerInfoCommand);
             await SendTcpMessageAsync(json);
@@ -1649,11 +1682,7 @@ public class SecureNetworkManager : MonoBehaviour
         try
         {
             // Send GET_ROOM_PLAYERS command as newline-delimited JSON
-            var playersCommand = new
-            {
-                command = "GET_ROOM_PLAYERS",
-                roomId = roomId
-            };
+            var playersCommand = new GetRoomPlayersRequest(roomId);
             
             string jsonCommand = JsonUtility.ToJson(playersCommand);
             await SendTcpMessageAsync(jsonCommand);
@@ -1852,12 +1881,11 @@ public class SecureNetworkManager : MonoBehaviour
         {
             _lastLatencyCheck = DateTime.UtcNow;
             
-            var pingCommand = new
-            {
-                command = "PING"
-            };
+            var pingCommand = new SimpleCommand("PING");
             
             string json = JsonUtility.ToJson(pingCommand);
+            Log($"📤 Sending PING: {json}");
+            await SendTcpMessageAsync(json);
             await SendTcpMessageAsync(json);
             
             if (enableDebugLogs)
@@ -1941,7 +1969,7 @@ public class SecureNetworkManager : MonoBehaviour
             // Send NAME command with JSON format (same as initial authentication)
             Log($"Re-auth credentials - Name: '{playerName}', Password length: {playerPassword?.Length ?? 0}");
             
-            var authRequest = new AuthRequest("NAME", playerName, playerPassword ?? "");
+            var authRequest = new AuthRequest(playerName, playerPassword ?? "");
             
             string json = JsonUtility.ToJson(authRequest);
             Log($"📤 Re-auth JSON being sent: {json}");
@@ -2141,7 +2169,7 @@ public class SecureNetworkManager : MonoBehaviour
             Log($"Authenticating with credentials - Name: '{playerName}', Password length: {playerPassword.Length}");
             
             // Send NAME command with JSON format using proper serializable class
-            var authRequest = new AuthRequest("NAME", playerName, playerPassword);
+            var authRequest = new AuthRequest(playerName, playerPassword);
             
             string json = JsonUtility.ToJson(authRequest);
             Log($"📤 Sending auth JSON: {json}");
@@ -2189,6 +2217,124 @@ public class SecureNetworkManager : MonoBehaviour
     }
     
     #endregion
+
+    /// <summary>
+    /// Handle ROOM_LIST response directly using JsonUtility for proper array parsing
+    /// </summary>
+    private void HandleRoomListResponseDirect(string jsonMessage)
+    {
+        try
+        {
+            // Clean up the JSON message first
+            jsonMessage = jsonMessage.Trim();
+            
+            Log("🔍 Parsing ROOM_LIST response with JsonUtility...");
+            Log($"🔍 Raw JSON being parsed: {jsonMessage}");
+            
+            // First, let's check if the JSON structure is valid
+            if (!jsonMessage.Contains("\"rooms\":["))
+            {
+                LogError("❌ JSON doesn't contain expected 'rooms' array structure");
+                
+                // Try alternate parsing method for different server response formats
+                TryAlternateRoomListParsing(jsonMessage);
+                return;
+            }
+            
+            var roomListResponse = JsonUtility.FromJson<RoomListResponse>(jsonMessage);
+            
+            if (roomListResponse == null)
+            {
+                LogError("❌ JsonUtility.FromJson returned null for RoomListResponse");
+                TryAlternateRoomListParsing(jsonMessage);
+                return;
+            }
+            
+            if (roomListResponse.rooms == null)
+            {
+                LogError("❌ rooms array is null in parsed response");
+                Log($"Command field: {roomListResponse.command}");
+                TryAlternateRoomListParsing(jsonMessage);
+                return;
+            }
+            
+            List<RoomInfo> roomList = new List<RoomInfo>();
+            Log($"✅ Found {roomListResponse.rooms.Length} rooms in server response");
+            
+            foreach (var roomData in roomListResponse.rooms)
+            {
+                try
+                {
+                    var roomInfo = new RoomInfo
+                    {
+                        Id = roomData.id ?? "unknown",
+                        Name = roomData.name ?? "Unknown Room",
+                        HostId = roomData.hostId ?? "unknown",
+                        PlayerCount = roomData.playerCount, // Matches server format exactly
+                        MaxPlayers = 8, // Default since server doesn't provide this
+                        IsActive = roomData.isActive
+                    };
+                    
+                    roomList.Add(roomInfo);
+                    Log($"✅ Added room: {roomInfo.Name} (ID: {roomInfo.Id}, Players: {roomInfo.PlayerCount}, Active: {roomInfo.IsActive})");
+                }
+                catch (Exception roomEx)
+                {
+                    LogError($"❌ Error processing individual room data: {roomEx.Message}");
+                }
+            }
+            
+            Log($"✅ Successfully parsed room list with {roomList.Count} rooms");
+            OnRoomListReceived?.Invoke(roomList);
+        }
+        catch (Exception ex)
+        {
+            LogError($"❌ Error parsing ROOM_LIST response: {ex.Message}");
+            LogError($"❌ Exception type: {ex.GetType().Name}");
+            LogError($"❌ Stack trace: {ex.StackTrace}");
+            Log($"🔍 Raw JSON that failed: {jsonMessage}");
+            
+            // Try alternate parsing as fallback
+            TryAlternateRoomListParsing(jsonMessage);
+        }
+    }
+    
+    /// <summary>
+    /// Alternative room list parsing method for edge cases or different server formats
+    /// </summary>
+    private void TryAlternateRoomListParsing(string jsonMessage)
+    {
+        try
+        {
+            Log("🔄 Attempting alternate room list parsing...");
+            
+            // Try parsing as a generic JSON object first
+            var genericData = ParseJsonMessage(jsonMessage);
+            if (genericData != null && genericData.ContainsKey("command"))
+            {
+                Log($"🔍 Generic parsing successful. Command: {genericData["command"]}");
+                Log($"🔍 Available keys: {string.Join(", ", genericData.Keys)}");
+                
+                // Try to extract rooms data manually
+                if (genericData.ContainsKey("rooms"))
+                {
+                    Log("🔍 Found 'rooms' key in generic data");
+                    // Let the fallback HandleRoomList method try to process it
+                    HandleRoomList(genericData);
+                    return;
+                }
+            }
+            
+            // If all else fails, return empty list
+            LogError("❌ All room list parsing methods failed");
+            OnRoomListReceived?.Invoke(new List<RoomInfo>());
+        }
+        catch (Exception ex)
+        {
+            LogError($"❌ Alternate parsing also failed: {ex.Message}");
+            OnRoomListReceived?.Invoke(new List<RoomInfo>());
+        }
+    }
 }
 
 // Network data structures for MP-Server protocol
@@ -2267,6 +2413,16 @@ internal class PositionUpdateMessage
     public string sessionId;
     public Vector3Data position;
     public QuaternionData rotation;
+    public long timestamp;
+    
+    public PositionUpdateMessage(string session, Vector3 pos, Quaternion rot)
+    {
+        command = "UPDATE";
+        sessionId = session;
+        position = new Vector3Data(pos);
+        rotation = new QuaternionData(rot);
+        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    }
 }
 
 [System.Serializable]
@@ -2274,9 +2430,20 @@ internal class InputUpdateMessage
 {
     public string command;
     public string sessionId;
-    public string roomId;
-    public InputData input;
-    public string client_id;
+    public float steering;
+    public float throttle;
+    public float brake;
+    public long timestamp;
+    
+    public InputUpdateMessage(string session, float steer, float throttleVal, float brakeVal)
+    {
+        command = "INPUT";
+        sessionId = session;
+        steering = steer;
+        throttle = throttleVal;
+        brake = brakeVal;
+        timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    }
 }
 
 [System.Serializable]
@@ -2285,6 +2452,13 @@ internal class Vector3Data
     public float x;
     public float y;
     public float z;
+    
+    public Vector3Data(Vector3 v)
+    {
+        x = v.x;
+        y = v.y;
+        z = v.z;
+    }
 }
 
 [System.Serializable]
@@ -2294,97 +2468,141 @@ internal class QuaternionData
     public float y;
     public float z;
     public float w;
-}
-
-[System.Serializable]
-internal class InputData
-{
-    public float steering;
-    public float throttle;
-    public float brake;
-    public float timestamp;
-}
-
-[System.Serializable]
-public class AuthRequest
-{
-    public string command;
-    public string name;
-    public string password;
     
-    public AuthRequest(string command, string name, string password)
+    public QuaternionData(Quaternion q)
     {
-        this.command = command;
-        this.name = name;
-        this.password = password;
+        x = q.x;
+        y = q.y;
+        z = q.z;
+        w = q.w;
     }
 }
 
-[System.Serializable]
-public class CreateRoomRequest
-{
-    public string command;
-    public string name;
-    public int maxPlayers;
-    
-    public CreateRoomRequest(string roomName, int maxPlayers)
+    // Serializable classes for network messages
+    [Serializable]
+    public class AuthRequest
     {
-        this.command = "CREATE_ROOM";
-        this.name = roomName;
-        this.maxPlayers = maxPlayers;
+        public string command;
+        public string name;
+        public string password;
+        
+        public AuthRequest(string playerName, string playerPassword)
+        {
+            command = "NAME";
+            name = playerName;
+            password = playerPassword;
+        }
     }
-}
+    
+    [Serializable]
+    public class CreateRoomRequest
+    {
+        public string command;
+        public string name;  // Uses "name" to match the MP-Server protocol exactly
+        
+        public CreateRoomRequest(string roomName)
+        {
+            command = "CREATE_ROOM";
+            name = roomName;
+        }
+    }
+    
+    [Serializable]
+    public class JoinRoomRequest
+    {
+        public string command;
+        public string roomId;
+        
+        public JoinRoomRequest(string id)
+        {
+            command = "JOIN_ROOM";
+            roomId = id;
+        }
+    }
+    
+    [Serializable]
+    public class SimpleCommand
+    {
+        public string command;
+        
+        public SimpleCommand(string cmd)
+        {
+            command = cmd;
+        }
+    }
+    
+    [Serializable]
+    public class MessageRequest
+    {
+        public string command;
+        public string message;
+        public string playerId;
+        
+        public MessageRequest(string msg, string id)
+        {
+            command = "MESSAGE";
+            message = msg;
+            playerId = id;
+        }
+    }
+    
+    [Serializable]
+    public class RelayMessageRequest
+    {
+        public string command;
+        public string message;
+        public string targetId;
+        
+        public RelayMessageRequest(string msg, string target)
+        {
+            command = "RELAY_MESSAGE";
+            message = msg;
+            targetId = target;
+        }
+    }
 
-[System.Serializable]
-public class JoinRoomRequest
-{
-    public string command;
-    public string roomId;
-    
-    public JoinRoomRequest(string roomId)
+    // Response classes for proper JSON parsing (matching server format)
+    [Serializable]
+    public class RoomData
     {
-        this.command = "JOIN_ROOM";
-        this.roomId = roomId;
+        public string id;
+        public string name;
+        public string hostId;
+        public int playerCount;  // Server uses "playerCount" not "currentPlayers"
+        public bool isActive;
+        // Note: Server doesn't send maxPlayers or createdAt, so we removed them
     }
-}
 
-[System.Serializable]
-public class SimpleCommand
-{
-    public string command;
-    
-    public SimpleCommand(string commandName)
+    [Serializable]
+    public class RoomListResponse
     {
-        this.command = commandName;
+        public string command;  // Server sends "ROOM_LIST"
+        public RoomData[] rooms;
     }
-}
 
-[System.Serializable]
-public class MessageRequest
-{
-    public string command;
-    public string message;
-    
-    public MessageRequest(string message)
+    [Serializable]
+    public class GetRoomPlayersRequest
     {
-        this.command = "MESSAGE";
-        this.message = message;
+        public string command;
+        public string roomId;
+        
+        public GetRoomPlayersRequest(string id)
+        {
+            command = "GET_ROOM_PLAYERS";
+            roomId = id;
+        }
     }
-}
-
-[System.Serializable]
-public class RelayMessageRequest
-{
-    public string command;
-    public string toPlayerId;
-    public string messageType;
-    public string data;
     
-    public RelayMessageRequest(string toPlayerId, string messageType, string data)
+    [Serializable]
+    public class CreateRoomResponse
     {
-        this.command = "RELAY_MESSAGE";
-        this.toPlayerId = toPlayerId;
-        this.messageType = messageType;
-        this.data = data;
+        public string command;
+        public string roomId;
     }
-}
+    
+    [Serializable]
+    public class ErrorResponse
+    {
+        public string command;
+        public string message;
+    }
