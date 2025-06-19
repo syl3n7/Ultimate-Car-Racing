@@ -59,5 +59,6 @@ MonoBehaviour:
   logSecurityEvents: 1
   rateLimitTcpMs: 100
   rateLimitUdpMs: 50
-  enableDebugLogs: 1
-  logNetworkTraffic: 1
+  enableDebugLogs: 0
+  logNetworkTraffic: 0
+  pingIntervalSeconds: 30

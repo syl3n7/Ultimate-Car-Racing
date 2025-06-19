@@ -48,7 +48,7 @@ public class SecureNetworkManager : MonoBehaviour
     
     [Header("Debug")]
     [SerializeField] private bool enableDebugLogs = true;
-    [SerializeField] private bool logNetworkTraffic = false;
+    [SerializeField] private bool logNetworkTraffic = true; // Enable by default for debugging
     
     [Header("Keepalive Settings")]
     [SerializeField] private float pingIntervalSeconds = 30f; // Send ping every 30 seconds
@@ -816,6 +816,42 @@ public class SecureNetworkManager : MonoBehaviour
                 _currentRoomHostId = data["hostId"].ToString();
             }
             
+            // CRITICAL FIX: Extract spawn position from server
+            Vector3 spawnPosition = Vector3.zero;
+            if (data.ContainsKey("spawnPosition"))
+            {
+                var spawnPosData = data["spawnPosition"] as Dictionary<string, object>;
+                if (spawnPosData != null)
+                {
+                    spawnPosition = new Vector3(
+                        Convert.ToSingle(spawnPosData["x"]),
+                        Convert.ToSingle(spawnPosData["y"]),
+                        Convert.ToSingle(spawnPosData["z"])
+                    );
+                    
+                    Log($"🎯 SERVER ASSIGNED SPAWN POSITION: {spawnPosition}");
+                    
+                    // Notify GameManager of the server-assigned spawn position
+                    if (GameManager.Instance != null)
+                    {
+                        GameManager.Instance.SetMultiplayerSpawnPosition(spawnPosition);
+                        Log($"✅ GameManager notified of spawn position: {spawnPosition}");
+                    }
+                    else
+                    {
+                        LogError("⚠️ GameManager.Instance is null - cannot set spawn position!");
+                    }
+                }
+                else
+                {
+                    LogError("⚠️ spawnPosition data is not in expected format");
+                }
+            }
+            else
+            {
+                LogError("⚠️ No spawnPosition received from server - players may spawn on top of each other!");
+            }
+            
             var roomInfo = new RoomInfo
             {
                 Id = _currentRoomId,
@@ -824,7 +860,7 @@ public class SecureNetworkManager : MonoBehaviour
             };
             
             OnRoomJoined?.Invoke(roomInfo);
-            Log($"Joined room: {_currentRoomId}");
+            Log($"Joined room: {_currentRoomId} at spawn position {spawnPosition}");
         }
     }
     
@@ -1152,10 +1188,26 @@ public class SecureNetworkManager : MonoBehaviour
                     // Decrypt and process UDP message
                     if (_udpCrypto != null)
                     {
-                        // Try to parse as position update
-                        var positionUpdate = _udpCrypto.ParsePacket<PlayerUpdate>(encryptedData);
-                        if (!string.IsNullOrEmpty(positionUpdate.SessionId))
+                        // Try to parse as server position update (exact server format)
+                        var serverUpdate = _udpCrypto.ParsePacket<ServerPlayerUpdate>(encryptedData);
+                        if (!string.IsNullOrEmpty(serverUpdate.sessionId) && serverUpdate.command == "UPDATE")
                         {
+                            // Convert to our internal format
+                            var positionUpdate = new PlayerUpdate
+                            {
+                                SessionId = serverUpdate.sessionId,
+                                Position = serverUpdate.position,
+                                Rotation = serverUpdate.rotation,
+                                Velocity = Vector3.zero, // Not provided by server
+                                AngularVelocity = Vector3.zero, // Not provided by server
+                                Timestamp = Time.time
+                            };
+                            
+                            if (logNetworkTraffic)
+                            {
+                                Log($"📥 UDP Position Update: {serverUpdate.sessionId} at {serverUpdate.position}");
+                            }
+                            
                             // Dispatch to main thread for Unity operations
                             UnityMainThreadDispatcher.Instance().Enqueue(() =>
                             {
@@ -1164,7 +1216,7 @@ public class SecureNetworkManager : MonoBehaviour
                             continue;
                         }
                         
-                        // Try to parse as input update
+                        // Try to parse as input update (keep existing logic)
                         var inputUpdate = _udpCrypto.ParsePacket<PlayerInput>(encryptedData);
                         if (!string.IsNullOrEmpty(inputUpdate.SessionId))
                         {
@@ -2606,3 +2658,12 @@ internal class QuaternionData
         public string command;
         public string message;
     }
+
+[System.Serializable]
+public struct ServerPlayerUpdate
+{
+    public string command;     // "UPDATE"
+    public string sessionId;   // Player who moved (camelCase to match server)
+    public Vector3 position;   // Position coordinates
+    public Quaternion rotation; // Rotation quaternion
+}

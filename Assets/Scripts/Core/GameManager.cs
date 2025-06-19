@@ -970,8 +970,15 @@ public class GameManager : MonoBehaviour
     
     private void HandlePlayerPositionUpdate(PlayerUpdate playerUpdate)
     {
+        Debug.Log($"🔄 RECEIVED POSITION UPDATE from {playerUpdate.SessionId} at {playerUpdate.Position} (local player: {localPlayerId})");
+        
         if (playerUpdate.SessionId == localPlayerId)
+        {
+            Debug.Log($"⚠️  Skipping position update from local player {playerUpdate.SessionId}");
             return; // Skip our own updates
+        }
+        
+        Debug.Log($"🎯 PROCESSING REMOTE PLAYER UPDATE: {playerUpdate.SessionId} - spawning/updating car");
             
         // Convert PlayerUpdate to PlayerStateData for compatibility
         var stateData = new PlayerStateData
@@ -984,6 +991,7 @@ public class GameManager : MonoBehaviour
             timestamp = playerUpdate.Timestamp
         };
         
+        Debug.Log($"🎯 APPLYING PLAYER STATE for remote player {stateData.playerId}");
         ApplyPlayerState(stateData);
     }
     
