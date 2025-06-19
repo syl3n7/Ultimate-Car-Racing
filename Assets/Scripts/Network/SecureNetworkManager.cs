@@ -1192,25 +1192,25 @@ public class SecureNetworkManager : MonoBehaviour
                         var serverUpdate = _udpCrypto.ParsePacket<ServerPlayerUpdate>(encryptedData);
                         if (!string.IsNullOrEmpty(serverUpdate.sessionId) && serverUpdate.command == "UPDATE")
                         {
-                            // Convert to our internal format
-                            var positionUpdate = new PlayerUpdate
-                            {
-                                SessionId = serverUpdate.sessionId,
-                                Position = serverUpdate.position,
-                                Rotation = serverUpdate.rotation,
-                                Velocity = Vector3.zero, // Not provided by server
-                                AngularVelocity = Vector3.zero, // Not provided by server
-                                Timestamp = Time.time
-                            };
-                            
                             if (logNetworkTraffic)
                             {
                                 Log($"📥 UDP Position Update: {serverUpdate.sessionId} at {serverUpdate.position}");
                             }
                             
-                            // Dispatch to main thread for Unity operations
+                            // Dispatch to main thread for Unity operations (including Time.time access)
                             UnityMainThreadDispatcher.Instance().Enqueue(() =>
                             {
+                                // Convert to our internal format on main thread
+                                var positionUpdate = new PlayerUpdate
+                                {
+                                    SessionId = serverUpdate.sessionId,
+                                    Position = serverUpdate.position,
+                                    Rotation = serverUpdate.rotation,
+                                    Velocity = Vector3.zero, // Not provided by server
+                                    AngularVelocity = Vector3.zero, // Not provided by server
+                                    Timestamp = Time.time // Now safe to call on main thread
+                                };
+                                
                                 OnPlayerPositionUpdate?.Invoke(positionUpdate);
                             });
                             continue;
@@ -2155,13 +2155,27 @@ public class SecureNetworkManager : MonoBehaviour
     {
         if (enableDebugLogs)
         {
-            Debug.Log($"[MP-Client] {message}");
+            // Ensure Unity APIs are called on main thread
+            if (UnityMainThreadDispatcher.Instance() != null)
+            {
+                UnityMainThreadDispatcher.Instance().Enqueue(() =>
+                {
+                    Debug.Log($"[MP-Client] {message}");
+                });
+            }
         }
     }
     
     private void LogError(string message)
     {
-        Debug.LogError($"[MP-Client] {message}");
+        // Ensure Unity APIs are called on main thread
+        if (UnityMainThreadDispatcher.Instance() != null)
+        {
+            UnityMainThreadDispatcher.Instance().Enqueue(() =>
+            {
+                Debug.LogError($"[MP-Client] {message}");
+            });
+        }
     }
     
     #endregion
