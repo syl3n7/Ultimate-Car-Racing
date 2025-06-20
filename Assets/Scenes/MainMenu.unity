@@ -2410,7 +2410,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 1, y: 1}
-  m_AnchoredPosition: {x: -0.00004863739, y: -0.0000024157057}
+  m_AnchoredPosition: {x: -0.00004863739, y: 0.000115393865}
   m_SizeDelta: {x: 0, y: 300}
   m_Pivot: {x: 0, y: 1}
 --- !u!114 &240730156
@@ -16340,6 +16340,14 @@ PrefabInstance:
       propertyPath: m_Name
       value: SecureNetworkManager
       objectReference: {fileID: 0}
+    - target: {fileID: 1457017774786166952, guid: 31303a106cb5f40c29beef94406698a6, type: 3}
+      propertyPath: enableDebugLogs
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 1457017774786166952, guid: 31303a106cb5f40c29beef94406698a6, type: 3}
+      propertyPath: logNetworkTraffic
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: 8901063129558861309, guid: 31303a106cb5f40c29beef94406698a6, type: 3}
       propertyPath: m_LocalPosition.x
       value: 1123.1765
@@ -17824,7 +17832,7 @@ MonoBehaviour:
   m_HandleRect: {fileID: 2116467348}
   m_Direction: 2
   m_Value: 0
-  m_Size: 1
+  m_Size: 0.992246
   m_NumberOfSteps: 0
   m_OnValueChanged:
     m_PersistentCalls:
